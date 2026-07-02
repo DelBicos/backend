@@ -32,7 +32,12 @@ export const sendBotMessage = async (
   if (!message || typeof message !== "string" || message.trim().length === 0) {
     return res.status(400).json({ error: "O campo 'message' é obrigatório e não pode estar vazio" });
   }
-  if (message.trim().length > 2000) {
+  // Remove caracteres de controle (exceto \n e \t) para evitar inputs malformados no banco/LLM
+  const cleanMessage = message.replace(/[^\P{C}\n\t]/gu, "").trim();
+  if (cleanMessage.length === 0) {
+    return res.status(400).json({ error: "Mensagem contém apenas caracteres inválidos" });
+  }
+  if (cleanMessage.length > 2000) {
     return res.status(400).json({ error: "Mensagem muito longa (máx. 2000 caracteres)" });
   }
 
@@ -46,7 +51,7 @@ export const sendBotMessage = async (
   try {
     const result = await processMessage(
       req.user.id,
-      message.trim(),
+      cleanMessage,
       sessionId,
       channelStr,
     );
