@@ -1,5 +1,32 @@
 import logger from "../utils/logger";
 
+/** Timeout (ms) para chamada ao LLM. Configurável via NLU_TIMEOUT_MS (padrão: 8s). */
+const NLU_TIMEOUT_MS = Number(process.env.NLU_TIMEOUT_MS ?? 8000);
+
+const VALID_INTENTS = new Set(["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR", "SAUDACAO", "FALLBACK"]);
+
+/** Whitelist das chaves de entidade permitidas — impede que o LLM injete campos extras no banco. */
+const ALLOWED_ENTITY_KEYS: Array<keyof NluEntities> = [
+  "service", "date", "time", "professional", "appointment_id",
+];
+
+function sanitizeEntities(raw: unknown): NluEntities {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const out: NluEntities = {};
+  const src = raw as Record<string, unknown>;
+  for (const key of ALLOWED_ENTITY_KEYS) {
+    const val = src[key];
+    if (val === undefined || val === null) continue;
+    if (key === "appointment_id") {
+      const n = Number(val);
+      if (Number.isInteger(n) && n > 0) out.appointment_id = n;
+    } else if (typeof val === "string" && val.trim().length > 0) {
+      (out as Record<string, unknown>)[key] = val.trim().slice(0, 200);
+    }
+  }
+  return out;
+}
+
 export type NluIntent =
   | "AGENDAR"
   | "ALTERAR"
@@ -100,9 +127,13 @@ export async function analyzeMessage(
       ? `Contexto atual da conversa: ${JSON.stringify(sessionContext)}\n\nMensagem do usuário: ${message}`
       : `Mensagem do usuário: ${message}`;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), NLU_TIMEOUT_MS);
+
   try {
     const response = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
+      signal: controller.signal,
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
@@ -134,16 +165,34 @@ export async function analyzeMessage(
       return { intent: "FALLBACK", entities: {}, confidence: 0 };
     }
 
-    const parsed = JSON.parse(content) as NluResult;
+    const raw = JSON.parse(content) as Record<string, unknown>;
+
+    // Valida intent — rejeita qualquer valor não reconhecido
+    const intent = typeof raw.intent === "string" && VALID_INTENTS.has(raw.intent)
+      ? (raw.intent as NluIntent)
+      : "FALLBACK";
+
+    // Valida confidence — garante número entre 0-1
+    const rawConf = Number(raw.confidence);
+    const confidence = Number.isFinite(rawConf) ? Math.min(1, Math.max(0, rawConf)) : 0;
+
+    // Filtra entidades com whitelist
+    const entities = sanitizeEntities(raw.entities);
 
     // Normaliza data relativa que o LLM pode não ter resolvido
-    if (parsed.entities?.date && !/^\d{4}-\d{2}-\d{2}$/.test(parsed.entities.date)) {
-      parsed.entities.date = resolveRelativeDate(parsed.entities.date);
+    if (entities.date && !/^\d{4}-\d{2}-\d{2}$/.test(entities.date)) {
+      entities.date = resolveRelativeDate(entities.date);
     }
 
-    return parsed;
-  } catch (error) {
-    logger.error("NLU: erro ao processar mensagem", error as Error);
+    return { intent, entities, confidence };
+  } catch (error: any) {
+    if (error?.name === "AbortError") {
+      logger.warn("NLU: timeout na chamada ao LLM", { timeoutMs: NLU_TIMEOUT_MS });
+    } else {
+      logger.error("NLU: erro ao processar mensagem", error as Error);
+    }
     return { intent: "FALLBACK", entities: {}, confidence: 0 };
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
