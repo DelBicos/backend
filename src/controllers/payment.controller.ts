@@ -13,6 +13,7 @@ export const createPaymentIntentController = async (
     selectedTime,
     serviceId,
     addressId,
+    appointmentId,
   } = req.body;
 
   if (amount == null || typeof amount !== "number" || amount <= 0) {
@@ -44,6 +45,7 @@ export const createPaymentIntentController = async (
     serviceId: serviceId.toString(),
     selectedTime: selectedTime,
     addressId: addressId.toString(),
+    ...(appointmentId ? { appointmentId: appointmentId.toString() } : {}),
   };
 
   try {
