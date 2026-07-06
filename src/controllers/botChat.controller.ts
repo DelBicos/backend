@@ -23,10 +23,11 @@ export const sendBotMessage = async (
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
-  const { message, session_id, channel } = req.body as {
+  const { message, session_id, channel, selected_time } = req.body as {
     message?: unknown;
     session_id?: unknown;
     channel?: unknown;
+    selected_time?: unknown;
   };
 
   if (!message || typeof message !== "string" || message.trim().length === 0) {
@@ -47,6 +48,10 @@ export const sendBotMessage = async (
   }
 
   const channelStr = typeof channel === "string" ? channel.slice(0, 50) : "web";
+  const selectedTimeIso =
+    typeof selected_time === "string" && selected_time.trim().length > 0
+      ? selected_time.trim()
+      : undefined;
 
   try {
     const result = await processMessage(
@@ -54,6 +59,7 @@ export const sendBotMessage = async (
       cleanMessage,
       sessionId,
       channelStr,
+      selectedTimeIso,
     );
 
     logger.info("Bot: mensagem processada", {
