@@ -170,38 +170,58 @@ export const PaymentService = {
     }
 
     // ============================================================
-    // Criação do agendamento
+    // Criação ou atualização do agendamento
     // ============================================================
     try {
-      const newAppointment = await AppointmentModel.create({
-        professional_id: Number(professionalId),
-        client_id: clientId,
-        service_id: Number(serviceId),
-        address_id: Number(addressId),
-        start_time: startTime,
-        end_time: endTime,
-        status: "pending",
-        payment_intent_id: paymentIntentId,
-        short_id: shortId,
-      });
+      let appointment: AppointmentModel;
 
-      // Cria sala de chat
-      await ensureChatRoomForAppointment(newAppointment);
+      if (metadata.appointmentId) {
+        const existing = await AppointmentModel.findByPk(Number(metadata.appointmentId));
+        if (!existing) {
+          throw new Error("Agendamento pré-existente não encontrado.");
+        }
+        existing.payment_intent_id = paymentIntentId;
+        if (!existing.short_id) {
+          existing.short_id = shortId;
+        }
+        await existing.save();
+        appointment = existing;
 
-      // Notificação para o cliente
-      await NotificationModel.create({
-        user_id: authenticatedUserId, // ou client.user_id
-        title: "Agendamento Criado com Sucesso",
-        message: `Seu agendamento para o serviço '${service.title}' no dia ${selectedTime} foi criado. Aguardando confirmação do profissional.`,
-        notification_type: "appointment",
-        related_entity_id: newAppointment.id,
-        is_read: false,
-      });
+        await NotificationModel.create({
+          user_id: authenticatedUserId,
+          title: "Pagamento Confirmado",
+          message: `O pagamento para o seu agendamento do serviço '${service.title}' no dia ${selectedTime} foi confirmado!`,
+          notification_type: "appointment",
+          related_entity_id: appointment.id,
+          is_read: false,
+        });
+      } else {
+        appointment = await AppointmentModel.create({
+          professional_id: Number(professionalId),
+          client_id: clientId,
+          service_id: Number(serviceId),
+          address_id: Number(addressId),
+          start_time: startTime,
+          end_time: endTime,
+          status: "pending",
+          payment_intent_id: paymentIntentId,
+          short_id: shortId,
+        });
 
-      // Opcional: notificar o profissional (como na criação via controller)
-      // ...
+        // Cria automaticamente a sala de chat para este agendamento
+        await ensureChatRoomForAppointment(appointment);
 
-      return newAppointment;
+        await NotificationModel.create({
+          user_id: authenticatedUserId,
+          title: "Agendamento Criado com Sucesso",
+          message: `Seu agendamento para o serviço '${service.title}' no dia ${selectedTime} foi criado. Aguardando confirmação do profissional.`,
+          notification_type: "appointment",
+          related_entity_id: appointment.id,
+          is_read: false,
+        });
+      }
+
+      return appointment;
     } catch (dbError: any) {
       console.error(
         "[PaymentService] Erro ao salvar agendamento no DB:",
