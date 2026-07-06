@@ -12,10 +12,86 @@ import {
   BotPendingAction,
 } from "../models/BotChatSession";
 import { BotChatMessageModel } from "../models/BotChatMessage";
-import { analyzeMessage, NluResult } from "./nlu.service";
+import { CategoryModel } from "../models/Category";
+import { SubCategoryModel } from "../models/Subcategory";
+import { analyzeMessage, NluResult, NluEntities } from "./nlu.service";
 import { getAvailableSlots } from "./availability.service";
 import { ensureChatRoomForAppointment } from "../utils/chatRoom";
 import logger, { logError } from "../utils/logger";
+
+// ─── Helpers de normalização e busca ────────────────────────────────────────
+
+function normalizeText(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // remove acentos
+    .replace(/[^a-z0-9\s]/g, "")    // remove caracteres especiais e pontuação
+    .replace(/\s+/g, " ")           // normaliza múltiplos espaços
+    .trim();
+}
+
+function levenshteinDistance(a: string, b: string): number {
+  const matrix = [];
+
+  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+
+  for (let i = 1; i <= b.length; i++) {
+    for (let j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        matrix[i][j] = Math.min(
+          matrix[i - 1][j - 1] + 1, // substituição
+          matrix[i][j - 1] + 1,     // inserção
+          matrix[i - 1][j] + 1      // deleção
+        );
+      }
+    }
+  }
+
+  return matrix[b.length][a.length];
+}
+
+function stringSimilarity(s1: string, s2: string): number {
+  const longer = s1.length > s2.length ? s1 : s2;
+  const shorter = s1.length > s2.length ? s2 : s1;
+  if (longer.length === 0) return 1.0;
+  return (longer.length - levenshteinDistance(longer, shorter)) / longer.length;
+}
+
+function calculateMatchScore(svc: any, normalizedSearch: string, searchKeywords: string[]): number {
+  const svcTitleNorm = normalizeText(svc.title);
+  const subcatTitleNorm = svc.Subcategory ? normalizeText(svc.Subcategory.title) : "";
+  const catTitleNorm = svc.Subcategory && svc.Subcategory.Category ? normalizeText(svc.Subcategory.Category.title) : "";
+
+  // 1. Exact match or full substring match in service title
+  if (svcTitleNorm === normalizedSearch) return 10;
+  if (svcTitleNorm.includes(normalizedSearch)) return 8;
+
+  // 2. Exact match or full substring match in subcategory or category
+  if (subcatTitleNorm === normalizedSearch) return 7;
+  if (catTitleNorm === normalizedSearch) return 6;
+  if (subcatTitleNorm.includes(normalizedSearch)) return 5;
+  if (catTitleNorm.includes(normalizedSearch)) return 4;
+
+  // 3. Keyword match (all keywords present in combined text)
+  const combinedText = `${svcTitleNorm} ${subcatTitleNorm} ${catTitleNorm}`;
+  const allKeywordsMatch = searchKeywords.length > 0 && searchKeywords.every(kw => combinedText.includes(kw));
+  if (allKeywordsMatch) return 3;
+
+  // 4. Fuzzy similarity fallback (Levenshtein)
+  const svcSim = stringSimilarity(normalizedSearch, svcTitleNorm);
+  const subcatSim = subcatTitleNorm ? stringSimilarity(normalizedSearch, subcatTitleNorm) : 0;
+  const maxSim = Math.max(svcSim, subcatSim);
+
+  if (maxSim >= 0.65) {
+    return maxSim * 2; // will be in range [1.3, 2.0]
+  }
+
+  return 0;
+}
 
 // ─── Tipos públicos ─────────────────────────────────────────────────────────
 
@@ -56,6 +132,21 @@ function formatDatePtBR(date: string): string {
   return `${day}/${months[Number(month) - 1]}/${year}`;
 }
 
+/** Offset fixo do fuso de Brasília (UTC-3, sem horário de verão desde 2019). */
+const BRAZIL_UTC_OFFSET_HOURS = 3;
+
+/**
+ * Converte data + horário informados pelo usuário para Date UTC no banco.
+ * Alinhado ao checkout, que envia localDate.toISOString() do cliente.
+ */
+function parseLocalAppointmentStart(date: string, time: string): Date {
+  const [year, month, day] = date.split("-").map(Number);
+  const [hour, minute] = time.trim().slice(0, 5).split(":").map(Number);
+  return new Date(
+    Date.UTC(year, month - 1, day, hour + BRAZIL_UTC_OFFSET_HOURS, minute, 0, 0),
+  );
+}
+
 function formatCurrency(cents: number | undefined, decimal: number | undefined): string {
   const value = cents != null ? cents / 100 : decimal ?? 0;
   return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -85,19 +176,102 @@ function isValidFutureDate(date: string): boolean {
 
 /** Tenta extrair HH:MM de texto livre */
 function parseTimeFromText(text: string): string | null {
-  const match = text.match(/\b(\d{1,2})[h:](\d{2})?\b/i);
-  if (match) {
-    const h = match[1].padStart(2, "0");
-    const m = (match[2] || "00").padStart(2, "0");
-    if (Number(h) < 24 && Number(m) < 60) return `${h}:${m}`;
+  const t = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+  // Mapeamento de números por extenso para inteiros
+  const wordToNum: Record<string, number> = {
+    zero: 0, uma: 1, um: 1, dois: 2, duas: 2, tres: 3, quatro: 4,
+    cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10,
+    onze: 11, doze: 12, treze: 13, quatorze: 14, catorze: 14,
+    quinze: 15, dezesseis: 16, dezessete: 17, dezoito: 18,
+    dezenove: 19, vinte: 20, "vinte e um": 21, "vinte e dois": 22,
+    "vinte e tres": 23,
+  };
+
+  // Mapeamento de minutos por extenso
+  const minuteWords: Record<string, number> = {
+    zero: 0, "e meia": 30, "e quinze": 15, "e um quarto": 15,
+    "e quarenta e cinco": 45, "e trinta": 30,
+  };
+
+  // Detectar período do dia
+  const isTarde = /\b(tarde|da tarde|a tarde)\b/.test(t);
+  const isNoite = /\b(noite|da noite|a noite)\b/.test(t);
+  const isManha = /\b(manha|da manha|a manha|manha cedo)\b/.test(t);
+
+  // Meio-dia
+  if (/\b(meio.?dia)\b/.test(t)) {
+    if (/e meia/.test(t)) return "12:30";
+    if (/e quinze/.test(t) || /e um quarto/.test(t)) return "12:15";
+    if (/e quarenta e cinco/.test(t)) return "12:45";
+    return "12:00";
   }
-  const simpleMatch = text.match(/\b(\d{1,2})[hH]\b/);
-  if (simpleMatch) {
-    const h = simpleMatch[1].padStart(2, "0");
-    if (Number(h) < 24) return `${h}:00`;
+
+  // Meia-noite
+  if (/\b(meia.?noite)\b/.test(t)) {
+    if (/e meia/.test(t)) return "00:30";
+    return "00:00";
   }
+
+  // Número numérico seguido de "h" ou ":" com minutos opcionais: "14h30", "10:30", "9h"
+  const numericMatch = t.match(/\b(\d{1,2})[h:](\d{2})?\b/i);
+  if (numericMatch) {
+    let h = Number(numericMatch[1]);
+    const m = Number(numericMatch[2] || "0");
+    // Ajustar AM/PM pelo período
+    if ((isTarde || isNoite) && h < 12) h += 12;
+    if (isManha && h === 12) h = 0;
+    if (h < 24 && m < 60) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+  }
+
+  // Só o número seguido de "h": "9h", "14h"
+  const simpleNumeric = t.match(/\b(\d{1,2})[h]\b/);
+  if (simpleNumeric) {
+    let h = Number(simpleNumeric[1]);
+    if ((isTarde || isNoite) && h < 12) h += 12;
+    if (isManha && h === 12) h = 0;
+    if (h < 24) return `${String(h).padStart(2, "0")}:00`;
+  }
+
+  // Tentar "quinze para as X" → X:45 (ou ajustar)
+  const quinzeParaMatch = t.match(/quinze para (?:as?|as) ([a-z]+)/);
+  if (quinzeParaMatch) {
+    const hw = quinzeParaMatch[1].trim();
+    let h = wordToNum[hw] ?? null;
+    if (h !== null) {
+      if ((isTarde || isNoite) && h < 12) h += 12;
+      if (isManha && h === 12) h = 0;
+      return `${String(h).padStart(2, "0")}:45`;
+    }
+  }
+
+  // Número por extenso: "as quatro da tarde", "quatro horas", "as quatro e meia"
+  // Ordena por comprimento decrescente para casar "vinte e um" antes de "vinte"
+  const sortedWords = Object.keys(wordToNum).sort((a, b) => b.length - a.length);
+  for (const w of sortedWords) {
+    if (t.includes(w)) {
+      let h = wordToNum[w];
+      // Minutos por extenso
+      let m = 0;
+      if (t.includes("e meia")) m = 30;
+      else if (t.includes("e quinze") || t.includes("e um quarto")) m = 15;
+      else if (t.includes("e quarenta e cinco")) m = 45;
+      else if (t.includes("e trinta")) m = 30;
+      else if (t.includes("e vinte")) m = 20;
+      else if (t.includes("e dez")) m = 10;
+      else if (t.includes("e cinco")) m = 5;
+
+      // Ajustar AM/PM
+      if ((isTarde || isNoite) && h < 12) h += 12;
+      if (isManha && h === 12) h = 0;
+      if (h >= 24) continue;
+      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+    }
+  }
+
   return null;
 }
+
 
 /** Encontra slots em dias próximos ao requestedTime */
 async function findAlternativeDays(
@@ -131,6 +305,7 @@ async function findAlternativeDays(
 async function createBotAppointment(
   userId: number,
   ctx: BotSessionContext,
+  selectedTimeIso?: string,
 ): Promise<AppointmentModel> {
   const { serviceId, professionalId, date, time } = ctx;
   if (!serviceId || !professionalId || !date || !time)
@@ -146,19 +321,21 @@ async function createBotAppointment(
   if (!professional) throw new Error("Profissional não encontrado");
   if (!service || !service.active) throw new Error("Serviço inativo ou não encontrado");
 
-  const [hour, minute] = time.split(":").map(Number);
-  const startTime = new Date(`${date}T00:00:00.000Z`);
-  startTime.setUTCHours(hour, minute, 0, 0);
+  const normalizedTime = time.trim().slice(0, 5);
+  let startTime: Date;
+  if (selectedTimeIso) {
+    const parsed = new Date(selectedTimeIso);
+    startTime = isNaN(parsed.getTime())
+      ? parseLocalAppointmentStart(date, normalizedTime)
+      : parsed;
+  } else {
+    startTime = parseLocalAppointmentStart(date, normalizedTime);
+  }
   const endTime = new Date(startTime.getTime() + service.duration * 60000);
 
   // Verificação de disponibilidade (double-booking guard)
   const slots = await getAvailableSlots(professionalId, date, service.duration, serviceId);
-  const slotStr = startTime.toLocaleTimeString("pt-BR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    timeZone: "UTC",
-  });
-  if (!slots.includes(slotStr)) {
+  if (!slots.includes(normalizedTime)) {
     throw new Error(
       `Horário ${time} não está mais disponível. Por favor, escolha outro horário.`,
     );
@@ -188,11 +365,10 @@ async function createBotAppointment(
   try {
     const clientUser = await UserModel.findByPk(clientRecord.user_id);
     const profUser = await UserModel.findByPk(professional.user_id);
-    const dateStr = startTime.toLocaleDateString("pt-BR");
-    const timeStr = startTime.toLocaleTimeString("pt-BR", {
-      hour: "2-digit",
-      minute: "2-digit",
+    const dateStr = startTime.toLocaleDateString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
     });
+    const timeStr = normalizedTime;
 
     if (profUser) {
       await NotificationModel.create({
@@ -372,29 +548,76 @@ async function handleColetandoServico(
 ): Promise<HandlerResult> {
   const ctx = (session.context ?? {}) as BotSessionContext;
 
-  // Se há opções listadas e usuário digitou um número
-  if (ctx.serviceOptions && ctx.serviceOptions.length > 0) {
-    const choice = parseInt(userMessage.trim(), 10);
-    if (!isNaN(choice) && choice >= 1 && choice <= ctx.serviceOptions.length) {
-      const picked = ctx.serviceOptions[choice - 1];
-      const contextUpdate: Partial<BotSessionContext> = {
-        serviceId: picked.id,
-        serviceName: picked.title,
-        servicePrice: picked.price,
-        serviceDuration: picked.duration,
-        professionalId: picked.professionalId,
-        professionalName: picked.professionalName,
-        serviceOptions: undefined,
-      };
-      const dateHint = ctx.date ? ` para ${formatDatePtBR(ctx.date)}` : "";
+  // 1. Se estamos aguardando confirmação do serviço selecionado
+  if (ctx.pendingService) {
+    const lower = userMessage.toLowerCase().trim();
+    const confirmed = /\b(sim|s|yes|confirmar|confirmo|ok|pode|vamos)\b/.test(lower);
+    const denied = /\b(n[aã]o|nao|no|cancelar|desistir|voltar)\b/.test(lower);
+
+    if (!confirmed && !denied) {
       return {
-        reply: `Ótimo! Serviço selecionado: "${picked.title}" com ${picked.professionalName}${dateHint}.\n\nQual data você prefere? (Ex: amanhã, 10/07/2026 ou AAAA-MM-DD)`,
-        nextState: ctx.date ? "COLETANDO_HORARIO" : "COLETANDO_DATA",
-        contextUpdate,
+        reply: `Por favor, responda com "sim" para confirmar o serviço "${ctx.pendingService.title}" ou "não" para buscar outro:`,
+        nextState: "COLETANDO_SERVICO",
+        contextUpdate: {
+          serviceOptions: ["Sim", "Não"],
+          serviceOptionsData: undefined,
+        },
+      };
+    }
+
+    if (denied) {
+      return {
+        reply: "Ok, escolha cancelada. Qual serviço você gostaria de agendar? (Ex: corte de cabelo, pintura, limpeza...)",
+        nextState: "COLETANDO_SERVICO",
+        contextUpdate: {
+          pendingService: null,
+          serviceOptions: undefined,
+          serviceOptionsData: undefined,
+        },
+      };
+    }
+
+    // Confirmado! Transiciona para COLETANDO_DATA (pergunta dia primeiro)
+    const picked = ctx.pendingService;
+    
+    // Busca todos os IDs de serviços ativos com o mesmo título para verificar disponibilidade de múltiplos profissionais
+    const matchingServices = await ServiceModel.findAll({
+      where: { title: picked.title, active: true },
+    });
+    const matchedServiceIds = matchingServices.map(s => s.id);
+
+    return {
+      reply: `Serviço "${picked.title}" selecionado.\n\nQual data você prefere? (Formatos aceitos: DD/MM/AAAA, AAAA-MM-DD ou texto como "amanhã", "próxima segunda")`,
+      nextState: "COLETANDO_DATA",
+      contextUpdate: {
+        serviceName: picked.title,
+        serviceDuration: picked.duration,
+        matchedServiceIds,
+        pendingService: null,
+        serviceOptions: undefined,
+        serviceOptionsData: undefined,
+      },
+    };
+  }
+
+  // 2. Se há opções listadas e o usuário digitou um número para selecionar
+  if (ctx.serviceOptionsData && ctx.serviceOptionsData.length > 0) {
+    const choice = parseInt(userMessage.trim(), 10);
+    if (!isNaN(choice) && choice >= 1 && choice <= ctx.serviceOptionsData.length) {
+      const picked = ctx.serviceOptionsData[choice - 1];
+      return {
+        reply: `Você escolheu: "${picked.title}".\n\nVocê confirma a escolha deste serviço? ("sim" / "não")`,
+        nextState: "COLETANDO_SERVICO",
+        contextUpdate: {
+          pendingService: picked,
+          serviceOptions: ["Sim", "Não"],
+          serviceOptionsData: undefined,
+        },
       };
     }
   }
 
+  // 3. Caso contrário, faz a busca pelo termo
   const searchTerm = nlu.entities.service ?? userMessage.trim();
   if (!searchTerm) {
     return {
@@ -405,50 +628,46 @@ async function handleColetandoServico(
   }
 
   const services = await ServiceModel.findAll({
-    where: {
-      title: { [Op.like]: `%${searchTerm}%` },
-      active: true,
-    },
+    where: { active: true },
     include: [
+      {
+        model: SubCategoryModel,
+        as: "Subcategory",
+        include: [{ model: CategoryModel, as: "Category" }],
+      },
       {
         model: ProfessionalModel,
         as: "Professional",
         include: [{ model: UserModel, as: "User", attributes: ["name"] }],
       },
     ],
-    limit: 5,
   });
 
-  if (services.length === 0) {
+  const normalizedSearch = normalizeText(searchTerm);
+  const searchKeywords = normalizedSearch.split(" ").filter(w => w.length > 0);
+
+  const scoredServices = services
+    .map((svc: any) => {
+      const score = calculateMatchScore(svc, normalizedSearch, searchKeywords);
+      return { svc, score };
+    })
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  if (scoredServices.length === 0) {
     return {
       reply: `Não encontrei serviços com o nome "${searchTerm}". Tente um termo diferente ou mais genérico (ex: "cabelo", "pintura"):`,
       nextState: "COLETANDO_SERVICO",
-      contextUpdate: { serviceOptions: undefined },
+      contextUpdate: { serviceOptions: undefined, serviceOptionsData: undefined },
     };
   }
 
-  if (services.length === 1) {
-    const svc = services[0] as any;
+  // Se houver apenas títulos idênticos nos resultados encontrados, pede a confirmação
+  const distinctTitles = Array.from(new Set(scoredServices.map(item => item.svc.title)));
+  if (distinctTitles.length === 1) {
+    const svc = scoredServices[0].svc as any;
     const profName = svc.Professional?.User?.name ?? "Profissional";
-    return {
-      reply: `Encontrei: "${svc.title}" com ${profName} — ${formatCurrency(svc.price_cents, svc.price)}.\n\nQual data você prefere?`,
-      nextState: "COLETANDO_DATA",
-      contextUpdate: {
-        serviceId: svc.id,
-        serviceName: svc.title,
-        servicePrice: svc.price_cents ?? svc.price * 100,
-        serviceDuration: svc.duration,
-        professionalId: svc.professional_id,
-        professionalName: profName,
-        serviceOptions: undefined,
-      },
-    };
-  }
-
-  // Múltiplos resultados
-  const options = services.map((svc: any) => {
-    const profName = svc.Professional?.User?.name ?? "Profissional";
-    return {
+    const pending = {
       id: svc.id,
       title: svc.title,
       professionalId: svc.professional_id,
@@ -456,15 +675,159 @@ async function handleColetandoServico(
       price: svc.price_cents ?? Math.round(svc.price * 100),
       duration: svc.duration,
     };
-  });
-  const lines = options.map(
-    (o, i) => `${i + 1}. ${o.title} — ${o.professionalName} — ${formatCurrency(undefined, o.price / 100)}`,
+    return {
+      reply: `Encontrei o serviço: "${svc.title}".\n\nVocê confirma a escolha deste serviço? ("sim" / "não")`,
+      nextState: "COLETANDO_SERVICO",
+      contextUpdate: {
+        pendingService: pending,
+        serviceOptions: ["Sim", "Não"],
+        serviceOptionsData: undefined,
+      },
+    };
+  }
+
+  // Múltiplos resultados com títulos diferentes
+  const uniqueOptions: any[] = [];
+  const seenTitles = new Set<string>();
+  for (const item of scoredServices) {
+    const svc = item.svc as any;
+    if (!seenTitles.has(svc.title)) {
+      seenTitles.add(svc.title);
+      const profName = svc.Professional?.User?.name ?? "Profissional";
+      uniqueOptions.push({
+        id: svc.id,
+        title: svc.title,
+        professionalId: svc.professional_id,
+        professionalName: profName,
+        price: svc.price_cents ?? Math.round(svc.price * 100),
+        duration: svc.duration,
+      });
+      if (uniqueOptions.length >= 5) break;
+    }
+  }
+
+  const serviceOptions = uniqueOptions.map(o => o.title);
+  const lines = uniqueOptions.map(
+    (o, i) => `${i + 1}. ${o.title}`,
   );
+  
   return {
-    reply: `Encontrei ${options.length} serviços:\n\n${lines.join("\n")}\n\nQual deles você prefere? Responda com o número:`,
+    reply: `Encontrei ${uniqueOptions.length} opções relacionadas a "${searchTerm}":\n\n${lines.join("\n")}\n\nQual delas você prefere? Responda com o número:`,
     nextState: "COLETANDO_SERVICO",
-    contextUpdate: { serviceOptions: options },
+    contextUpdate: {
+      serviceOptions,
+      serviceOptionsData: uniqueOptions,
+      pendingService: null,
+    },
   };
+}
+
+function parsePortugueseDate(text: string): string | null {
+  const lower = text.toLowerCase().trim();
+  const today = new Date();
+  const currentYear = today.getFullYear();
+
+  const wordNumbers: Record<string, number> = {
+    primeiro: 1, um: 1, dois: 2, tres: 3, três: 3, quatro: 4, cinco: 5,
+    seis: 6, sete: 7, oito: 8, nove: 9, dez: 10, onze: 11, doze: 12,
+    treze: 13, treza: 13,
+    quatorze: 14, catorze: 14, quatorza: 14,
+    quinze: 15, quinza: 15,
+    dezesseis: 16, dezessete: 17, dezoito: 18, dezenove: 19, vinte: 20,
+    "vinte e um": 21, "vinte e dois": 22, "vinte e três": 23, "vinte e quatro": 24,
+    "vinte e cinco": 25, "vinte e seis": 26, "vinte e sete": 27,
+    "vinte e oito": 28, "vinte e dezenove": 29, "vinte e nove": 29,
+    trinta: 30, "trinta e um": 31
+  };
+
+  const monthsMap: Record<string, number> = {
+    janeiro: 1, jan: 1,
+    fevereiro: 2, fev: 2,
+    março: 3, marco: 3, mar: 3,
+    abril: 4, abr: 4,
+    maio: 5, mai: 5,
+    junho: 6, jun: 6,
+    julho: 7, jul: 7,
+    agosto: 8, ago: 8,
+    setembro: 9, set: 9,
+    outubro: 10, out: 10,
+    novembro: 11, nov: 11,
+    dezembro: 12, dez: 12
+  };
+
+  let normalized = lower;
+  const sortedWordNumbersKeys = Object.keys(wordNumbers).sort((a, b) => b.length - a.length);
+  for (const word of sortedWordNumbersKeys) {
+    const num = wordNumbers[word];
+    const regex = new RegExp(`\\b${word}\\b`, "g");
+    normalized = normalized.replace(regex, String(num));
+  }
+
+  const matchDmy = normalized.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/);
+  if (matchDmy) {
+    let day = parseInt(matchDmy[1], 10);
+    let month = parseInt(matchDmy[2], 10);
+    let year = parseInt(matchDmy[3], 10);
+    if (year < 100) year += 2000;
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  const matchDm = normalized.match(/\b(\d{1,2})\/(\d{1,2})\b/);
+  if (matchDm) {
+    let day = parseInt(matchDm[1], 10);
+    let month = parseInt(matchDm[2], 10);
+    let year = currentYear;
+    const parsedDate = new Date(year, month - 1, day);
+    if (parsedDate < today) {
+      year += 1;
+    }
+    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+  }
+
+  const matchExt = normalized.match(/\b(?:dia\s+)?(\d{1,2})\s+(?:de|do|da)\s+([a-zçáéíóú\d]+)(?:\s+de\s+(\d{2,4}))?\b/);
+  if (matchExt) {
+    const day = parseInt(matchExt[1], 10);
+    const monthStr = matchExt[2];
+    
+    let month = monthsMap[monthStr];
+    if (!month && /^\d{1,2}$/.test(monthStr)) {
+      month = parseInt(monthStr, 10);
+    }
+    
+    if (month && month >= 1 && month <= 12) {
+      let year = matchExt[3] ? parseInt(matchExt[3], 10) : currentYear;
+      if (matchExt[3] && year < 100) year += 2000;
+      if (!matchExt[3]) {
+        const parsedDate = new Date(year, month - 1, day);
+        if (parsedDate < today) {
+          year += 1;
+        }
+      }
+      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+  }
+
+  // Novo matcher: resolve dias avulsos (ex: "dia 13" ou "13" ou "treze") para o mês atual ou próximo
+  const matchOnlyDay = normalized.match(/^(?:dia\s+)?(\d{1,2})$/i);
+  if (matchOnlyDay) {
+    const day = parseInt(matchOnlyDay[1], 10);
+    if (day >= 1 && day <= 31) {
+      let month = today.getMonth() + 1;
+      let year = currentYear;
+      const parsedDate = new Date(year, month - 1, day);
+      // Se o dia já passou no mês atual, agenda para o próximo mês
+      if (parsedDate < today) {
+        month += 1;
+        if (month > 12) {
+          month = 1;
+          year += 1;
+        }
+      }
+      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+  }
+
+  return null;
 }
 
 async function handleColetandoData(
@@ -474,14 +837,19 @@ async function handleColetandoData(
 ): Promise<HandlerResult> {
   const ctx = (session.context ?? {}) as BotSessionContext;
 
-  // Tenta extrair a data: primeiro do NLU, depois do texto diretamente
-  let date = nlu.entities.date;
-  if (!date) {
-    // Tenta parsear formatos brasileiros dd/mm/aaaa
-    const brMatch = userMessage.match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    if (brMatch) {
-      date = `${brMatch[3]}-${brMatch[2].padStart(2, "0")}-${brMatch[1].padStart(2, "0")}`;
+  let date: string | undefined | null;
+
+  // Se o usuário escolheu um número de uma lista de datas sugeridas
+  if (ctx.suggestedDates && ctx.suggestedDates.length > 0) {
+    const choice = parseInt(userMessage.trim(), 10);
+    if (!isNaN(choice) && choice >= 1 && choice <= ctx.suggestedDates.length) {
+      date = ctx.suggestedDates[choice - 1];
     }
+  }
+
+  // Tenta extrair a data: primeiro do parser local (D/M/Y, D/M, extenso), depois do NLU
+  if (!date) {
+    date = parsePortugueseDate(userMessage) ?? nlu.entities.date;
   }
 
   if (!date || !isValidFutureDate(date)) {
@@ -496,28 +864,131 @@ async function handleColetandoData(
   const isAlterar = ctx.pendingAction === "RESCHEDULE";
   const field = isAlterar ? "newDate" : "date";
 
-  // Busca slots disponíveis já para dar uma prévia
-  const profId = ctx.professionalId;
-  const svcId = ctx.serviceId;
-  const duration = ctx.serviceDuration ?? 60;
-
-  let slotPreview = "";
-  if (profId && svcId) {
-    const slots = await getAvailableSlots(profId, date, duration, svcId);
-    if (slots.length === 0) {
-      return {
-        reply: `Nenhum horário disponível em ${formatDatePtBR(date)}. Por favor, escolha outra data:`,
-        nextState: "COLETANDO_DATA",
-        contextUpdate: {},
-      };
+  // Se for reagendamento (ALTERAR) e já temos o horário, podemos validar direto
+  const chosenTime = isAlterar ? ctx.newTime : ctx.time;
+  if (isAlterar && chosenTime && ctx.professionalId && ctx.serviceId) {
+    const slots = await getAvailableSlots(ctx.professionalId, date, ctx.serviceDuration ?? 60, ctx.serviceId);
+    if (slots.includes(chosenTime)) {
+      return buildConfirmationResponse(ctx, date, chosenTime, { [field]: date, suggestedSlots: undefined });
     }
-    slotPreview = `\n\nHorários disponíveis em ${formatDatePtBR(date)}: ${slots.slice(0, 8).join(", ")}${slots.length > 8 ? ` e mais ${slots.length - 8}...` : ""}.`;
+    // Caso contrário, segue o fluxo normal sugerindo alternativas para o reagendamento
   }
 
+  // Busca todos os profissionais que oferecem o serviço selecionado e suas disponibilidades na data
+  const matchedServiceIds = ctx.matchedServiceIds ?? [];
+  if (matchedServiceIds.length === 0 && ctx.serviceId) {
+    matchedServiceIds.push(ctx.serviceId);
+  }
+
+  const matchingServices = await ServiceModel.findAll({
+    where: { id: matchedServiceIds, active: true },
+    include: [
+      {
+        model: ProfessionalModel,
+        as: "Professional",
+        include: [{ model: UserModel, as: "User", attributes: ["name"] }],
+      },
+    ],
+  });
+
+  const duration = ctx.serviceDuration ?? 60;
+  const lines: string[] = [];
+  let optionIndex = 1;
+  const suggestedSlotsData: Array<{
+    index: number;
+    serviceId: number;
+    professionalId: number;
+    professionalName: string;
+    price: number;
+    duration: number;
+    time: string;
+  }> = [];
+
+  for (const svc of matchingServices) {
+    const profName = (svc as any).Professional?.User?.name || "Profissional";
+    const slots = await getAvailableSlots(svc.professional_id, date, duration, svc.id);
+    
+    if (slots.length > 0) {
+      const formattedSlots = slots.map(s => {
+        const idx = optionIndex++;
+        suggestedSlotsData.push({
+          index: idx,
+          serviceId: svc.id,
+          professionalId: svc.professional_id,
+          professionalName: profName,
+          price: svc.price_cents ?? Math.round(Number(svc.price) * 100),
+          duration: svc.duration,
+          time: s,
+        });
+        return `  ${idx} — ${s}`;
+      });
+      lines.push(`• ${profName}:\n${formattedSlots.join("\n")}`);
+    }
+  }
+
+  if (suggestedSlotsData.length === 0) {
+    // Busca dias próximos com disponibilidade (até 14 dias à frente)
+    const alternativeDates: Array<{ dateStr: string; slotCount: number }> = [];
+    const baseDate = new Date(date + "T12:00:00.000Z");
+
+    for (let offset = 1; offset <= 14 && alternativeDates.length < 3; offset++) {
+      const nextDate = new Date(baseDate);
+      nextDate.setUTCDate(nextDate.getUTCDate() + offset);
+      const nextDateStr = nextDate.toISOString().split("T")[0];
+
+      let totalSlots = 0;
+      for (const svc of matchingServices) {
+        const slots = await getAvailableSlots(svc.professional_id, nextDateStr, duration, svc.id);
+        totalSlots += slots.length;
+        if (totalSlots > 0) break; // basta saber que tem ao menos 1 slot
+      }
+      if (totalSlots > 0) {
+        alternativeDates.push({ dateStr: nextDateStr, slotCount: totalSlots });
+      }
+    }
+
+    if (alternativeDates.length > 0) {
+      const weekdayNames = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+      const suggestions = alternativeDates.map((alt, i) => {
+        const d = new Date(alt.dateStr + "T12:00:00.000Z");
+        const weekday = weekdayNames[d.getUTCDay()];
+        return `  ${i + 1} — ${weekday}, ${formatDatePtBR(alt.dateStr)}`;
+      });
+
+      return {
+        reply:
+          `Infelizmente não encontrei profissionais disponíveis no dia ${formatDatePtBR(date)} para o serviço "${ctx.serviceName}".\n\n` +
+          `Mas encontrei disponibilidade nos próximos dias:\n\n` +
+          `${suggestions.join("\n")}\n\n` +
+          `Escolha o número da data desejada, ou informe outra data:`,
+        nextState: "COLETANDO_DATA",
+        contextUpdate: {
+          [field]: date,
+          suggestedDates: alternativeDates.map(a => a.dateStr),
+        },
+      };
+    }
+
+    return {
+      reply: `Infelizmente não encontrei profissionais disponíveis no dia ${formatDatePtBR(date)} nem nos próximos 14 dias para o serviço "${ctx.serviceName}". Por favor, informe outra data:`,
+      nextState: "COLETANDO_DATA",
+      contextUpdate: { [field]: date },
+    };
+  }
+
+  const serviceOptions = suggestedSlotsData.map(d => String(d.index));
+
   return {
-    reply: `Data registrada: ${formatDatePtBR(date)}.${slotPreview}\n\nQual horário você prefere? (Formato HH:MM, ex: 09:30)`,
+    reply:
+      `Para ${formatDatePtBR(date)}, temos estes profissionais e horários disponíveis:\n\n` +
+      `${lines.join("\n\n")}\n\n` +
+      `Escolha o número correspondente à sua preferência, ou informe outro horário de preferência (ex: 'quero às 15:00'):`,
     nextState: "COLETANDO_HORARIO",
-    contextUpdate: { [field]: date },
+    contextUpdate: {
+      [field]: date,
+      suggestedSlots: serviceOptions,
+      suggestedSlotsData,
+    },
   };
 }
 
@@ -529,81 +1000,126 @@ async function handleColetandoHorario(
   const ctx = (session.context ?? {}) as BotSessionContext;
   const isAlterar = ctx.pendingAction === "RESCHEDULE";
   const date = isAlterar ? (ctx.newDate ?? ctx.date) : ctx.date;
-  const { serviceId, professionalId } = ctx;
 
-  if (!date || !serviceId || !professionalId) {
+  // 1. Verifica se usuário está escolhendo de uma lista numerada de sugestões
+  if (ctx.suggestedSlotsData && ctx.suggestedSlotsData.length > 0) {
+    const choice = parseInt(userMessage.trim(), 10);
+    if (!isNaN(choice) && choice >= 1 && choice <= ctx.suggestedSlotsData.length) {
+      const pickedSlot = ctx.suggestedSlotsData[choice - 1];
+      const field = isAlterar ? "newTime" : "time";
+      
+      const contextUpdate: Partial<BotSessionContext> = {
+        [field]: pickedSlot.time,
+        serviceId: pickedSlot.serviceId,
+        professionalId: pickedSlot.professionalId,
+        professionalName: pickedSlot.professionalName,
+        servicePrice: pickedSlot.price,
+        serviceDuration: pickedSlot.duration,
+        suggestedSlots: undefined,
+        suggestedSlotsData: undefined,
+      };
+
+      return buildConfirmationResponse({ ...ctx, ...contextUpdate }, date!, pickedSlot.time, contextUpdate);
+    }
+  }
+
+  // 2. Tenta obter o horário da mensagem
+  const time = nlu.entities.time ?? parseTimeFromText(userMessage);
+  if (!time) {
     return {
-      reply: "Ocorreu um erro na sessão. Vamos recomeçar — qual serviço você deseja agendar?",
-      nextState: "COLETANDO_SERVICO",
+      reply: "Não consegui identificar o horário. Por favor, escolha uma opção pelo número, ou digite outro horário (ex: 14:30):",
+      nextState: "COLETANDO_HORARIO",
+      contextUpdate: {},
+    };
+  }
+
+  // Se não temos a data ainda (reagendamento sem data), salva horário e pede data
+  if (!date) {
+    const field = isAlterar ? "newTime" : "time";
+    return {
+      reply: `Horário registrado: ${time}.\n\nQual data você prefere? (Formatos aceitos: DD/MM/AAAA, AAAA-MM-DD ou texto como "amanhã", "próxima segunda")`,
+      nextState: "COLETANDO_DATA",
+      contextUpdate: { [field]: time, suggestedSlots: undefined, suggestedSlotsData: undefined },
+    };
+  }
+
+  // 3. Se o usuário forneceu um horário customizado, busca profissionais disponíveis nesse horário
+  const matchedServiceIds = ctx.matchedServiceIds ?? [];
+  if (matchedServiceIds.length === 0 && ctx.serviceId) {
+    matchedServiceIds.push(ctx.serviceId);
+  }
+
+  const matchingServices = await ServiceModel.findAll({
+    where: { id: matchedServiceIds, active: true },
+    include: [
+      {
+        model: ProfessionalModel,
+        as: "Professional",
+        include: [{ model: UserModel, as: "User", attributes: ["name"] }],
+      },
+    ],
+  });
+
+  const duration = ctx.serviceDuration ?? 60;
+  const availableForTime: typeof matchingServices = [];
+
+  for (const svc of matchingServices) {
+    const slots = await getAvailableSlots(svc.professional_id, date, duration, svc.id);
+    if (slots.includes(time)) {
+      availableForTime.push(svc);
+    }
+  }
+
+  if (availableForTime.length > 0) {
+    const lines: string[] = [];
+    let optionIndex = 1;
+    const suggestedSlotsData: Array<{
+      index: number;
+      serviceId: number;
+      professionalId: number;
+      professionalName: string;
+      price: number;
+      duration: number;
+      time: string;
+    }> = [];
+
+    for (const svc of availableForTime) {
+      const profName = (svc as any).Professional?.User?.name ?? "Profissional";
+      const idx = optionIndex++;
+      suggestedSlotsData.push({
+        index: idx,
+        serviceId: svc.id,
+        professionalId: svc.professional_id,
+        professionalName: profName,
+        price: svc.price_cents ?? Math.round(svc.price * 100),
+        duration: svc.duration,
+        time: time,
+      });
+      lines.push(`${idx}. ${profName}`);
+    }
+
+    const serviceOptions = suggestedSlotsData.map(d => String(d.index));
+
+    return {
+      reply:
+        `Para as ${time} em ${formatDatePtBR(date)}, temos estes profissionais disponíveis:\n\n` +
+        `${lines.join("\n")}\n\n` +
+        `Escolha o número correspondente à sua preferência:`,
+      nextState: "COLETANDO_HORARIO",
       contextUpdate: {
-        serviceId: undefined, professionalId: undefined, date: undefined, time: undefined,
+        suggestedSlots: serviceOptions,
+        suggestedSlotsData,
       },
     };
   }
 
-  // Verifica se usuário está escolhendo de uma lista numerada de sugestões
-  if (ctx.suggestedSlots && ctx.suggestedSlots.length > 0) {
-    const choice = parseInt(userMessage.trim(), 10);
-    if (!isNaN(choice) && choice >= 1 && choice <= ctx.suggestedSlots.length) {
-      const pickedSlot = ctx.suggestedSlots[choice - 1];
-      const field = isAlterar ? "newTime" : "time";
-      return buildConfirmationResponse(ctx, date, pickedSlot, { [field]: pickedSlot, suggestedSlots: undefined });
-    }
-  }
-
-  const time = nlu.entities.time ?? parseTimeFromText(userMessage);
-  if (!time) {
-    return {
-      reply: "Não consegui identificar o horário. Por favor, informe no formato HH:MM (ex: 14:30):",
-      nextState: "COLETANDO_HORARIO",
-      contextUpdate: { suggestedSlots: undefined },
-    };
-  }
-
-  const duration = ctx.serviceDuration ?? 60;
-  const slots = await getAvailableSlots(professionalId, date, duration, serviceId);
-
-  if (slots.includes(time)) {
-    const field = isAlterar ? "newTime" : "time";
-    return buildConfirmationResponse(ctx, date, time, { [field]: time, suggestedSlots: undefined });
-  }
-
-  // Horário solicitado não disponível — sugerir alternativas
-  const nearbyToday = findNearbySlots(slots, time, 5);
-  const altDays = nearbyToday.length === 0
-    ? await findAlternativeDays(professionalId, serviceId, duration, time, date)
-    : [];
-
-  const suggestions: string[] = [];
-  const suggestionLines: string[] = [];
-
-  nearbyToday.forEach((s, i) => {
-    suggestions.push(s);
-    suggestionLines.push(`${i + 1}. ${s} em ${formatDatePtBR(date)}`);
-  });
-
-  altDays.forEach(({ date: altDate, slots: altSlots }) => {
-    altSlots.forEach((s) => {
-      suggestions.push(`${altDate}|${s}`);
-      suggestionLines.push(`${suggestions.length}. ${s} em ${formatDatePtBR(altDate)}`);
-    });
-  });
-
-  if (suggestions.length === 0) {
-    return {
-      reply: `Nenhum horário disponível próximo às ${time} em ${formatDatePtBR(date)}. Gostaria de tentar outra data?`,
-      nextState: "COLETANDO_DATA",
-      contextUpdate: { suggestedSlots: undefined },
-    };
-  }
-
+  // Se nenhum profissional estiver disponível na hora sugerida
   return {
     reply:
-      `O horário ${time} não está disponível em ${formatDatePtBR(date)}.\n\n` +
-      `Horários alternativos:\n${suggestionLines.join("\n")}\n\n` +
-      `Escolha um número ou informe outro horário:`,
+      `Infelizmente nenhum profissional está disponível às ${time} em ${formatDatePtBR(date)}.\n\n` +
+      `Por favor, escolha uma das opções listadas anteriormente ou tente outro horário:`,
     nextState: "COLETANDO_HORARIO",
-    contextUpdate: { suggestedSlots: suggestions },
+    contextUpdate: {}, // mantém as opções sugeridas anteriores
   };
 }
 
@@ -630,7 +1146,11 @@ function buildConfirmationResponse(
       oldInfo +
       `\nConfirma? Responda com *sim* para confirmar ou *não* para cancelar.`,
     nextState: "CONFIRMACAO",
-    contextUpdate: ctxUpdate,
+    contextUpdate: {
+      ...ctxUpdate,
+      serviceOptions: ["Sim", "Não"],
+      serviceOptionsData: undefined,
+    },
   };
 }
 
@@ -638,6 +1158,7 @@ async function handleConfirmacao(
   userMessage: string,
   userId: number,
   session: BotChatSessionModel,
+  selectedTimeIso?: string,
 ): Promise<HandlerResult> {
   const ctx = (session.context ?? {}) as BotSessionContext;
   const lower = userMessage.toLowerCase().trim();
@@ -648,7 +1169,10 @@ async function handleConfirmacao(
     return {
       reply: "Por favor, responda com *sim* para confirmar ou *não* para cancelar:",
       nextState: "CONFIRMACAO",
-      contextUpdate: {},
+      contextUpdate: {
+        serviceOptions: ["Sim", "Não"],
+        serviceOptionsData: undefined,
+      },
     };
   }
 
@@ -689,7 +1213,7 @@ async function handleConfirmacao(
         date: ctx.newDate ?? ctx.date,
         time: ctx.newTime ?? ctx.time,
       };
-      const newAppointment = await createBotAppointment(userId, reschedCtx);
+      const newAppointment = await createBotAppointment(userId, reschedCtx, selectedTimeIso);
       return {
         reply:
           `✅ Reagendamento concluído!\n\n` +
@@ -699,14 +1223,16 @@ async function handleConfirmacao(
           `Horário: ${reschedCtx.time}\n\n` +
           `Aguarde a confirmação do profissional.`,
         nextState: "FINALIZADO",
-        contextUpdate: {},
+        contextUpdate: {
+          appointmentId: newAppointment.id,
+        },
         appointmentId: newAppointment.id,
         finalize: true,
       };
     }
 
     // CREATE (padrão)
-    const appointment = await createBotAppointment(userId, ctx);
+    const appointment = await createBotAppointment(userId, ctx, selectedTimeIso);
     return {
       reply:
         `✅ Agendamento criado com sucesso!\n\n` +
@@ -716,7 +1242,9 @@ async function handleConfirmacao(
         `Horário: ${ctx.time}\n\n` +
         `Aguarde a confirmação do profissional. Você receberá uma notificação.`,
       nextState: "FINALIZADO",
-      contextUpdate: {},
+      contextUpdate: {
+        appointmentId: appointment.id,
+      },
       appointmentId: appointment.id,
       finalize: true,
     };
@@ -815,6 +1343,8 @@ async function handleAguardandoIdAgendamento(
         appointmentId: appointment.id,
         serviceId: appointment.service_id,
         professionalId: appointment.professional_id,
+        serviceOptions: ["Sim", "Não"],
+        serviceOptionsData: undefined,
       },
     };
   }
@@ -848,6 +1378,7 @@ export async function processMessage(
   userMessage: string,
   sessionId?: number,
   channel = "web",
+  selectedTimeIso?: string,
 ): Promise<BotMessageResponse> {
   // 1. Carregar ou criar sessão
   let session: BotChatSessionModel;
@@ -880,10 +1411,116 @@ export async function processMessage(
   }
 
   const trimmedMessage = userMessage.trim().slice(0, 2000);
+  const lowerMsg = trimmedMessage.toLowerCase().trim();
+
+  // A. Recomeçar/Reiniciar fluxo globalmente
+  if (/^(recome[cç]ar|reiniciar|come[cç]ar\s+de\s+novo|limpar\s+chat|outro\s+servi[cç]o)$/i.test(lowerMsg)) {
+    session.state = "INICIO";
+    session.context = {};
+    session.appointment_id = null;
+    await session.save();
+
+    await BotChatMessageModel.create({
+      session_id: session.id,
+      sender: "bot",
+      content: "Entendido! Vamos recomeçar. Que tipo de serviço você precisa hoje?",
+    });
+
+    return {
+      sessionId: session.id,
+      message: "Entendido! Vamos recomeçar. Que tipo de serviço você precisa hoje?",
+      state: "INICIO",
+      context: {},
+    };
+  }
+
+  // B. Escolher outro profissional
+  if (/^(outro\s+profissional|mudar\s+de\s+profissional|outro\s+prestador)$/i.test(lowerMsg)) {
+    const activeCtx = (session.context ?? {}) as BotSessionContext;
+    if (activeCtx.serviceName) {
+      session.state = "COLETANDO_SERVICO";
+      await session.save();
+      const nluFake = { intent: "AGENDAR" as const, entities: { service: activeCtx.serviceName }, confidence: 1.0 };
+      const result = await handleColetandoServico(activeCtx.serviceName, nluFake, session);
+      
+      const mergedContext = {
+        ...(session.context ?? {}),
+        ...result.contextUpdate,
+        professionalId: undefined,
+        professionalName: undefined,
+        date: undefined,
+        time: undefined,
+        newDate: undefined,
+        newTime: undefined,
+        suggestedDates: undefined,
+        suggestedSlots: undefined,
+      };
+
+      session.state = result.nextState;
+      session.context = mergedContext;
+      await session.save();
+
+      await BotChatMessageModel.create({
+        session_id: session.id,
+        sender: "bot",
+        content: `Entendido. Vamos escolher outro profissional. Aqui estão os profissionais disponíveis:\n\n${result.reply}`,
+      });
+
+      return {
+        sessionId: session.id,
+        message: `Entendido. Vamos escolher outro profissional. Aqui estão os profissionais disponíveis:\n\n${result.reply}`,
+        state: session.state,
+        context: session.context as BotSessionContext,
+      };
+    } else {
+      session.state = "INICIO";
+      session.context = {};
+      await session.save();
+      
+      const replyText = "Você ainda não escolheu um serviço. Vamos recomeçar — qual tipo de serviço você precisa?";
+      await BotChatMessageModel.create({
+        session_id: session.id,
+        sender: "bot",
+        content: replyText,
+      });
+      return {
+        sessionId: session.id,
+        message: replyText,
+        state: "INICIO",
+        context: {},
+      };
+    }
+  }
 
   // 2. Persiste mensagem do usuário
   const ctx = (session.context ?? {}) as BotSessionContext;
-  const nlu = await analyzeMessage(trimmedMessage, ctx as Record<string, unknown>);
+
+  // Decisão dinâmica de acionar NLU (Gemini):
+  // Se a entrada do usuário for uma opção padrão (ex: número do menu, data exata, etc.),
+  // processamos localmente sem gastar cota de IA. Caso contrário, acionamos o Gemini para ajudar a interpretar.
+  let needNlu = true;
+
+  if (session.state === "CONFIRMACAO" || session.state === "VERIFICANDO_DISPONIBILIDADE") {
+    needNlu = false;
+  } else if (session.state === "COLETANDO_DATA") {
+    const choice = parseInt(lowerMsg, 10);
+    const isValidChoice = ctx.suggestedDates && !isNaN(choice) && choice >= 1 && choice <= ctx.suggestedDates.length;
+    const isValidLocalDate = parsePortugueseDate(trimmedMessage) !== null;
+    if (isValidChoice || isValidLocalDate) {
+      needNlu = false;
+    }
+  } else if (session.state === "COLETANDO_HORARIO") {
+    const choice = parseInt(lowerMsg, 10);
+    const isValidChoice = ctx.suggestedSlots && !isNaN(choice) && choice >= 1 && choice <= ctx.suggestedSlots.length;
+    const isValidLocalTime = parseTimeFromText(trimmedMessage) !== null;
+    if (isValidChoice || isValidLocalTime) {
+      needNlu = false;
+    }
+  }
+
+  const nlu = needNlu
+    ? await analyzeMessage(trimmedMessage, ctx as Record<string, unknown>)
+    : { intent: "FALLBACK" as const, entities: {} as NluEntities, confidence: 1.0 };
 
   await BotChatMessageModel.create({
     session_id: session.id,
@@ -896,10 +1533,42 @@ export async function processMessage(
   // 3. Roteia para o handler do estado atual
   let result: HandlerResult;
 
+  const isExplicitIntent = ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR"].includes(nlu.intent);
+  let shouldRedirectToInicio = false;
+  if (isExplicitIntent) {
+    if (nlu.intent === "AGENDAR") {
+      // Se a intenção for AGENDAR, redireciona se:
+      // 1. Não houver entidade de serviço (ex: "quero agendar")
+      // 2. Ou se não estivermos no estado COLETANDO_SERVICO (ex: estamos em COLETANDO_DATA, e queremos buscar outro serviço)
+      // 3. Ou se estivermos em COLETANDO_SERVICO mas já tivermos um pendingService ativo (quer descartar e buscar outro)
+      if (!nlu.entities.service || session.state !== "COLETANDO_SERVICO" || ctx.pendingService) {
+        shouldRedirectToInicio = true;
+      }
+    } else {
+      // Para ALTERAR, CANCELAR, CONSULTAR, redireciona se não estivermos em confirmação
+      if (session.state !== "CONFIRMACAO" && session.state !== "AGUARDANDO_ID_AGENDAMENTO") {
+        shouldRedirectToInicio = true;
+      }
+    }
+  }
+
+  if (shouldRedirectToInicio) {
+    session.state = "INICIO";
+    session.context = {}; // Limpa o contexto para iniciar novo fluxo
+  }
+
   try {
     switch (session.state) {
       case "INICIO":
         result = await handleInicio(userId, nlu, session);
+        // Se o NLU já trouxe o serviço, podemos fazer a busca direto para economizar um turno
+        if (result.nextState === "COLETANDO_SERVICO" && nlu.entities.service) {
+          session.context = {
+            ...session.context,
+            ...result.contextUpdate,
+          };
+          result = await handleColetandoServico(nlu.entities.service, nlu, session);
+        }
         break;
       case "COLETANDO_SERVICO":
         result = await handleColetandoServico(trimmedMessage, nlu, session);
@@ -919,7 +1588,7 @@ export async function processMessage(
         result = await handleColetandoHorario(trimmedMessage, nlu, session);
         break;
       case "CONFIRMACAO":
-        result = await handleConfirmacao(trimmedMessage, userId, session);
+        result = await handleConfirmacao(trimmedMessage, userId, session, selectedTimeIso);
         break;
       case "AGUARDANDO_ID_AGENDAMENTO":
         result = await handleAguardandoIdAgendamento(trimmedMessage, nlu, userId, session);
@@ -986,8 +1655,11 @@ export async function processMessage(
   };
 
   session.state = result.nextState;
+  if (result.appointmentId) {
+    session.appointment_id = result.appointmentId;
+    mergedContext.appointmentId = result.appointmentId;
+  }
   session.context = mergedContext;
-  if (result.appointmentId) session.appointment_id = result.appointmentId;
   if (result.finalize) {
     session.status = "completed";
     session.ended_at = new Date();
