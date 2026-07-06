@@ -48,6 +48,7 @@ services:
     volumes:
       - ./src:/app/src
       - ./server.ts:/app/server.ts
+      - ./.env:/app/.env
     ports:
       - "3001:3000"
     depends_on:
