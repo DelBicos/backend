@@ -24,6 +24,7 @@ export default async function auth(
     req.address = decoded.address;
     next();
   } catch (error) {
+    console.error("JWT verification failed:", error);
     res.status(403).json({
       msg: "Token inválido",
     });
