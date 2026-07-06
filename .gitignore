@@ -10,6 +10,7 @@ coverage
 
 ## Project Files ##
 .env
+scratch/
 
 ## Image Directories ##
 avatarBucket
