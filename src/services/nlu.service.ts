@@ -107,6 +107,91 @@ function resolveRelativeDate(text: string): string {
   return text;
 }
 
+function classifyLocal(message: string): NluResult | null {
+  const lower = message.toLowerCase().trim();
+
+  // A. Respostas curtas de confirmação, negação ou ok (evita chamar LLM no sim/não)
+  if (
+    /^(sim|s|n[aã]o|n|ok|confirmar|confirmado|cancelar|cancela|desistir|blz|vlw|obrigado|obrigada)$/i.test(lower)
+  ) {
+    return { intent: "FALLBACK", entities: {}, confidence: 1.0 };
+  }
+
+  // B. Apenas números/opções de chips (ex: "1", "2", "3") ou IDs de agendamento (ex: "61")
+  if (/^\d+$/.test(lower)) {
+    const entities: NluEntities = {};
+    const num = parseInt(lower, 10);
+    if (num > 10) {
+      entities.appointment_id = num;
+    }
+    return { intent: "FALLBACK", entities, confidence: 1.0 };
+  }
+
+  // C. Datas e horas simples escritas no chip (ex: "16/07/2026", "10:30")
+  if (
+    /^\d{1,2}[\/\-]\d{1,2}([\/\-]\d{2,4})?$/.test(lower) || 
+    /^\d{1,2}:\d{2}$/.test(lower)
+  ) {
+    const entities: NluEntities = {};
+    if (lower.includes(":")) {
+      entities.time = lower;
+    } else {
+      entities.date = lower;
+    }
+    return { intent: "FALLBACK", entities, confidence: 1.0 };
+  }
+
+  // 1. SAUDACAO
+  if (
+    /^(oi|ol[aá]|bom\s+dia|boa\s+tarde|boa\s+noite|ol[aá]\s+tudo\s+bem|ol[aá],\s+tudo\s+bem|tudo\s+bem\??)$/i.test(lower) ||
+    /^(hey|hello|hi)$/i.test(lower)
+  ) {
+    return { intent: "SAUDACAO", entities: {}, confidence: 0.95 };
+  }
+
+  // 2. CANCELAR
+  if (/\b(cancelar|cancela|desistir)\b/i.test(lower)) {
+    const idMatch = lower.match(/\b(?:id|agendamento|numero|número)?\s*(\d+)\b/i);
+    const entities: NluEntities = {};
+    if (idMatch) {
+      entities.appointment_id = parseInt(idMatch[1], 10);
+    }
+    return { intent: "CANCELAR", entities, confidence: 0.95 };
+  }
+
+  // 3. ALTERAR
+  if (/\b(alterar|reagendar|remarcar|mudar\s+hor[aá]rio|trocar\s+hor[aá]rio)\b/i.test(lower)) {
+    const idMatch = lower.match(/\b(?:id|agendamento|numero|número)?\s*(\d+)\b/i);
+    const entities: NluEntities = {};
+    if (idMatch) {
+      entities.appointment_id = parseInt(idMatch[1], 10);
+    }
+    return { intent: "ALTERAR", entities, confidence: 0.95 };
+  }
+
+  // 4. CONSULTAR
+  if (/\b(consultar|ver\s+meus|listar|meus\s+agendamentos|meus\s+compromissos|ver\s+agendamentos)\b/i.test(lower)) {
+    return { intent: "CONSULTAR", entities: {}, confidence: 0.95 };
+  }
+
+  // 5. AGENDAR
+  if (/\b(agendar|marcar|quero|novo\s+agendamento|fazer\s+agendamento|contratar|bico)\b/i.test(lower)) {
+    const serviceMatch = lower.match(/\b(?:agendar|marcar|quero|novo\s+agendamento|fazer\s+agendamento|contratar)\s+(?:de\s+|para\s+|um\s+|uma\s+)?([^,.?!]+)/i);
+    const entities: NluEntities = {};
+    if (serviceMatch && serviceMatch[1].trim().length > 0) {
+      const svc = serviceMatch[1].trim();
+      const svcLower = svc.toLowerCase();
+      const ignoredTerms = new Set(["agendar", "marcar", "agendamento", "contratar", "bico", "servico", "serviço"]);
+      if (!ignoredTerms.has(svcLower) && !/^(hoje|amanh[aã]|segunda|ter[cç]a|quarta|quinta|sexta|s[aá]bado|domingo)$/i.test(svc)) {
+        entities.service = svc;
+      }
+    }
+    return { intent: "AGENDAR", entities, confidence: 0.95 };
+  }
+
+  return null;
+}
+
 /**
  * Analisa a mensagem do usuário e retorna intenção + entidades.
  * Usa a API OpenAI via fetch nativo (Node 18+).
@@ -116,11 +201,30 @@ export async function analyzeMessage(
   message: string,
   sessionContext?: Record<string, unknown>,
 ): Promise<NluResult> {
+  // Tenta classificar localmente primeiro para respostas rápidas e offline
+  const localResult = classifyLocal(message);
+  if (localResult) {
+    logger.info("NLU: mensagem classificada localmente", {
+      message,
+      intent: localResult.intent,
+    });
+    return localResult;
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) {
-    logger.warn("NLU: OPENAI_API_KEY não configurada — retornando FALLBACK");
+  if (!apiKey || apiKey === "sk-proj-sua_chave_aqui") {
+    logger.warn("NLU: OPENAI_API_KEY não configurada ou placeholder — retornando FALLBACK");
     return { intent: "FALLBACK", entities: {}, confidence: 0 };
   }
+
+  const isGemini = apiKey.startsWith("AIzaSy") || apiKey.startsWith("AQ") || process.env.NLU_PROVIDER === "gemini";
+  const apiEndpoint = isGemini 
+    ? "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    : "https://api.openai.com/v1/chat/completions";
+
+  const model = isGemini 
+    ? (process.env.OPENAI_MODEL && process.env.OPENAI_MODEL.includes("gemini") ? process.env.OPENAI_MODEL : "gemini-flash-latest")
+    : (process.env.OPENAI_MODEL || "gpt-4o-mini");
 
   const userContent =
     sessionContext && Object.keys(sessionContext).length > 0
@@ -131,7 +235,7 @@ export async function analyzeMessage(
   const timeoutId = setTimeout(() => controller.abort(), NLU_TIMEOUT_MS);
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch(apiEndpoint, {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -139,7 +243,7 @@ export async function analyzeMessage(
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        model: model,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           { role: "user", content: userContent },
@@ -165,7 +269,23 @@ export async function analyzeMessage(
       return { intent: "FALLBACK", entities: {}, confidence: 0 };
     }
 
-    const raw = JSON.parse(content) as Record<string, unknown>;
+    let cleanContent = content.trim();
+    
+    // Tenta extrair bloco de código markdown (```json ... ``` ou ``` ... ```) em qualquer parte do texto
+    const markdownRegex = /```(?:json)?\s*([\s\S]*?)\s*```/;
+    const matchMarkdown = cleanContent.match(markdownRegex);
+    if (matchMarkdown) {
+      cleanContent = matchMarkdown[1].trim();
+    } else {
+      // Fallback: Se não achar markdown, tenta capturar tudo de { até o último }
+      const jsonRegex = /(\{[\s\S]*\})/;
+      const matchJson = cleanContent.match(jsonRegex);
+      if (matchJson) {
+        cleanContent = matchJson[1].trim();
+      }
+    }
+
+    const raw = JSON.parse(cleanContent) as Record<string, unknown>;
 
     // Valida intent — rejeita qualquer valor não reconhecido
     const intent = typeof raw.intent === "string" && VALID_INTENTS.has(raw.intent)
