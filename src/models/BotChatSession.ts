@@ -30,7 +30,8 @@ export interface BotSessionContext {
   newTime?: string;     // HH:MM (para ALTERAR)
   appointmentId?: number;
   suggestedSlots?: string[];
-  serviceOptions?: Array<{
+  serviceOptions?: string[];
+  serviceOptionsData?: Array<{
     id: number;
     title: string;
     professionalId: number;
@@ -38,6 +39,25 @@ export interface BotSessionContext {
     price: number;
     duration: number;
   }>;
+  pendingService?: {
+    id: number;
+    title: string;
+    professionalId: number;
+    professionalName: string;
+    price: number;
+    duration: number;
+  } | null;
+  matchedServiceIds?: number[];
+  suggestedSlotsData?: Array<{
+    index: number;
+    serviceId: number;
+    professionalId: number;
+    professionalName: string;
+    price: number;
+    duration: number;
+    time: string;
+  }>;
+  suggestedDates?: string[];
 }
 
 export interface IBotChatSession {
