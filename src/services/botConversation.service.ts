@@ -1,3 +1,6 @@
+import { normalizeText, calculateMatchScore, findBestOptionMatch } from "../utils/nlp.util";
+import { formatDatePtBR, parseLocalAppointmentStart, isValidFutureDate, parseTimeFromText, parsePortugueseDate } from "../utils/date.util";
+import { formatCurrency } from "../utils/format.util";
 import { Op } from "sequelize";
 import { AppointmentModel } from "../models/Appointment";
 import { ClientModel } from "../models/Client";
@@ -21,77 +24,13 @@ import logger, { logError } from "../utils/logger";
 
 // ─── Helpers de normalização e busca ────────────────────────────────────────
 
-function normalizeText(text: string): string {
-  return text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // remove acentos
-    .replace(/[^a-z0-9\s]/g, "")    // remove caracteres especiais e pontuação
-    .replace(/\s+/g, " ")           // normaliza múltiplos espaços
-    .trim();
-}
 
-function levenshteinDistance(a: string, b: string): number {
-  const matrix = [];
 
-  for (let i = 0; i <= b.length; i++) matrix[i] = [i];
-  for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
 
-  for (let i = 1; i <= b.length; i++) {
-    for (let j = 1; j <= a.length; j++) {
-      if (b.charAt(i - 1) === a.charAt(j - 1)) {
-        matrix[i][j] = matrix[i - 1][j - 1];
-      } else {
-        matrix[i][j] = Math.min(
-          matrix[i - 1][j - 1] + 1, // substituição
-          matrix[i][j - 1] + 1,     // inserção
-          matrix[i - 1][j] + 1      // deleção
-        );
-      }
-    }
-  }
 
-  return matrix[b.length][a.length];
-}
 
-function stringSimilarity(s1: string, s2: string): number {
-  const longer = s1.length > s2.length ? s1 : s2;
-  const shorter = s1.length > s2.length ? s2 : s1;
-  if (longer.length === 0) return 1.0;
-  return (longer.length - levenshteinDistance(longer, shorter)) / longer.length;
-}
 
-function calculateMatchScore(svc: any, normalizedSearch: string, searchKeywords: string[]): number {
-  const svcTitleNorm = normalizeText(svc.title);
-  const subcatTitleNorm = svc.Subcategory ? normalizeText(svc.Subcategory.title) : "";
-  const catTitleNorm = svc.Subcategory && svc.Subcategory.Category ? normalizeText(svc.Subcategory.Category.title) : "";
 
-  // 1. Exact match or full substring match in service title
-  if (svcTitleNorm === normalizedSearch) return 10;
-  if (svcTitleNorm.includes(normalizedSearch)) return 8;
-
-  // 2. Exact match or full substring match in subcategory or category
-  if (subcatTitleNorm === normalizedSearch) return 7;
-  if (catTitleNorm === normalizedSearch) return 6;
-  if (subcatTitleNorm.includes(normalizedSearch)) return 5;
-  if (catTitleNorm.includes(normalizedSearch)) return 4;
-
-  // 3. Keyword match (all keywords present in combined text)
-  const combinedText = `${svcTitleNorm} ${subcatTitleNorm} ${catTitleNorm}`;
-  const allKeywordsMatch = searchKeywords.length > 0 && searchKeywords.every(kw => combinedText.includes(kw));
-  if (allKeywordsMatch) return 3;
-
-  // 4. Fuzzy similarity fallback (Levenshtein)
-  const svcSim = stringSimilarity(normalizedSearch, svcTitleNorm);
-  const subcatSim = subcatTitleNorm ? stringSimilarity(normalizedSearch, subcatTitleNorm) : 0;
-  const maxSim = Math.max(svcSim, subcatSim);
-
-  if (maxSim >= 0.65) {
-    return maxSim * 2; // will be in range [1.3, 2.0]
-  }
-
-  return 0;
-}
 
 // ─── Tipos públicos ─────────────────────────────────────────────────────────
 
@@ -123,34 +62,11 @@ export interface BotSessionHistory {
 
 // ─── Helpers de formatação ──────────────────────────────────────────────────
 
-function formatDatePtBR(date: string): string {
-  const [year, month, day] = date.split("-");
-  const months = [
-    "jan", "fev", "mar", "abr", "mai", "jun",
-    "jul", "ago", "set", "out", "nov", "dez",
-  ];
-  return `${day}/${months[Number(month) - 1]}/${year}`;
-}
 
-/** Offset fixo do fuso de Brasília (UTC-3, sem horário de verão desde 2019). */
-const BRAZIL_UTC_OFFSET_HOURS = 3;
 
-/**
- * Converte data + horário informados pelo usuário para Date UTC no banco.
- * Alinhado ao checkout, que envia localDate.toISOString() do cliente.
- */
-function parseLocalAppointmentStart(date: string, time: string): Date {
-  const [year, month, day] = date.split("-").map(Number);
-  const [hour, minute] = time.trim().slice(0, 5).split(":").map(Number);
-  return new Date(
-    Date.UTC(year, month - 1, day, hour + BRAZIL_UTC_OFFSET_HOURS, minute, 0, 0),
-  );
-}
 
-function formatCurrency(cents: number | undefined, decimal: number | undefined): string {
-  const value = cents != null ? cents / 100 : decimal ?? 0;
-  return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-}
+
+
 
 function findNearbySlots(allSlots: string[], requestedTime: string, maxResults = 5): string[] {
   const [rh, rm] = requestedTime.split(":").map(Number);
@@ -166,111 +82,9 @@ function findNearbySlots(allSlots: string[], requestedTime: string, maxResults =
     .sort();
 }
 
-/** Verifica se a data é válida e >= hoje */
-function isValidFutureDate(date: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return new Date(date + "T00:00:00") >= today;
-}
 
-/** Tenta extrair HH:MM de texto livre */
-function parseTimeFromText(text: string): string | null {
-  const t = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-  // Mapeamento de números por extenso para inteiros
-  const wordToNum: Record<string, number> = {
-    zero: 0, uma: 1, um: 1, dois: 2, duas: 2, tres: 3, quatro: 4,
-    cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10,
-    onze: 11, doze: 12, treze: 13, quatorze: 14, catorze: 14,
-    quinze: 15, dezesseis: 16, dezessete: 17, dezoito: 18,
-    dezenove: 19, vinte: 20, "vinte e um": 21, "vinte e dois": 22,
-    "vinte e tres": 23,
-  };
 
-  // Mapeamento de minutos por extenso
-  const minuteWords: Record<string, number> = {
-    zero: 0, "e meia": 30, "e quinze": 15, "e um quarto": 15,
-    "e quarenta e cinco": 45, "e trinta": 30,
-  };
-
-  // Detectar período do dia
-  const isTarde = /\b(tarde|da tarde|a tarde)\b/.test(t);
-  const isNoite = /\b(noite|da noite|a noite)\b/.test(t);
-  const isManha = /\b(manha|da manha|a manha|manha cedo)\b/.test(t);
-
-  // Meio-dia
-  if (/\b(meio.?dia)\b/.test(t)) {
-    if (/e meia/.test(t)) return "12:30";
-    if (/e quinze/.test(t) || /e um quarto/.test(t)) return "12:15";
-    if (/e quarenta e cinco/.test(t)) return "12:45";
-    return "12:00";
-  }
-
-  // Meia-noite
-  if (/\b(meia.?noite)\b/.test(t)) {
-    if (/e meia/.test(t)) return "00:30";
-    return "00:00";
-  }
-
-  // Número numérico seguido de "h" ou ":" com minutos opcionais: "14h30", "10:30", "9h"
-  const numericMatch = t.match(/\b(\d{1,2})[h:](\d{2})?\b/i);
-  if (numericMatch) {
-    let h = Number(numericMatch[1]);
-    const m = Number(numericMatch[2] || "0");
-    // Ajustar AM/PM pelo período
-    if ((isTarde || isNoite) && h < 12) h += 12;
-    if (isManha && h === 12) h = 0;
-    if (h < 24 && m < 60) return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-  }
-
-  // Só o número seguido de "h": "9h", "14h"
-  const simpleNumeric = t.match(/\b(\d{1,2})[h]\b/);
-  if (simpleNumeric) {
-    let h = Number(simpleNumeric[1]);
-    if ((isTarde || isNoite) && h < 12) h += 12;
-    if (isManha && h === 12) h = 0;
-    if (h < 24) return `${String(h).padStart(2, "0")}:00`;
-  }
-
-  // Tentar "quinze para as X" → X:45 (ou ajustar)
-  const quinzeParaMatch = t.match(/quinze para (?:as?|as) ([a-z]+)/);
-  if (quinzeParaMatch) {
-    const hw = quinzeParaMatch[1].trim();
-    let h = wordToNum[hw] ?? null;
-    if (h !== null) {
-      if ((isTarde || isNoite) && h < 12) h += 12;
-      if (isManha && h === 12) h = 0;
-      return `${String(h).padStart(2, "0")}:45`;
-    }
-  }
-
-  // Número por extenso: "as quatro da tarde", "quatro horas", "as quatro e meia"
-  // Ordena por comprimento decrescente para casar "vinte e um" antes de "vinte"
-  const sortedWords = Object.keys(wordToNum).sort((a, b) => b.length - a.length);
-  for (const w of sortedWords) {
-    if (t.includes(w)) {
-      let h = wordToNum[w];
-      // Minutos por extenso
-      let m = 0;
-      if (t.includes("e meia")) m = 30;
-      else if (t.includes("e quinze") || t.includes("e um quarto")) m = 15;
-      else if (t.includes("e quarenta e cinco")) m = 45;
-      else if (t.includes("e trinta")) m = 30;
-      else if (t.includes("e vinte")) m = 20;
-      else if (t.includes("e dez")) m = 10;
-      else if (t.includes("e cinco")) m = 5;
-
-      // Ajustar AM/PM
-      if ((isTarde || isNoite) && h < 12) h += 12;
-      if (isManha && h === 12) h = 0;
-      if (h >= 24) continue;
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-    }
-  }
-
-  return null;
-}
 
 
 /** Encontra slots em dias próximos ao requestedTime */
@@ -600,11 +414,19 @@ async function handleColetandoServico(
     };
   }
 
-  // 2. Se há opções listadas e o usuário digitou um número para selecionar
+  // 2. Se há opções listadas, tenta selecionar por número ou por correspondência de texto
   if (ctx.serviceOptionsData && ctx.serviceOptionsData.length > 0) {
     const choice = parseInt(userMessage.trim(), 10);
+    let picked = null;
+    
     if (!isNaN(choice) && choice >= 1 && choice <= ctx.serviceOptionsData.length) {
-      const picked = ctx.serviceOptionsData[choice - 1];
+      picked = ctx.serviceOptionsData[choice - 1];
+    } else {
+      // Tenta correspondência textual (ex: "Serv geral" correspondendo a "Serviços Gerais")
+      picked = findBestOptionMatch(userMessage, ctx.serviceOptionsData);
+    }
+
+    if (picked) {
       return {
         reply: `Você escolheu: "${picked.title}".\n\nVocê confirma a escolha deste serviço? ("sim" / "não")`,
         nextState: "COLETANDO_SERVICO",
@@ -658,7 +480,10 @@ async function handleColetandoServico(
     return {
       reply: `Não encontrei serviços com o nome "${searchTerm}". Tente um termo diferente ou mais genérico (ex: "cabelo", "pintura"):`,
       nextState: "COLETANDO_SERVICO",
-      contextUpdate: { serviceOptions: undefined, serviceOptionsData: undefined },
+      contextUpdate: {
+        serviceOptions: ctx.serviceOptions,
+        serviceOptionsData: ctx.serviceOptionsData,
+      },
     };
   }
 
@@ -722,113 +547,7 @@ async function handleColetandoServico(
   };
 }
 
-function parsePortugueseDate(text: string): string | null {
-  const lower = text.toLowerCase().trim();
-  const today = new Date();
-  const currentYear = today.getFullYear();
 
-  const wordNumbers: Record<string, number> = {
-    primeiro: 1, um: 1, dois: 2, tres: 3, três: 3, quatro: 4, cinco: 5,
-    seis: 6, sete: 7, oito: 8, nove: 9, dez: 10, onze: 11, doze: 12,
-    treze: 13, treza: 13,
-    quatorze: 14, catorze: 14, quatorza: 14,
-    quinze: 15, quinza: 15,
-    dezesseis: 16, dezessete: 17, dezoito: 18, dezenove: 19, vinte: 20,
-    "vinte e um": 21, "vinte e dois": 22, "vinte e três": 23, "vinte e quatro": 24,
-    "vinte e cinco": 25, "vinte e seis": 26, "vinte e sete": 27,
-    "vinte e oito": 28, "vinte e dezenove": 29, "vinte e nove": 29,
-    trinta: 30, "trinta e um": 31
-  };
-
-  const monthsMap: Record<string, number> = {
-    janeiro: 1, jan: 1,
-    fevereiro: 2, fev: 2,
-    março: 3, marco: 3, mar: 3,
-    abril: 4, abr: 4,
-    maio: 5, mai: 5,
-    junho: 6, jun: 6,
-    julho: 7, jul: 7,
-    agosto: 8, ago: 8,
-    setembro: 9, set: 9,
-    outubro: 10, out: 10,
-    novembro: 11, nov: 11,
-    dezembro: 12, dez: 12
-  };
-
-  let normalized = lower;
-  const sortedWordNumbersKeys = Object.keys(wordNumbers).sort((a, b) => b.length - a.length);
-  for (const word of sortedWordNumbersKeys) {
-    const num = wordNumbers[word];
-    const regex = new RegExp(`\\b${word}\\b`, "g");
-    normalized = normalized.replace(regex, String(num));
-  }
-
-  const matchDmy = normalized.match(/\b(\d{1,2})\/(\d{1,2})\/(\d{2,4})\b/);
-  if (matchDmy) {
-    let day = parseInt(matchDmy[1], 10);
-    let month = parseInt(matchDmy[2], 10);
-    let year = parseInt(matchDmy[3], 10);
-    if (year < 100) year += 2000;
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  }
-
-  const matchDm = normalized.match(/\b(\d{1,2})\/(\d{1,2})\b/);
-  if (matchDm) {
-    let day = parseInt(matchDm[1], 10);
-    let month = parseInt(matchDm[2], 10);
-    let year = currentYear;
-    const parsedDate = new Date(year, month - 1, day);
-    if (parsedDate < today) {
-      year += 1;
-    }
-    return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-  }
-
-  const matchExt = normalized.match(/\b(?:dia\s+)?(\d{1,2})\s+(?:de|do|da)\s+([a-zçáéíóú\d]+)(?:\s+de\s+(\d{2,4}))?\b/);
-  if (matchExt) {
-    const day = parseInt(matchExt[1], 10);
-    const monthStr = matchExt[2];
-    
-    let month = monthsMap[monthStr];
-    if (!month && /^\d{1,2}$/.test(monthStr)) {
-      month = parseInt(monthStr, 10);
-    }
-    
-    if (month && month >= 1 && month <= 12) {
-      let year = matchExt[3] ? parseInt(matchExt[3], 10) : currentYear;
-      if (matchExt[3] && year < 100) year += 2000;
-      if (!matchExt[3]) {
-        const parsedDate = new Date(year, month - 1, day);
-        if (parsedDate < today) {
-          year += 1;
-        }
-      }
-      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    }
-  }
-
-  // Novo matcher: resolve dias avulsos (ex: "dia 13" ou "13" ou "treze") para o mês atual ou próximo
-  const matchOnlyDay = normalized.match(/^(?:dia\s+)?(\d{1,2})$/i);
-  if (matchOnlyDay) {
-    const day = parseInt(matchOnlyDay[1], 10);
-    if (day >= 1 && day <= 31) {
-      let month = today.getMonth() + 1;
-      let year = currentYear;
-      const parsedDate = new Date(year, month - 1, day);
-      // Se o dia já passou no mês atual, agenda para o próximo mês
-      if (parsedDate < today) {
-        month += 1;
-        if (month > 12) {
-          month = 1;
-          year += 1;
-        }
-      }
-      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    }
-  }
-
-  return null;
-}
 
 async function handleColetandoData(
   userMessage: string,

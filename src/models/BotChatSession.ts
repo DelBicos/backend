@@ -1,15 +1,9 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import { sequelize } from "../config/database";
 
-export type BotSessionState =
-  | "INICIO"
-  | "COLETANDO_SERVICO"
-  | "COLETANDO_DATA"
-  | "COLETANDO_HORARIO"
-  | "VERIFICANDO_DISPONIBILIDADE"
-  | "CONFIRMACAO"
-  | "AGUARDANDO_ID_AGENDAMENTO"
-  | "FINALIZADO";
+import { BotState } from "../constants/botStates";
+
+export type BotSessionState = `${BotState}`;
 
 export type BotSessionStatus = "active" | "completed" | "abandoned";
 
