@@ -57,6 +57,19 @@ export const createAppointment = async (req: Request, res: Response) => {
       });
     }
 
+    // Regra de antecedência: no mínimo 48 horas (2 dias)
+    const startDate = new Date(start_time);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const minAdvanceDate = new Date(today);
+    minAdvanceDate.setDate(minAdvanceDate.getDate() + 2);
+
+    if (startDate < minAdvanceDate) {
+      return res.status(400).json({
+        error: "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
+      });
+    }
+
     const [professional, service] = await Promise.all([
       ProfessionalModel.findByPk(Number(professional_id), {
         include: [

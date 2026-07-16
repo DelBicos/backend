@@ -4,7 +4,7 @@ import { UserModel } from "../../../models/User";
 import { BotChatSessionModel, BotSessionContext } from "../../../models/BotChatSession";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
-import { parsePortugueseDate, isValidFutureDate, formatDatePtBR } from "../../../utils/date.util";
+import { parsePortugueseDate, isValidFutureDate, isValidBookingDate, formatDatePtBR } from "../../../utils/date.util";
 import { getAvailableSlots } from "../../availability.service";
 import { buildConfirmationResponse } from "./stateHelpers";
 
@@ -32,10 +32,19 @@ export class ColetandoDataState implements BotStateNode {
       date = parsePortugueseDate(userMessage) ?? nlu.entities.date;
     }
 
-    if (!date || !isValidFutureDate(date)) {
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return {
         reply:
-          "Por favor, informe uma data válida no futuro.\nFormatos aceitos: DD/MM/AAAA, AAAA-MM-DD ou texto como \"amanhã\", \"próxima segunda\".",
+          "Por favor, informe uma data válida.\nFormatos aceitos: DD/MM/AAAA, AAAA-MM-DD ou texto como \"próxima segunda\".",
+        nextState: "COLETANDO_DATA",
+        contextUpdate: {},
+      };
+    }
+
+    if (!isValidBookingDate(date)) {
+      return {
+        reply:
+          "Desculpe, os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.\nPor favor, informe outra data:",
         nextState: "COLETANDO_DATA",
         contextUpdate: {},
       };
