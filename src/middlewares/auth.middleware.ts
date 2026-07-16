@@ -22,6 +22,7 @@ export default async function auth(
     req.user = decoded.user;
     req.client = decoded.client;
     req.address = decoded.address;
+    req.authSessionId = decoded.jti;
     next();
   } catch (error) {
     console.error("JWT verification failed:", error);

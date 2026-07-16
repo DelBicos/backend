@@ -57,6 +57,7 @@ export interface BotSessionContext {
 export interface IBotChatSession {
   id?: number;
   user_id: number;
+  auth_session_id: string;
   channel: string;
   status: BotSessionStatus;
   state: BotSessionState;
@@ -77,6 +78,7 @@ export class BotChatSessionModel extends Model<
 > {
   public id!: number;
   public user_id!: number;
+  public auth_session_id!: string;
   public channel!: string;
   public status!: BotSessionStatus;
   public state!: BotSessionState;
@@ -101,6 +103,10 @@ BotChatSessionModel.init(
       type: DataTypes.INTEGER,
       allowNull: false,
       references: { model: "users", key: "id" },
+    },
+    auth_session_id: {
+      type: DataTypes.STRING(64),
+      allowNull: false,
     },
     channel: {
       type: DataTypes.STRING(50),
