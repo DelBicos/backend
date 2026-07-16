@@ -24,6 +24,17 @@ export function isValidFutureDate(date: string): boolean {
   return new Date(date + "T00:00:00") >= today;
 }
 
+export function isValidBookingDate(date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  
+  const minDate = new Date(today);
+  minDate.setDate(minDate.getDate() + 2);
+  
+  return new Date(date + "T00:00:00") >= minDate;
+}
+
 export function parseTimeFromText(text: string): string | null {
   const t = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
@@ -39,6 +50,8 @@ export function parseTimeFromText(text: string): string | null {
   const minuteWords: Record<string, number> = {
     zero: 0, "e meia": 30, "e quinze": 15, "e um quarto": 15,
     "e quarenta e cinco": 45, "e trinta": 30,
+    "meia": 30, "trinta": 30, "quinze": 15, "um quarto": 15,
+    "quarenta e cinco": 45
   };
 
   const isTarde = /\b(tarde|da tarde|a tarde)\b/.test(t);
@@ -91,6 +104,9 @@ export function parseTimeFromText(text: string): string | null {
     if (isNoite && hour >= 1 && hour <= 11) hour += 12;
     if (isManha && hour === 12) hour = 0;
 
+    // Auto-inferência: 1 a 7 normalmente significam tarde/noite (13h às 19h) em agendamentos
+    if (!isManha && !isTarde && !isNoite && hour >= 1 && hour <= 7) hour += 12;
+
     if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
       return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
     }
@@ -103,6 +119,9 @@ export function parseTimeFromText(text: string): string | null {
     if (isTarde && hour >= 1 && hour <= 11) hour += 12;
     if (isNoite && hour >= 1 && hour <= 11) hour += 12;
     if (isManha && hour === 12) hour = 0;
+    
+    // Auto-inferência também para o match puramente numérico (ex: "3:30" vira 15:30)
+    if (!isManha && !isTarde && !isNoite && hour >= 1 && hour <= 7) hour += 12;
     if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
       return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
     }
@@ -166,8 +185,6 @@ export function parsePortugueseDate(text: string): string | null {
     let day = parseInt(matchDm[1], 10);
     let month = parseInt(matchDm[2], 10);
     let year = currentYear;
-    const parsedDate = new Date(year, month - 1, day);
-    if (parsedDate < today) year += 1;
     return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
   }
 
@@ -184,10 +201,6 @@ export function parsePortugueseDate(text: string): string | null {
     if (month && month >= 1 && month <= 12) {
       let year = matchExt[3] ? parseInt(matchExt[3], 10) : currentYear;
       if (matchExt[3] && year < 100) year += 2000;
-      if (!matchExt[3]) {
-        const parsedDate = new Date(year, month - 1, day);
-        if (parsedDate < today) year += 1;
-      }
       return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
     }
   }
