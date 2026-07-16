@@ -34,13 +34,14 @@ export interface BotSessionHistory {
 
 export async function processMessage(
   userId: number,
+  authSessionId: string,
   userMessage: string,
   sessionId?: number,
   channel = "web",
   selectedTimeIso?: string,
 ): Promise<BotMessageResponse> {
   // 1. Carregar ou criar sessão
-  let session = await BotSessionManager.getOrCreateSession(userId, channel, sessionId);
+  let session = await BotSessionManager.getOrCreateSession(userId, authSessionId, channel, sessionId);
 
   const trimmedMessage = userMessage.trim().slice(0, 2000);
   const lowerMsg = trimmedMessage.toLowerCase().trim();
@@ -210,7 +211,7 @@ export async function processMessage(
     session.ended_at = new Date();
     await session.save();
 
-    const newSession = await BotSessionManager.getOrCreateSession(userId, session.channel);
+    const newSession = await BotSessionManager.getOrCreateSession(userId, authSessionId, session.channel);
     await BotSessionManager.createMessage(newSession.id, "bot", result.reply);
 
     return {
@@ -236,10 +237,19 @@ export async function processMessage(
 export async function getSessionHistory(
   sessionId: number,
   userId: number,
+  authSessionId: string,
 ): Promise<BotSessionHistory> {
-  const history = await BotSessionManager.getHistory(userId);
+  const history = await BotSessionManager.getHistory(userId, authSessionId);
   if (!history || history.session.id !== sessionId) {
     throw new Error("Histórico de sessão não encontrado ou não pertence a este usuário");
   }
   return history;
+}
+
+/** Returns the pending conversation for the current JWT login, if any. */
+export async function getActiveSessionHistory(
+  userId: number,
+  authSessionId: string,
+): Promise<BotSessionHistory | null> {
+  return BotSessionManager.getHistory(userId, authSessionId);
 }

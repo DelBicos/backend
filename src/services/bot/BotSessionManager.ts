@@ -8,20 +8,23 @@ export class BotSessionManager {
    */
   public static async getOrCreateSession(
     userId: number,
+    authSessionId: string,
     channel: string,
     sessionId?: number
   ): Promise<BotChatSessionModel> {
-    let session: BotChatSessionModel;
+    let session: BotChatSessionModel | undefined;
 
     if (sessionId) {
       const found = await BotChatSessionModel.findByPk(sessionId);
-      if (!found || found.user_id !== userId) {
-        throw new Error("Sessão não encontrada ou não pertence a este usuário");
+      if (found?.user_id === userId && found.auth_session_id === authSessionId) {
+        session = found;
       }
-      session = found;
-    } else {
+    }
+
+    if (!session) {
       session = await BotChatSessionModel.create({
         user_id: userId,
+        auth_session_id: authSessionId,
         channel,
         status: "active",
         state: "INICIO" as any,
@@ -32,6 +35,7 @@ export class BotSessionManager {
     if (session.status !== "active") {
       session = await BotChatSessionModel.create({
         user_id: userId,
+        auth_session_id: authSessionId,
         channel: session.channel,
         status: "active",
         state: "INICIO" as any,
@@ -83,10 +87,11 @@ export class BotSessionManager {
    */
   public static async getHistory(
     userId: number,
+    authSessionId: string,
     limit = 20
   ): Promise<BotSessionHistory | null> {
     const session = await BotChatSessionModel.findOne({
-      where: { user_id: userId, status: "active" },
+      where: { user_id: userId, auth_session_id: authSessionId, status: "active" },
       order: [["id", "DESC"]],
     });
 

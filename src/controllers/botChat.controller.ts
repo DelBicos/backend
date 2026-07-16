@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 import {
   processMessage,
   getSessionHistory,
+  getActiveSessionHistory,
 } from "../services/botConversation.service";
 import logger, { logError } from "../utils/logger";
 
@@ -19,7 +20,7 @@ export const sendBotMessage = async (
   req: AuthenticatedRequest,
   res: Response,
 ): Promise<Response> => {
-  if (!req.user) {
+  if (!req.user || !req.authSessionId) {
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
@@ -56,6 +57,7 @@ export const sendBotMessage = async (
   try {
     const result = await processMessage(
       req.user.id,
+      req.authSessionId,
       cleanMessage,
       sessionId,
       channelStr,
@@ -95,7 +97,7 @@ export const getBotSession = async (
   req: AuthenticatedRequest,
   res: Response,
 ): Promise<Response> => {
-  if (!req.user) {
+  if (!req.user || !req.authSessionId) {
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
@@ -105,7 +107,8 @@ export const getBotSession = async (
   }
 
   try {
-    const history = await getSessionHistory(sessionId, req.user.id);
+    const history = await getSessionHistory(sessionId, req.user.id, req.authSessionId);
+    res.setHeader("Cache-Control", "no-store");
     return res.json(history);
   } catch (error: any) {
     logError("Bot: erro ao buscar sessão", error, {
@@ -116,5 +119,27 @@ export const getBotSession = async (
       return res.status(404).json({ error: error.message });
     }
     return res.status(500).json({ error: "Erro interno ao buscar sessão" });
+  }
+};
+
+/**
+ * GET /api/chat/bot/session/active
+ * Restores only a conversation that belongs to the current JWT login.
+ */
+export const getActiveBotSession = async (
+  req: AuthenticatedRequest,
+  res: Response,
+): Promise<Response> => {
+  if (!req.user || !req.authSessionId) {
+    return res.status(401).json({ error: "Usuário não autenticado" });
+  }
+
+  try {
+    const history = await getActiveSessionHistory(req.user.id, req.authSessionId);
+    res.setHeader("Cache-Control", "no-store");
+    return res.json(history);
+  } catch (error) {
+    logError("Bot: erro ao buscar sessão ativa", error, { userId: req.user.id });
+    return res.status(500).json({ error: "Erro interno ao buscar sessão ativa" });
   }
 };
