@@ -9,6 +9,7 @@ import {
   sendBotMessage,
   getBotSession,
   getActiveBotSession,
+  getBotAppointmentStatus,
 } from "../controllers/botChat.controller";
 
 /**
@@ -246,6 +247,7 @@ chatRouter.post("/bot/message", authMiddleware, botMessageRateLimit, sendBotMess
  * @access  Private
  */
 chatRouter.get("/bot/session/active", authMiddleware, getActiveBotSession as any);
+chatRouter.get("/bot/appointments/:id/status", authMiddleware, getBotAppointmentStatus as any);
 chatRouter.get("/bot/session/:id", authMiddleware, getBotSession as any);
 
 export default chatRouter;

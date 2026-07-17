@@ -1,5 +1,7 @@
 import { BotChatSessionModel, BotSessionContext, BotSessionState } from "../../models/BotChatSession";
 import { BotChatMessageModel } from "../../models/BotChatMessage";
+import { AppointmentModel } from "../../models/Appointment";
+import { BotState } from "../../constants/botStates";
 import { BotSessionHistory } from "../botConversation.service";
 
 export class BotSessionManager {
@@ -8,39 +10,64 @@ export class BotSessionManager {
    */
   public static async getOrCreateSession(
     userId: number,
-    authSessionId: string,
+    authSessionId: string | undefined,
     channel: string,
-    sessionId?: number
+    sessionId?: number,
   ): Promise<BotChatSessionModel> {
-    let session: BotChatSessionModel | undefined;
+    let session: BotChatSessionModel | null = null;
 
     if (sessionId) {
-      const found = await BotChatSessionModel.findByPk(sessionId);
-      if (found?.user_id === userId && found.auth_session_id === authSessionId) {
-        session = found;
+      const requested = await BotChatSessionModel.findByPk(sessionId);
+      if (requested?.user_id === userId && requested.status === "active") {
+        session = requested;
+      }
+    }
+
+    if (!session) {
+      session = await BotChatSessionModel.findOne({
+        where: { user_id: userId, status: "active" },
+        order: [["id", "DESC"]],
+      });
+    }
+
+    if (!session) {
+      const latest = await BotChatSessionModel.findOne({
+        where: { user_id: userId },
+        order: [["id", "DESC"]],
+      });
+      const appointment = latest?.appointment_id
+        ? await AppointmentModel.findByPk(latest.appointment_id)
+        : null;
+
+      if (latest && appointment && ["pending", "confirmed"].includes(appointment.status)) {
+        const context = (latest.context ?? {}) as BotSessionContext;
+        latest.status = "active";
+        latest.ended_at = null;
+        latest.state = appointment.status === "pending"
+          ? BotState.AGUARDANDO_CONFIRMACAO
+          : BotState.INICIO;
+        latest.context = {
+          ...context,
+          appointmentId: appointment.id,
+          appointmentStatus: appointment.status,
+        };
+        await latest.save();
+        session = latest;
       }
     }
 
     if (!session) {
       session = await BotChatSessionModel.create({
         user_id: userId,
-        auth_session_id: authSessionId,
+        auth_session_id: authSessionId ?? `user:${userId}`,
         channel,
         status: "active",
-        state: "INICIO" as any,
+        state: BotState.INICIO,
         context: {},
       });
-    }
-
-    if (session.status !== "active") {
-      session = await BotChatSessionModel.create({
-        user_id: userId,
-        auth_session_id: authSessionId,
-        channel: session.channel,
-        status: "active",
-        state: "INICIO" as any,
-        context: {},
-      });
+    } else if (authSessionId && session.auth_session_id !== authSessionId) {
+      session.auth_session_id = authSessionId;
+      await session.save();
     }
 
     return session;
@@ -87,21 +114,47 @@ export class BotSessionManager {
    */
   public static async getHistory(
     userId: number,
-    authSessionId: string,
-    limit = 20
   ): Promise<BotSessionHistory | null> {
-    const session = await BotChatSessionModel.findOne({
-      where: { user_id: userId, auth_session_id: authSessionId, status: "active" },
+    let session = await BotChatSessionModel.findOne({
+      where: { user_id: userId, status: "active" },
       order: [["id", "DESC"]],
     });
 
-    if (!session) return null;
+    if (!session) {
+      session = await BotChatSessionModel.findOne({
+        where: { user_id: userId },
+        order: [["id", "DESC"]],
+      });
+    }
 
-    const messages = await BotChatMessageModel.findAll({
-      where: { session_id: session.id },
-      order: [["createdAt", "ASC"]],
-      limit,
-    });
+    return session ? this.buildHistory(session) : null;
+  }
+
+  public static async getHistoryBySessionId(
+    sessionId: number,
+    userId: number,
+  ): Promise<BotSessionHistory | null> {
+    const session = await BotChatSessionModel.findByPk(sessionId);
+    if (!session || session.user_id !== userId) return null;
+    return this.buildHistory(session);
+  }
+
+  private static async buildHistory(
+    session: BotChatSessionModel,
+  ): Promise<BotSessionHistory> {
+    const [messages, appointment] = await Promise.all([
+      BotChatMessageModel.findAll({
+        where: { session_id: session.id },
+        order: [["createdAt", "ASC"]],
+      }),
+      session.appointment_id
+        ? AppointmentModel.findByPk(session.appointment_id, {
+            attributes: ["id", "status", "updatedAt"],
+          })
+        : Promise.resolve(null),
+    ]);
+
+    const appointmentStatus = appointment?.status ?? null;
 
     return {
       session: {
@@ -109,16 +162,20 @@ export class BotSessionManager {
         state: session.state,
         status: session.status,
         channel: session.channel,
+        context: session.context ?? {},
         started_at: session.started_at,
         ended_at: session.ended_at,
         appointment_id: session.appointment_id,
+        appointment_status: appointmentStatus,
+        waiting_for_professional: appointmentStatus === "pending",
+        poll_after_ms: appointmentStatus === "pending" ? 5000 : null,
       },
-      messages: messages.map((m) => ({
-        id: m.id,
-        sender: m.sender as "user" | "bot",
-        content: m.content,
-        intent: m.intent,
-        createdAt: m.createdAt,
+      messages: messages.map((message) => ({
+        id: message.id,
+        sender: message.sender as "user" | "bot",
+        content: message.content,
+        intent: message.intent,
+        createdAt: message.createdAt,
       })),
     };
   }

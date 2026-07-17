@@ -23,6 +23,7 @@ export interface BotSessionContext {
   newDate?: string;     // YYYY-MM-DD (para ALTERAR)
   newTime?: string;     // HH:MM (para ALTERAR)
   appointmentId?: number;
+  appointmentStatus?: "pending" | "confirmed" | "completed" | "canceled";
   suggestedSlots?: string[];
   serviceOptions?: string[];
   serviceOptionsData?: Array<{

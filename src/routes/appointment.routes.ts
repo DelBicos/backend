@@ -379,7 +379,7 @@ router.get("/user/:id", getAllAppointments);
  *       500:
  *         description: Erro interno do servidor
  */
-router.post("/:id/confirm", confirmAppointment);
+router.post("/:id/confirm", authMiddleware, confirmAppointment);
 
 /**
  * @swagger

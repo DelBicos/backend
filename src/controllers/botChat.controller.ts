@@ -6,6 +6,8 @@ import {
   getActiveSessionHistory,
 } from "../services/botConversation.service";
 import logger, { logError } from "../utils/logger";
+import { AppointmentModel } from "../models/Appointment";
+import { ClientModel } from "../models/Client";
 
 /**
  * POST /api/chat/bot/message
@@ -20,7 +22,7 @@ export const sendBotMessage = async (
   req: AuthenticatedRequest,
   res: Response,
 ): Promise<Response> => {
-  if (!req.user || !req.authSessionId) {
+  if (!req.user) {
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
@@ -97,7 +99,7 @@ export const getBotSession = async (
   req: AuthenticatedRequest,
   res: Response,
 ): Promise<Response> => {
-  if (!req.user || !req.authSessionId) {
+  if (!req.user) {
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
@@ -107,7 +109,7 @@ export const getBotSession = async (
   }
 
   try {
-    const history = await getSessionHistory(sessionId, req.user.id, req.authSessionId);
+    const history = await getSessionHistory(sessionId, req.user.id);
     res.setHeader("Cache-Control", "no-store");
     return res.json(history);
   } catch (error: any) {
@@ -124,22 +126,61 @@ export const getBotSession = async (
 
 /**
  * GET /api/chat/bot/session/active
- * Restores only a conversation that belongs to the current JWT login.
+ * Restores the latest conversation that belongs to the authenticated user.
  */
 export const getActiveBotSession = async (
   req: AuthenticatedRequest,
   res: Response,
 ): Promise<Response> => {
-  if (!req.user || !req.authSessionId) {
+  if (!req.user) {
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
   try {
-    const history = await getActiveSessionHistory(req.user.id, req.authSessionId);
+    const history = await getActiveSessionHistory(req.user.id);
     res.setHeader("Cache-Control", "no-store");
     return res.json(history);
   } catch (error) {
     logError("Bot: erro ao buscar sessão ativa", error, { userId: req.user.id });
     return res.status(500).json({ error: "Erro interno ao buscar sessão ativa" });
   }
+};
+
+/** Lightweight polling fallback when the realtime socket is unavailable. */
+export const getBotAppointmentStatus = async (
+  req: AuthenticatedRequest,
+  res: Response,
+): Promise<Response> => {
+  if (!req.user) {
+    return res.status(401).json({ error: "Usu\u00e1rio n\u00e3o autenticado" });
+  }
+
+  const appointmentId = Number(req.params.id);
+  if (!Number.isInteger(appointmentId) || appointmentId <= 0) {
+    return res.status(400).json({ error: "ID de agendamento inv\u00e1lido" });
+  }
+
+  const client = await ClientModel.findOne({ where: { user_id: req.user.id } });
+  const appointment = client
+    ? await AppointmentModel.findOne({
+        where: { id: appointmentId, client_id: client.id },
+        attributes: ["id", "status", "updatedAt"],
+      })
+    : null;
+
+  if (!appointment) {
+    return res.status(404).json({ error: "Agendamento n\u00e3o encontrado" });
+  }
+
+  const pollAfterMs = appointment.status === "pending" ? 5000 : null;
+  res.setHeader("Cache-Control", "no-store");
+  if (pollAfterMs) res.setHeader("Retry-After", "5");
+
+  return res.json({
+    appointment_id: appointment.id,
+    status: appointment.status,
+    waiting_for_professional: appointment.status === "pending",
+    poll_after_ms: pollAfterMs,
+    updated_at: appointment.updatedAt,
+  });
 };

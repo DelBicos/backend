@@ -14,6 +14,7 @@ import {
   ensureChatRoomForAppointment,
   syncChatRoomStatusForAppointment,
 } from "../utils/chatRoom";
+import { syncBotSessionsForAppointmentStatus } from "../services/botAppointmentStatus.service";
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -340,9 +341,13 @@ export const getAllAppointments = async (req: Request, res: Response) => {
 export const confirmAppointment = async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    const appointment = await AppointmentModel.findOne({
-      where: { short_id: req.params.id }
+    const authReq = req as AuthenticatedRequest;
+    let appointment = await AppointmentModel.findOne({
+      where: { short_id: id }
     });
+    if (!appointment && !isNaN(Number(id))) {
+      appointment = await AppointmentModel.findByPk(Number(id));
+    }
     if (!appointment) {
       return res.status(404).json({ error: "Agendamento não encontrado" });
     }
@@ -351,8 +356,16 @@ export const confirmAppointment = async (req: Request, res: Response) => {
         error: `Não é possível aceitar um agendamento com status '${appointment.status}'`,
       });
     }
+    const professional = await ProfessionalModel.findByPk(appointment.professional_id);
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional respons\u00e1vel pode aceitar este agendamento",
+      });
+    }
+
     appointment.status = "confirmed";
     await appointment.save();
+    await syncBotSessionsForAppointmentStatus(appointment);
     logger.info("Appointment confirmado", { appointmentId: id });
     res.json(appointment);
   } catch (error: any) {
@@ -385,6 +398,13 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
 
     if (!appointment) {
       return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const appointmentProfessional = (appointment as any).Professional;
+    if (!authReq.user || appointmentProfessional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional respons\u00e1vel pode alterar este agendamento",
+      });
     }
 
     if (appointment.status !== "pending") {
@@ -424,6 +444,8 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
         });
       }
     }
+
+    await syncBotSessionsForAppointmentStatus(appointment);
 
     logger.info(`Appointment status updated to ${status}`, { appointmentId: id });
     res.json(appointment);

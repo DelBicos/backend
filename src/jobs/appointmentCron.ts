@@ -8,6 +8,7 @@ import { UserModel } from '../models/User';
 import { ServiceModel } from '../models/Service';
 import logger from '../utils/logger';
 import { archiveChatRoomForAppointment } from '../utils/chatRoom';
+import { syncBotSessionsForAppointmentStatus } from '../services/botAppointmentStatus.service';
 
 export const startAppointmentCron = () => {
   // Roda a cada 10 minutos
@@ -66,6 +67,8 @@ export const startAppointmentCron = () => {
             is_read: false,
           });
         }
+
+        await syncBotSessionsForAppointmentStatus(appointment);
       }
     } catch (error) {
       logger.error('Erro ao executar cron job de agendamentos expirados:', error);
