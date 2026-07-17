@@ -8,6 +8,7 @@ import { ColetandoDataState } from "./states/ColetandoDataState";
 import { ColetandoHorarioState } from "./states/ColetandoHorarioState";
 import { ConfirmacaoState } from "./states/ConfirmacaoState";
 import { AguardandoIdAgendamentoState } from "./states/AguardandoIdAgendamentoState";
+import { AguardandoConfirmacaoState } from "./states/AguardandoConfirmacaoState";
 
 const stateNodes: Record<BotState, BotStateNode> = {
   [BotState.INICIO]: new InicioState(),
@@ -17,6 +18,7 @@ const stateNodes: Record<BotState, BotStateNode> = {
   [BotState.COLETANDO_HORARIO]: new ColetandoHorarioState(),
   [BotState.VERIFICANDO_DISPONIBILIDADE]: new ColetandoHorarioState(), // Roteia para horário
   [BotState.CONFIRMACAO]: new ConfirmacaoState(),
+  [BotState.AGUARDANDO_CONFIRMACAO]: new AguardandoConfirmacaoState(),
   [BotState.AGUARDANDO_ID_AGENDAMENTO]: new AguardandoIdAgendamentoState(),
   [BotState.FINALIZADO]: new InicioState(),
 };

@@ -21,6 +21,15 @@ interface SendMessagePayload {
 }
 
 const roomChannel = (roomId: number) => `room:${roomId}`;
+const userChannel = (userId: number) => `user:${userId}`;
+
+export interface AppointmentStatusSocketPayload {
+  appointment_id: number;
+  status: "pending" | "confirmed" | "completed" | "canceled";
+  session_ids: number[];
+  message: string;
+  updated_at: string;
+}
 
 const parseOrigins = (): string[] | boolean => {
   const raw = process.env.ALLOWED_ORIGINS || "";
@@ -67,6 +76,10 @@ export function initChatSocket(httpServer: HttpServer): Server {
 
   io.on("connection", (socket: AuthedSocket) => {
     logger.info("Socket conectado", { userId: socket.userId, id: socket.id });
+
+    if (socket.userId) {
+      socket.join(userChannel(socket.userId));
+    }
 
     // Entrar numa sala (valida participação)
     socket.on("room:join", async (roomId: number, ack?: (resp: any) => void) => {
@@ -170,4 +183,12 @@ export function initChatSocket(httpServer: HttpServer): Server {
 
 export function getChatSocket(): Server | null {
   return io;
+}
+
+/** Pushes appointment changes to every open device of the same user. */
+export function emitAppointmentStatusUpdate(
+  userId: number,
+  payload: AppointmentStatusSocketPayload,
+): void {
+  io?.to(userChannel(userId)).emit("appointment:status", payload);
 }

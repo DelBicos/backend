@@ -19,9 +19,13 @@ export interface BotSessionHistory {
     state: BotSessionState;
     status: string;
     channel: string;
+    context: BotSessionContext;
     started_at: Date;
     ended_at: Date | null;
     appointment_id: number | null;
+    appointment_status: "pending" | "confirmed" | "completed" | "canceled" | null;
+    waiting_for_professional: boolean;
+    poll_after_ms: number | null;
   };
   messages: Array<{
     id: number;
@@ -34,7 +38,7 @@ export interface BotSessionHistory {
 
 export async function processMessage(
   userId: number,
-  authSessionId: string,
+  authSessionId: string | undefined,
   userMessage: string,
   sessionId?: number,
   channel = "web",
@@ -237,19 +241,17 @@ export async function processMessage(
 export async function getSessionHistory(
   sessionId: number,
   userId: number,
-  authSessionId: string,
 ): Promise<BotSessionHistory> {
-  const history = await BotSessionManager.getHistory(userId, authSessionId);
-  if (!history || history.session.id !== sessionId) {
+  const history = await BotSessionManager.getHistoryBySessionId(sessionId, userId);
+  if (!history) {
     throw new Error("Histórico de sessão não encontrado ou não pertence a este usuário");
   }
   return history;
 }
 
-/** Returns the pending conversation for the current JWT login, if any. */
+/** Returns the latest conversation owned by the authenticated user. */
 export async function getActiveSessionHistory(
   userId: number,
-  authSessionId: string,
 ): Promise<BotSessionHistory | null> {
-  return BotSessionManager.getHistory(userId, authSessionId);
+  return BotSessionManager.getHistory(userId);
 }

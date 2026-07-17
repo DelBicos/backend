@@ -73,12 +73,12 @@ export class ConfirmacaoState implements BotStateNode {
             `Data: ${formatDatePtBR(reschedCtx.date!)}\n` +
             `Horário: ${reschedCtx.time}\n\n` +
             `Aguarde a confirmação do profissional.`,
-          nextState: "FINALIZADO",
+          nextState: "AGUARDANDO_CONFIRMACAO",
           contextUpdate: {
             appointmentId: newAppointment.id,
+            appointmentStatus: "pending",
           },
           appointmentId: newAppointment.id,
-          finalize: true,
         };
       }
 
@@ -92,12 +92,12 @@ export class ConfirmacaoState implements BotStateNode {
           `Data: ${formatDatePtBR(ctx.date!)}\n` +
           `Horário: ${ctx.time}\n\n` +
           `Aguarde a confirmação do profissional. Você receberá uma notificação.`,
-        nextState: "FINALIZADO",
+        nextState: "AGUARDANDO_CONFIRMACAO",
         contextUpdate: {
           appointmentId: appointment.id,
+          appointmentStatus: "pending",
         },
         appointmentId: appointment.id,
-        finalize: true,
       };
     } catch (error: any) {
       logError("Bot: erro ao executar ação de confirmação", error, { userId });
