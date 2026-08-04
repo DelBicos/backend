@@ -9,6 +9,25 @@ export type BotSessionStatus = "active" | "completed" | "abandoned";
 
 export type BotPendingAction = "CREATE" | "CANCEL" | "RESCHEDULE";
 
+export interface BotServiceOption {
+  id: number;
+  title: string;
+  description?: string | null;
+  subcategoryId: number;
+  subcategoryName: string;
+  categoryName?: string | null;
+  professionalId: number;
+  professionalName: string;
+  professionalAvatarUri?: string | null;
+  professionalDescription?: string | null;
+  professionalCity?: string | null;
+  professionalState?: string | null;
+  price: number;
+  duration: number;
+  rating: number;
+  ratingsCount: number;
+}
+
 export interface BotSessionContext {
   intent?: string;
   pendingAction?: BotPendingAction;
@@ -18,6 +37,15 @@ export interface BotSessionContext {
   serviceDuration?: number;
   professionalId?: number;
   professionalName?: string;
+  professionalAvatarUri?: string | null;
+  professionalRating?: number;
+  professionalRatingsCount?: number;
+  professionalCity?: string | null;
+  professionalState?: string | null;
+  serviceDescription?: string | null;
+  serviceSubcategoryId?: number;
+  serviceSubcategoryName?: string;
+  serviceCategoryName?: string | null;
   date?: string;        // YYYY-MM-DD
   time?: string;        // HH:MM
   newDate?: string;     // YYYY-MM-DD (para ALTERAR)
@@ -26,22 +54,8 @@ export interface BotSessionContext {
   appointmentStatus?: "pending" | "confirmed" | "completed" | "canceled";
   suggestedSlots?: string[];
   serviceOptions?: string[];
-  serviceOptionsData?: Array<{
-    id: number;
-    title: string;
-    professionalId: number;
-    professionalName: string;
-    price: number;
-    duration: number;
-  }>;
-  pendingService?: {
-    id: number;
-    title: string;
-    professionalId: number;
-    professionalName: string;
-    price: number;
-    duration: number;
-  } | null;
+  serviceOptionsData?: BotServiceOption[];
+  pendingService?: BotServiceOption | null;
   matchedServiceIds?: number[];
   suggestedSlotsData?: Array<{
     index: number;
