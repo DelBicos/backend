@@ -171,7 +171,11 @@ AppointmentModel.init(
       {
         name: "idx_appointment_short_id",
         fields: ["short_id"],
-      }
+      },
+      {
+        name: "idx_appointment_service_status_rating",
+        fields: ["service_id", "status", "rating"],
+      },
     ],
     timestamps: true,
     hooks: {
