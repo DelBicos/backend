@@ -1,28 +1,29 @@
 import { AppointmentModel } from "../models/Appointment";
 import { BotChatSessionModel, BotSessionContext } from "../models/BotChatSession";
 import { ClientModel } from "../models/Client";
+import { ProfessionalModel } from "../models/Professional";
 import { BotState } from "../constants/botStates";
 import { BotSessionManager } from "./bot/BotSessionManager";
 import {
   AppointmentStatusSocketPayload,
   emitAppointmentStatusUpdate,
 } from "../realtime/chatSocket";
-
-const statusMessages = {
-  pending: "O agendamento continua pendente de resposta do profissional.",
-  confirmed: "\u2705 O profissional confirmou seu agendamento. Ele agora est\u00e1 confirmado.",
-  canceled: "\u274c O profissional recusou ou o agendamento foi cancelado.",
-  completed: "\u2705 O agendamento foi conclu\u00eddo.",
-} as const;
+import {
+  getAppointmentPaymentStatus,
+  getAppointmentStatusMessage,
+} from "./botAppointmentStatus.helpers";
 
 /** Synchronizes the bot history and every connected device after a status change. */
 export async function syncBotSessionsForAppointmentStatus(
   appointment: AppointmentModel,
 ): Promise<AppointmentStatusSocketPayload | null> {
-  const client = await ClientModel.findByPk(appointment.client_id);
+  const [client, professional] = await Promise.all([
+    ClientModel.findByPk(appointment.client_id),
+    ProfessionalModel.findByPk(appointment.professional_id),
+  ]);
   if (!client) return null;
 
-  let sessions = await BotChatSessionModel.findAll({
+  const sessions = await BotChatSessionModel.findAll({
     where: {
       user_id: client.user_id,
       appointment_id: appointment.id,
@@ -31,25 +32,21 @@ export async function syncBotSessionsForAppointmentStatus(
     order: [["id", "DESC"]],
   });
 
-  // Repair conversations finalized by the previous flow.
-  if (sessions.length === 0) {
-    const latest = await BotChatSessionModel.findOne({
-      where: { user_id: client.user_id, appointment_id: appointment.id },
-      order: [["id", "DESC"]],
-    });
-    if (latest) sessions = [latest];
-  }
-
-  const message = statusMessages[appointment.status];
+  const paid = Boolean(appointment.payment_intent_id);
+  const paymentStatus = getAppointmentPaymentStatus(appointment);
+  const message = getAppointmentStatusMessage(appointment.status, paid);
 
   for (const session of sessions) {
     const context = (session.context ?? {}) as BotSessionContext;
-    const statusChanged = context.appointmentStatus !== appointment.status;
+    const statusChanged =
+      context.appointmentStatus !== appointment.status ||
+      context.appointmentPaid !== paid;
 
     session.context = {
       ...context,
       appointmentId: appointment.id,
       appointmentStatus: appointment.status,
+      appointmentPaid: paid,
     };
 
     if (appointment.status === "pending") {
@@ -84,9 +81,13 @@ export async function syncBotSessionsForAppointmentStatus(
     status: appointment.status,
     session_ids: sessions.map((session) => session.id),
     message,
+    payment_status: paymentStatus,
+    payment_pending: paymentStatus === "pending",
+    paid,
     updated_at: appointment.updatedAt.toISOString(),
   };
 
   emitAppointmentStatusUpdate(client.user_id, payload);
+  if (professional) emitAppointmentStatusUpdate(professional.user_id, payload);
   return payload;
 }
