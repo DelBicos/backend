@@ -34,10 +34,10 @@ export async function createBotAppointment(
   if (selectedTimeIso) {
     const parsed = new Date(selectedTimeIso);
     startTime = isNaN(parsed.getTime())
-      ? parseLocalAppointmentStart(date, normalizedTime)
+      ? parseLocalAppointmentStart(date, normalizedTime, ctx.timeZone)
       : parsed;
   } else {
-    startTime = parseLocalAppointmentStart(date, normalizedTime);
+    startTime = parseLocalAppointmentStart(date, normalizedTime, ctx.timeZone);
   }
   const endTime = new Date(startTime.getTime() + service.duration * 60000);
 

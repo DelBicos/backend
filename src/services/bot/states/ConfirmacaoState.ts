@@ -77,6 +77,7 @@ export class ConfirmacaoState implements BotStateNode {
           contextUpdate: {
             appointmentId: newAppointment.id,
             appointmentStatus: "pending",
+            appointmentPaid: false,
           },
           appointmentId: newAppointment.id,
         };
@@ -96,6 +97,7 @@ export class ConfirmacaoState implements BotStateNode {
         contextUpdate: {
           appointmentId: appointment.id,
           appointmentStatus: "pending",
+          appointmentPaid: false,
         },
         appointmentId: appointment.id,
       };

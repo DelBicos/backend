@@ -4,7 +4,15 @@ import { UserModel } from "../../../models/User";
 import { BotChatSessionModel, BotSessionContext } from "../../../models/BotChatSession";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
-import { parsePortugueseDate, isValidFutureDate, isValidBookingDate, formatDatePtBR } from "../../../utils/date.util";
+import {
+  filterTimesByPeriod,
+  formatDatePtBR,
+  formatTimePeriodPtBR,
+  isValidBookingDate,
+  parsePortugueseDate,
+  parseTimePeriodFromText,
+  selectSuggestedDateByWeekday,
+} from "../../../utils/date.util";
 import { getAvailableSlots } from "../../availability.service";
 import { buildConfirmationResponse } from "./stateHelpers";
 
@@ -16,6 +24,12 @@ export class ColetandoDataState implements BotStateNode {
     userId: number
   ): Promise<HandlerResult> {
     const ctx = (session.context ?? {}) as BotSessionContext;
+    const isAlterar = ctx.pendingAction === "RESCHEDULE";
+    const periodField = isAlterar ? "newTimePeriod" : "timePeriod";
+    const requestedPeriod =
+      nlu.entities.time_period ??
+      parseTimePeriodFromText(userMessage) ??
+      (isAlterar ? ctx.newTimePeriod : ctx.timePeriod);
 
     let date: string | undefined | null;
 
@@ -24,24 +38,26 @@ export class ColetandoDataState implements BotStateNode {
       const choice = parseInt(userMessage.trim(), 10);
       if (!isNaN(choice) && choice >= 1 && choice <= ctx.suggestedDates.length) {
         date = ctx.suggestedDates[choice - 1];
+      } else {
+        date = selectSuggestedDateByWeekday(userMessage, ctx.suggestedDates);
       }
     }
 
     // Tenta extrair a data: primeiro do parser local (D/M/Y, D/M, extenso), depois do NLU
     if (!date) {
-      date = parsePortugueseDate(userMessage) ?? nlu.entities.date;
+      date = parsePortugueseDate(userMessage, { timeZone: ctx.timeZone }) ?? nlu.entities.date;
     }
 
     if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
       return {
         reply:
-          "Por favor, informe uma data válida.\nFormatos aceitos: DD/MM/AAAA, AAAA-MM-DD ou texto como \"próxima segunda\".",
+          "Por favor, informe uma data válida.\nExemplos aceitos: 13/08, dia 13, 13 de agosto, \"sexta que vem\" ou \"próxima segunda\".",
         nextState: "COLETANDO_DATA",
         contextUpdate: {},
       };
     }
 
-    if (!isValidBookingDate(date)) {
+    if (!isValidBookingDate(date, { timeZone: ctx.timeZone })) {
       return {
         reply:
           "Desculpe, os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.\nPor favor, informe outra data:",
@@ -50,7 +66,6 @@ export class ColetandoDataState implements BotStateNode {
       };
     }
 
-    const isAlterar = ctx.pendingAction === "RESCHEDULE";
     const field = isAlterar ? "newDate" : "date";
 
     // Se for reagendamento (ALTERAR) e já temos o horário, podemos validar direto
@@ -95,7 +110,10 @@ export class ColetandoDataState implements BotStateNode {
 
     for (const svc of matchingServices) {
       const profName = (svc as any).Professional?.User?.name || "Profissional";
-      const slots = await getAvailableSlots(svc.professional_id, date, duration, svc.id);
+      const availableSlots = await getAvailableSlots(svc.professional_id, date, duration, svc.id);
+      const slots = requestedPeriod
+        ? filterTimesByPeriod(availableSlots, requestedPeriod)
+        : availableSlots;
       
       if (slots.length > 0) {
         const formattedSlots = slots.map(s => {
@@ -127,7 +145,10 @@ export class ColetandoDataState implements BotStateNode {
 
         let totalSlots = 0;
         for (const svc of matchingServices) {
-          const slots = await getAvailableSlots(svc.professional_id, nextDateStr, duration, svc.id);
+          const availableSlots = await getAvailableSlots(svc.professional_id, nextDateStr, duration, svc.id);
+          const slots = requestedPeriod
+            ? filterTimesByPeriod(availableSlots, requestedPeriod)
+            : availableSlots;
           totalSlots += slots.length;
           if (totalSlots > 0) break; // basta saber que tem ao menos 1 slot
         }
@@ -146,22 +167,23 @@ export class ColetandoDataState implements BotStateNode {
 
         return {
           reply:
-            `Infelizmente não encontrei profissionais disponíveis no dia ${formatDatePtBR(date)} para o serviço "${ctx.serviceName}".\n\n` +
+            `Infelizmente não encontrei profissionais disponíveis no dia ${formatDatePtBR(date)}${requestedPeriod ? ` no período ${formatTimePeriodPtBR(requestedPeriod)}` : ""} para o serviço "${ctx.serviceName}".\n\n` +
             `Mas encontrei disponibilidade nos próximos dias:\n\n` +
             `${suggestions.join("\n")}\n\n` +
             `Escolha o número da data desejada, ou informe outra data:`,
           nextState: "COLETANDO_DATA", // wait, nextState should be "COLETANDO_DATA"
           contextUpdate: {
             [field]: date,
+            [periodField]: requestedPeriod,
             suggestedDates: alternativeDates.map(a => a.dateStr),
           },
         };
       }
 
       return {
-        reply: `Infelizmente não encontrei profissionais disponíveis no dia ${formatDatePtBR(date)} nem nos próximos 14 dias para o serviço "${ctx.serviceName}". Por favor, informe outra data:`,
+        reply: `Infelizmente não encontrei profissionais disponíveis no dia ${formatDatePtBR(date)}${requestedPeriod ? ` no período ${formatTimePeriodPtBR(requestedPeriod)}` : ""} nem nos próximos 14 dias para o serviço "${ctx.serviceName}". Por favor, informe outra data ou período:`,
         nextState: "COLETANDO_DATA",
-        contextUpdate: { [field]: date },
+        contextUpdate: { [field]: date, [periodField]: requestedPeriod },
       };
     }
 
@@ -169,12 +191,13 @@ export class ColetandoDataState implements BotStateNode {
 
     return {
       reply:
-        `Para ${formatDatePtBR(date)}, temos estes profissionais e horários disponíveis:\n\n` +
+        `Para ${formatDatePtBR(date)}${requestedPeriod ? ` no período ${formatTimePeriodPtBR(requestedPeriod)}` : ""}, temos estes profissionais e horários disponíveis:\n\n` +
         `${lines.join("\n\n")}\n\n` +
         `Escolha o número correspondente à sua preferência, ou informe outro horário de preferência (ex: 'quero às 15:00'):`,
       nextState: "COLETANDO_HORARIO",
       contextUpdate: {
         [field]: date,
+        [periodField]: requestedPeriod,
         suggestedSlots: serviceOptions,
         suggestedSlotsData,
       },
