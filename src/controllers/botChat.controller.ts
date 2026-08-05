@@ -8,6 +8,10 @@ import {
 import logger, { logError } from "../utils/logger";
 import { AppointmentModel } from "../models/Appointment";
 import { ClientModel } from "../models/Client";
+import {
+  getAppointmentPaymentStatus,
+  getAppointmentStatusMessage,
+} from "../services/botAppointmentStatus.helpers";
 
 /**
  * POST /api/chat/bot/message
@@ -16,7 +20,7 @@ import { ClientModel } from "../models/Client";
  *   { message: string, session_id?: number, channel?: string }
  *
  * Response:
- *   { session_id, message, state, context }
+ *   { session_id, message, state, context, clear_history }
  */
 export const sendBotMessage = async (
   req: AuthenticatedRequest,
@@ -26,17 +30,18 @@ export const sendBotMessage = async (
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
-  const { message, session_id, channel, selected_time } = req.body as {
+  const { message, session_id, channel, selected_time, timezone } = req.body as {
     message?: unknown;
     session_id?: unknown;
     channel?: unknown;
     selected_time?: unknown;
+    timezone?: unknown;
   };
 
   if (!message || typeof message !== "string" || message.trim().length === 0) {
     return res.status(400).json({ error: "O campo 'message' é obrigatório e não pode estar vazio" });
   }
-  // Remove caracteres de controle (exceto \n e \t) para evitar inputs malformados no banco/LLM
+  // Remove caracteres de controle (exceto \n e \t) para evitar dados malformados no banco ou classificador.
   const cleanMessage = message.replace(/[^\P{C}\n\t]/gu, "").trim();
   if (cleanMessage.length === 0) {
     return res.status(400).json({ error: "Mensagem contém apenas caracteres inválidos" });
@@ -64,6 +69,7 @@ export const sendBotMessage = async (
       sessionId,
       channelStr,
       selectedTimeIso,
+      typeof timezone === "string" ? timezone : undefined,
     );
 
     logger.info("Bot: mensagem processada", {
@@ -77,6 +83,7 @@ export const sendBotMessage = async (
       message: result.message,
       state: result.state,
       context: result.context,
+      clear_history: result.clearHistory === true,
     });
   } catch (error: any) {
     logError("Bot: erro ao processar mensagem", error, {
@@ -164,7 +171,7 @@ export const getBotAppointmentStatus = async (
   const appointment = client
     ? await AppointmentModel.findOne({
         where: { id: appointmentId, client_id: client.id },
-        attributes: ["id", "status", "updatedAt"],
+        attributes: ["id", "status", "payment_intent_id", "updatedAt"],
       })
     : null;
 
@@ -172,14 +179,25 @@ export const getBotAppointmentStatus = async (
     return res.status(404).json({ error: "Agendamento n\u00e3o encontrado" });
   }
 
-  const pollAfterMs = appointment.status === "pending" ? 5000 : null;
+  const paid = Boolean(appointment.payment_intent_id);
+  const paymentStatus = getAppointmentPaymentStatus(appointment);
+  const pollAfterMs =
+    appointment.status === "pending"
+      ? 5000
+      : appointment.status === "confirmed" && !paid
+        ? 10000
+        : null;
   res.setHeader("Cache-Control", "no-store");
   if (pollAfterMs) res.setHeader("Retry-After", "5");
 
   return res.json({
     appointment_id: appointment.id,
     status: appointment.status,
+    message: getAppointmentStatusMessage(appointment.status, paid),
     waiting_for_professional: appointment.status === "pending",
+    payment_status: paymentStatus,
+    payment_pending: paymentStatus === "pending",
+    paid,
     poll_after_ms: pollAfterMs,
     updated_at: appointment.updatedAt,
   });
