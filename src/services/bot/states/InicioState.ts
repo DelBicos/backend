@@ -36,6 +36,7 @@ export class InicioState implements BotStateNode {
         }
         if (nlu.entities.date) newCtx.date = nlu.entities.date;
         if (nlu.entities.time) newCtx.time = nlu.entities.time;
+        if (nlu.entities.time_period) newCtx.timePeriod = nlu.entities.time_period;
 
         return {
           reply:

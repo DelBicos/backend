@@ -4,7 +4,13 @@ import { UserModel } from "../../../models/User";
 import { BotChatSessionModel, BotSessionContext } from "../../../models/BotChatSession";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
-import { parseTimeFromText, formatDatePtBR } from "../../../utils/date.util";
+import {
+  formatDatePtBR,
+  formatTimePeriodPtBR,
+  isTimeInPeriod,
+  parseTimeFromText,
+  parseTimePeriodFromText,
+} from "../../../utils/date.util";
 import { getAvailableSlots } from "../../availability.service";
 import { buildConfirmationResponse } from "./stateHelpers";
 
@@ -44,8 +50,44 @@ export class ColetandoHorarioState implements BotStateNode {
     // 2. Tenta obter o horário da mensagem
     const time = nlu.entities.time ?? parseTimeFromText(userMessage);
     if (!time) {
+      const requestedPeriod =
+        nlu.entities.time_period ?? parseTimePeriodFromText(userMessage);
+
+      if (requestedPeriod && ctx.suggestedSlotsData?.length) {
+        const filteredSlots = ctx.suggestedSlotsData
+          .filter((slot) => isTimeInPeriod(slot.time, requestedPeriod))
+          .map((slot, index) => ({ ...slot, index: index + 1 }));
+        const periodField = isAlterar ? "newTimePeriod" : "timePeriod";
+
+        if (filteredSlots.length > 0) {
+          const lines = filteredSlots.map(
+            (slot) => `${slot.index}. ${slot.time} — ${slot.professionalName}`,
+          );
+          return {
+            reply:
+              `Encontrei estes horários no período ${formatTimePeriodPtBR(requestedPeriod)}:\n\n` +
+              `${lines.join("\n")}\n\n` +
+              "Escolha o número correspondente à sua preferência:",
+            nextState: "COLETANDO_HORARIO",
+            contextUpdate: {
+              [periodField]: requestedPeriod,
+              suggestedSlots: filteredSlots.map((slot) => String(slot.index)),
+              suggestedSlotsData: filteredSlots,
+            },
+          };
+        }
+
+        return {
+          reply:
+            `Não encontrei horários disponíveis no período ${formatTimePeriodPtBR(requestedPeriod)} para esta data. ` +
+            "Escolha uma das opções apresentadas ou informe outra data ou período:",
+          nextState: "COLETANDO_HORARIO",
+          contextUpdate: { [periodField]: requestedPeriod },
+        };
+      }
+
       return {
-        reply: "Não consegui identificar o horário. Por favor, escolha uma opção pelo número, ou digite outro horário (ex: 14:30):",
+        reply: "Não consegui identificar o horário. Escolha uma opção pelo número, digite um horário (ex: 14:30) ou um período (manhã, tarde ou noite):",
         nextState: "COLETANDO_HORARIO",
         contextUpdate: {},
       };

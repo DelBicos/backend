@@ -47,12 +47,14 @@ export class AguardandoConfirmacaoState implements BotStateNode {
           "O profissional tem at\u00e9 12 horas para responder. " +
           "Voc\u00ea n\u00e3o precisa manter esta tela aberta: atualizaremos a conversa automaticamente.",
         nextState: "AGUARDANDO_CONFIRMACAO",
-        contextUpdate: { appointmentStatus: "pending" },
+        contextUpdate: { appointmentStatus: "pending", appointmentPaid: false },
       };
     }
 
     const replies = {
-      confirmed: `\u2705 O profissional confirmou o agendamento ID ${appointment.id}. A conversa permanece dispon\u00edvel no seu hist\u00f3rico.`,
+      confirmed: appointment.payment_intent_id
+        ? `\u2705 O pagamento do agendamento ID ${appointment.id} foi confirmado. O agendamento est\u00e1 confirmado e pago.`
+        : `\u2705 O profissional confirmou o agendamento ID ${appointment.id}. O pagamento est\u00e1 pendente; use a op\u00e7\u00e3o Pagar para finalizar.`,
       canceled: `\u274c O agendamento ID ${appointment.id} foi recusado ou cancelado. Posso ajud\u00e1-lo a escolher outra op\u00e7\u00e3o.`,
       completed: `\u2705 O agendamento ID ${appointment.id} foi conclu\u00eddo. Posso ajud\u00e1-lo com mais alguma coisa?`,
     } as const;
@@ -60,7 +62,10 @@ export class AguardandoConfirmacaoState implements BotStateNode {
     return {
       reply: replies[appointment.status],
       nextState: "INICIO",
-      contextUpdate: { appointmentStatus: appointment.status },
+      contextUpdate: {
+        appointmentStatus: appointment.status,
+        appointmentPaid: Boolean(appointment.payment_intent_id),
+      },
     };
   }
 }

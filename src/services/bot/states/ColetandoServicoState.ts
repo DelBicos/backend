@@ -70,7 +70,7 @@ function selectionResponse(option: BotServiceOption): HandlerResult {
       `Avaliação neste serviço: ${rating}\n` +
       `Valor: ${formatCurrency(option.price, undefined)}\n` +
       `Duração: ${option.duration} minutos\n\n` +
-      "Agora informe a data desejada (DD/MM/AAAA, AAAA-MM-DD ou \"próxima segunda\").",
+      "Agora informe a data desejada (ex.: 13/08, dia 13, 13 de agosto ou \"próxima segunda\").",
     nextState: "COLETANDO_DATA",
     contextUpdate: {
       serviceId: option.id,
