@@ -1,16 +1,17 @@
 import { BotSessionContext, BotSessionState } from "../models/BotChatSession";
-import { analyzeMessage, NluEntities } from "./nlu.service";
-import { parsePortugueseDate, parseTimeFromText } from "../utils/date.util";
+import { analyzeMessage, isRestartCommand } from "./nlu.service";
 import { BotSessionManager } from "./bot/BotSessionManager";
 import { BotMessageRouter } from "./bot/BotMessageRouter";
 import { BotState } from "../constants/botStates";
 import { logError } from "../utils/logger";
+import { resolveBotTimeZone } from "../utils/date.util";
 
 export interface BotMessageResponse {
   sessionId: number;
   message: string;
   state: BotSessionState;
   context: BotSessionContext;
+  clearHistory?: boolean;
 }
 
 export interface BotSessionHistory {
@@ -24,6 +25,8 @@ export interface BotSessionHistory {
     ended_at: Date | null;
     appointment_id: number | null;
     appointment_status: "pending" | "confirmed" | "completed" | "canceled" | null;
+    appointment_paid: boolean;
+    payment_pending: boolean;
     waiting_for_professional: boolean;
     poll_after_ms: number | null;
   };
@@ -43,6 +46,7 @@ export async function processMessage(
   sessionId?: number,
   channel = "web",
   selectedTimeIso?: string,
+  timeZone?: string,
 ): Promise<BotMessageResponse> {
   // 1. Carregar ou criar sessão
   let session = await BotSessionManager.getOrCreateSession(userId, authSessionId, channel, sessionId);
@@ -51,8 +55,8 @@ export async function processMessage(
   const lowerMsg = trimmedMessage.toLowerCase().trim();
 
   // A. Recomeçar/Reiniciar fluxo globalmente
-  if (/^(recome[cç]ar|reiniciar|come[cç]ar\s+de\s+novo|limpar\s+chat|outro\s+servi[cç]o)$/i.test(lowerMsg)) {
-    await BotSessionManager.saveSession(session, BotState.INICIO, {}, null);
+  if (isRestartCommand(lowerMsg) || /^(?:outro\s+servi[cç]o|nova\s+solicita[cç][aã]o)$/i.test(lowerMsg)) {
+    session = await BotSessionManager.restartSession(session, authSessionId);
     const replyText = "Entendido! Vamos recomeçar. Que tipo de serviço você precisa hoje?";
     await BotSessionManager.createMessage(session.id, "bot", replyText);
 
@@ -61,10 +65,12 @@ export async function processMessage(
       message: replyText,
       state: BotState.INICIO,
       context: {},
+      clearHistory: true,
     };
   }
 
   const ctx = (session.context ?? {}) as BotSessionContext;
+  ctx.timeZone = resolveBotTimeZone(timeZone ?? ctx.timeZone);
 
   // B. Escolher outro profissional
   if (/^(outro\s+profissional|mudar\s+de\s+profissional|outro\s+prestador)$/i.test(lowerMsg)) {
@@ -117,29 +123,10 @@ export async function processMessage(
     }
   }
 
-  // 2. Decisão dinâmica de acionar NLU (Gemini)
-  let needNlu = true;
-  if (session.state === BotState.CONFIRMACAO || session.state === BotState.VERIFICANDO_DISPONIBILIDADE) {
-    needNlu = false;
-  } else if (session.state === BotState.COLETANDO_DATA) {
-    const choice = parseInt(lowerMsg, 10);
-    const isValidChoice = ctx.suggestedDates && !isNaN(choice) && choice >= 1 && choice <= ctx.suggestedDates.length;
-    const isValidLocalDate = parsePortugueseDate(trimmedMessage) !== null;
-    if (isValidChoice || isValidLocalDate) {
-      needNlu = false;
-    }
-  } else if (session.state === BotState.COLETANDO_HORARIO) {
-    const choice = parseInt(lowerMsg, 10);
-    const isValidChoice = ctx.suggestedSlots && !isNaN(choice) && choice >= 1 && choice <= ctx.suggestedSlots.length;
-    const isValidLocalTime = parseTimeFromText(trimmedMessage) !== null;
-    if (isValidChoice || isValidLocalTime) {
-      needNlu = false;
-    }
-  }
-
-  const nlu = needNlu
-    ? await analyzeMessage(trimmedMessage, ctx as Record<string, unknown>)
-    : { intent: "FALLBACK" as const, entities: {} as NluEntities, confidence: 1.0 };
+  // 2. Entradas estruturadas (sim/não, número, data e hora) são tratadas por
+  // regras dentro de analyzeMessage. As demais podem interromper o fluxo atual
+  // por uma intenção explícita, mesmo durante um agendamento pendente.
+  const nlu = await analyzeMessage(trimmedMessage, ctx as Record<string, unknown>);
 
   // Persiste mensagem do usuário
   await BotSessionManager.createMessage(session.id, "user", trimmedMessage, nlu.intent, nlu.entities as Record<string, unknown>);
@@ -153,15 +140,18 @@ export async function processMessage(
         shouldRedirectToInicio = true;
       }
     } else {
-      if (session.state !== BotState.CONFIRMACAO && session.state !== BotState.AGUARDANDO_ID_AGENDAMENTO) {
-        shouldRedirectToInicio = true;
-      }
+      // Cancelar, alterar ou consultar representam uma nova ação explícita;
+      // portanto também interrompem confirmações e pedidos de ID anteriores.
+      shouldRedirectToInicio = true;
     }
   }
 
   if (shouldRedirectToInicio) {
     session.state = BotState.INICIO;
     session.context = {};
+    // Um novo pedido não deve manter o vínculo com o agendamento que estava
+    // sendo acompanhado antes da mudança de intenção.
+    session.appointment_id = null;
   }
 
   // 4. Roteia para o handler correspondente
@@ -195,6 +185,7 @@ export async function processMessage(
   const mergedContext: BotSessionContext = {
     ...(session.context ?? {}),
     ...result.contextUpdate,
+    timeZone: ctx.timeZone,
   };
 
   let finalState = result.nextState;
