@@ -1,5 +1,3 @@
-version: "3.8"
-
 name: backend-delbicos
 
 services:
@@ -20,6 +18,22 @@ services:
     container_name: mongo-delbicos
     ports:
       - "27017:27017"
+    restart: unless-stopped
+  nlu-service:
+    build:
+      context: ./nlp-service
+      dockerfile: Dockerfile
+    container_name: nlu-delbicos
+    environment:
+      - NLU_CONFIDENCE_THRESHOLD=${NLU_CONFIDENCE_THRESHOLD:-0.65}
+    expose:
+      - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
     restart: unless-stopped
   delbicos-server:
     build:
@@ -45,6 +59,8 @@ services:
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-sk_API_KEY}
       - MONGODB_URI=mongodb://mongo:27017/logs_db
       - MONGODB_CHAT_URI=mongodb://mongo:27017/delbicos_chat
+      - NLU_SERVICE_URL=http://nlu-service:8000
+      - NLU_CLASSIFIER_TIMEOUT_MS=${NLU_CLASSIFIER_TIMEOUT_MS:-1000}
     volumes:
       - ./src:/app/src
       - ./server.ts:/app/server.ts
@@ -52,8 +68,12 @@ services:
     ports:
       - "3001:3000"
     depends_on:
-      - postgres
-      - mongo
+      postgres:
+        condition: service_started
+      mongo:
+        condition: service_started
+      nlu-service:
+        condition: service_healthy
     restart: unless-stopped
 networks:
   default:
