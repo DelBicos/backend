@@ -2,6 +2,7 @@ import { DataTypes, Model, Optional } from "sequelize";
 import { sequelize } from "../config/database";
 
 import { BotState } from "../constants/botStates";
+import type { TimePeriod } from "../utils/date.util";
 
 export type BotSessionState = `${BotState}`;
 
@@ -31,6 +32,7 @@ export interface BotServiceOption {
 export interface BotSessionContext {
   intent?: string;
   pendingAction?: BotPendingAction;
+  timeZone?: string;
   serviceId?: number;
   serviceName?: string;
   servicePrice?: number;
@@ -48,10 +50,13 @@ export interface BotSessionContext {
   serviceCategoryName?: string | null;
   date?: string;        // YYYY-MM-DD
   time?: string;        // HH:MM
+  timePeriod?: TimePeriod;
   newDate?: string;     // YYYY-MM-DD (para ALTERAR)
   newTime?: string;     // HH:MM (para ALTERAR)
+  newTimePeriod?: TimePeriod;
   appointmentId?: number;
   appointmentStatus?: "pending" | "confirmed" | "completed" | "canceled";
+  appointmentPaid?: boolean;
   suggestedSlots?: string[];
   serviceOptions?: string[];
   serviceOptionsData?: BotServiceOption[];
