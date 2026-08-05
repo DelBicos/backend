@@ -4,7 +4,50 @@ import { AppointmentModel } from "../../models/Appointment";
 import { BotState } from "../../constants/botStates";
 import { BotSessionHistory } from "../botConversation.service";
 
+const configuredSessionTtlHours = Number(process.env.BOT_SESSION_TTL_HOURS ?? 24);
+const SESSION_TTL_MS =
+  (Number.isFinite(configuredSessionTtlHours) && configuredSessionTtlHours > 0
+    ? configuredSessionTtlHours
+    : 24) *
+  60 *
+  60 *
+  1000;
+
 export class BotSessionManager {
+  private static isExpired(session: BotChatSessionModel): boolean {
+    const startedAt = new Date(session.started_at).getTime();
+    return Number.isFinite(startedAt) && Date.now() - startedAt > SESSION_TTL_MS;
+  }
+
+  private static async expireSession(session: BotChatSessionModel): Promise<void> {
+    session.status = "completed";
+    session.ended_at = new Date();
+    await session.save();
+  }
+
+  /**
+   * Encerra a sessão atual e cria outra sem contexto, vínculo de agendamento ou
+   * mensagens. A sessão antiga é preservada como histórico do usuário.
+   */
+  public static async restartSession(
+    session: BotChatSessionModel,
+    authSessionId: string | undefined,
+  ): Promise<BotChatSessionModel> {
+    session.status = "completed";
+    session.ended_at = new Date();
+    await session.save();
+
+    return BotChatSessionModel.create({
+      user_id: session.user_id,
+      auth_session_id: authSessionId ?? `user:${session.user_id}`,
+      channel: session.channel,
+      status: "active",
+      state: BotState.INICIO,
+      context: {},
+      appointment_id: null,
+    });
+  }
+
   /**
    * Obtém uma sessão ativa ou cria uma nova se não existir ou se a fornecida estiver inativa.
    */
@@ -19,7 +62,11 @@ export class BotSessionManager {
     if (sessionId) {
       const requested = await BotChatSessionModel.findByPk(sessionId);
       if (requested?.user_id === userId && requested.status === "active") {
-        session = requested;
+        if (this.isExpired(requested)) {
+          await this.expireSession(requested);
+        } else {
+          session = requested;
+        }
       }
     }
 
@@ -28,31 +75,9 @@ export class BotSessionManager {
         where: { user_id: userId, status: "active" },
         order: [["id", "DESC"]],
       });
-    }
-
-    if (!session) {
-      const latest = await BotChatSessionModel.findOne({
-        where: { user_id: userId },
-        order: [["id", "DESC"]],
-      });
-      const appointment = latest?.appointment_id
-        ? await AppointmentModel.findByPk(latest.appointment_id)
-        : null;
-
-      if (latest && appointment && ["pending", "confirmed"].includes(appointment.status)) {
-        const context = (latest.context ?? {}) as BotSessionContext;
-        latest.status = "active";
-        latest.ended_at = null;
-        latest.state = appointment.status === "pending"
-          ? BotState.AGUARDANDO_CONFIRMACAO
-          : BotState.INICIO;
-        latest.context = {
-          ...context,
-          appointmentId: appointment.id,
-          appointmentStatus: appointment.status,
-        };
-        await latest.save();
-        session = latest;
+      if (session && this.isExpired(session)) {
+        await this.expireSession(session);
+        session = null;
       }
     }
 
@@ -115,19 +140,18 @@ export class BotSessionManager {
   public static async getHistory(
     userId: number,
   ): Promise<BotSessionHistory | null> {
-    let session = await BotChatSessionModel.findOne({
+    const session = await BotChatSessionModel.findOne({
       where: { user_id: userId, status: "active" },
       order: [["id", "DESC"]],
     });
 
-    if (!session) {
-      session = await BotChatSessionModel.findOne({
-        where: { user_id: userId },
-        order: [["id", "DESC"]],
-      });
+    if (!session) return null;
+    if (this.isExpired(session)) {
+      await this.expireSession(session);
+      return null;
     }
 
-    return session ? this.buildHistory(session) : null;
+    return this.buildHistory(session);
   }
 
   public static async getHistoryBySessionId(
@@ -149,12 +173,13 @@ export class BotSessionManager {
       }),
       session.appointment_id
         ? AppointmentModel.findByPk(session.appointment_id, {
-            attributes: ["id", "status", "updatedAt"],
+            attributes: ["id", "status", "payment_intent_id", "updatedAt"],
           })
         : Promise.resolve(null),
     ]);
 
     const appointmentStatus = appointment?.status ?? null;
+    const appointmentPaid = Boolean(appointment?.payment_intent_id);
 
     return {
       session: {
@@ -167,8 +192,15 @@ export class BotSessionManager {
         ended_at: session.ended_at,
         appointment_id: session.appointment_id,
         appointment_status: appointmentStatus,
+        appointment_paid: appointmentPaid,
+        payment_pending: appointmentStatus === "confirmed" && !appointmentPaid,
         waiting_for_professional: appointmentStatus === "pending",
-        poll_after_ms: appointmentStatus === "pending" ? 5000 : null,
+        poll_after_ms:
+          appointmentStatus === "pending"
+            ? 5000
+            : appointmentStatus === "confirmed" && !appointmentPaid
+              ? 10000
+              : null,
       },
       messages: messages.map((message) => ({
         id: message.id,
