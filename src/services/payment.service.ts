@@ -7,6 +7,7 @@ import { NotificationModel } from "../models/Notification";
 import { ServiceModel } from "../models/Service";
 import { ensureChatRoomForAppointment } from "../utils/chatRoom";
 import { customAlphabet } from 'nanoid';
+import { syncBotSessionsForAppointmentStatus } from "./botAppointmentStatus.service";
 
 dotenv.config();
 
@@ -221,6 +222,14 @@ export const PaymentService = {
         });
       }
 
+      try {
+        await syncBotSessionsForAppointmentStatus(appointment);
+      } catch (syncError: any) {
+        console.error(
+          "[PaymentService] Falha ao sincronizar status no chatbot:",
+          syncError.message,
+        );
+      }
       return appointment;
     } catch (dbError: any) {
       console.error(
