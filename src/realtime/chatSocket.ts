@@ -28,6 +28,9 @@ export interface AppointmentStatusSocketPayload {
   status: "pending" | "confirmed" | "completed" | "canceled";
   session_ids: number[];
   message: string;
+  payment_status: "not_available" | "pending" | "paid";
+  payment_pending: boolean;
+  paid: boolean;
   updated_at: string;
 }
 
