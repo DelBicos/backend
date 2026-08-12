@@ -10,6 +10,8 @@ export type BotSessionStatus = "active" | "completed" | "abandoned";
 
 export type BotPendingAction = "CREATE" | "CANCEL" | "RESCHEDULE";
 
+export type BotPendingPrompt = "OFFER_CREATE_AFTER_EMPTY_QUERY";
+
 export interface BotServiceOption {
   id: number;
   title: string;
@@ -32,6 +34,7 @@ export interface BotServiceOption {
 export interface BotSessionContext {
   intent?: string;
   pendingAction?: BotPendingAction;
+  pendingPrompt?: BotPendingPrompt;
   timeZone?: string;
   serviceId?: number;
   serviceName?: string;
