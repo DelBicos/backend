@@ -19,14 +19,15 @@ Todos os itens abaixo foram criados na adequação atual.
 | `nlp-service/requirements.txt` | Declara FastAPI, Uvicorn, NLTK, scikit-learn, joblib e pytest, com intervalos de versão. |
 | `nlp-service/Dockerfile` | Monta a imagem Python, instala dependências, treina o modelo, executa testes e inicia o Uvicorn. |
 | `nlp-service/app/__init__.py` | Identifica `app` como pacote Python. |
-| `nlp-service/app/preprocess.py` | Normaliza o texto, tokeniza e aplica stemming em português com NLTK. |
+| `nlp-service/app/preprocess.py` | Remove URLs e menções, normaliza texto e emojis, tokeniza e aplica stemming em português com NLTK. Não utiliza POS Tagging, NER ou lematização. |
 | `nlp-service/app/train.py` | Lê o corpus, cria TF-IDF de palavras e caracteres, treina `LinearSVC`, calcula métricas e grava o artefato. |
 | `nlp-service/app/model.py` | Carrega o artefato e executa a classificação, calculando confiança a partir da margem do SVM. |
 | `nlp-service/app/main.py` | Expõe a API interna FastAPI: `GET /health` e `POST /classify`. |
 | `nlp-service/data/intents.json` | Corpus versionado com frases de treino para `AGENDAR`, `ALTERAR`, `CANCELAR`, `CONSULTAR`, `SAUDACAO` e `FALLBACK`. |
 | `nlp-service/artifacts/.gitkeep` | Mantém no Git a pasta onde o modelo e as métricas são gerados. |
-| `nlp-service/tests/test_preprocess.py` | Testa normalização e processamento de texto. |
+| `nlp-service/tests/test_preprocess.py` | Testa acentos, espaços, emojis, URLs, menções, tokenização e preservação de comandos importantes. |
 | `nlp-service/tests/test_model.py` | Testa treinamento, carregamento e classificação do modelo. |
+| `seeders/20260812200000-demo-professional-availabilities.js` | Cria, sem duplicar, agendas semanais e disponibilidades de segunda a sábado para todos os serviços ativos dos oito profissionais demonstrativos. Localiza os registros por e-mail, sem depender de IDs fixos. |
 
 ### Artefatos gerados
 
@@ -83,7 +84,7 @@ cada fase seja testada e modificada isoladamente.
 | --- | --- |
 | `src/services/botAppointmentStatus.helpers.ts` | Centraliza regras puras de pagamento e mensagens por status sem abrir conexão com banco; também facilita testes unitários. |
 | `src/services/__tests__/botAppointmentStatus.service.test.ts` | Verifica `not_available`, `pending`, `paid` e os textos de confirmação. |
-| `src/services/__tests__/nlu.service.test.ts` | Verifica regras explícitas, fallback, chamada ao SVM e extração de entidades. |
+| `src/services/__tests__/nlu.service.test.ts` | Verifica a chamada obrigatória ao SVM para mensagens textuais, override e contingência por regras, fallback e extração de entidades. |
 | `src/utils/__tests__/date.util.test.ts` | Testa datas relativas, dias da semana, datas por extenso, períodos, horários e fusos. |
 | `docs/CHATBOT_PLN.md` | Registra decisão técnica, PLN, regras, operação e atualização de aceite/pagamento. |
 | `docs/DOCUMENTACAO_TECNICA_PLN_CHATBOT.md` | Documentação acadêmica da feature nas seções 9.1, 9.2 e 9.3, incluindo dataset e métricas reais. |
@@ -96,7 +97,7 @@ cada fase seja testada e modificada isoladamente.
 
 | Arquivo alterado | O que foi alterado |
 | --- | --- |
-| `src/services/nlu.service.ts` | Remove dependência de IA generativa, prioriza regras, chama o serviço TF-IDF/SVM e extrai entidades determinísticas. |
+| `src/services/nlu.service.ts` | Remove dependência de IA generativa, classifica mensagens textuais pelo TF-IDF/SVM, aplica override ou contingência controlada por regras e extrai entidades determinísticas. |
 | `src/services/botConversation.service.ts` | Passa fuso, reconhece reinício global, cria nova sessão limpa e permite interrupção do fluxo por nova intenção. |
 | `src/services/bot/BotSessionManager.ts` | Adiciona TTL, encerramento por expiração, reinício real, recuperação apenas de sessão ativa e dados de pagamento no histórico. |
 | `src/models/BotChatSession.ts` | Amplia o contexto JSON com fuso, período, status e pagamento. Como são campos dentro de JSON, não exigem nova coluna. |
@@ -108,7 +109,7 @@ cada fase seja testada e modificada isoladamente.
 | `src/services/bot/states/ConfirmacaoState.ts` | Mantém o novo agendamento ativo no estado de espera e inicia `appointmentPaid` como falso. |
 | `src/services/bot/states/AguardandoConfirmacaoState.ts` | Informa automaticamente aceite, recusa e pagamento pendente/pago. |
 | `src/services/bot/states/appointmentActions.ts` | Usa data/hora normalizadas ao criar e reagendar. |
-| `src/utils/date.util.ts` | Adiciona português informal, datas relativas, abreviações, números por extenso, semana seguinte, períodos e timezone. |
+| `src/utils/date.util.ts` | Adiciona português informal, datas relativas, abreviações, números por extenso, semana seguinte, períodos, timezone e resolução contextual de horas ambíguas como `seis horas` (`06:00`/`18:00`). |
 
 ### 6.2 Aceite, tempo real e pagamento
 
@@ -126,6 +127,15 @@ cada fase seja testada e modificada isoladamente.
 | `docker-compose.yml` | Adiciona `nlu-service`, healthcheck, rede interna e variáveis usadas pelo Node. |
 | `.env.example` | Documenta URL interna, timeout, limiar de confiança e TTL da sessão. |
 | `.gitignore` | Ignora artefatos Python gerados, caches e arquivos locais relacionados. |
+
+### 6.4 Serviços e agendas para demonstração
+
+| Arquivo alterado | O que foi alterado |
+| --- | --- |
+| `seeders/007-initial-reformas-services.js` | Passa a localizar os sete profissionais iniciais por e-mail e cada serviço por e-mail + título. A execução e o `down` deixam de depender da ordem dos IDs e não removem serviços alheios ao seeder. |
+| `seeders/010-demo-professional-services.js` | Evita duplicar os 28 serviços demonstrativos pela chave profissional + título e restringe o `down` aos títulos e profissionais conhecidos. |
+| `seeders/012-initial-availabilities.js` | Amplia a agenda geral de um para os sete profissionais iniciais, com regras semanais idempotentes e horários coerentes com seus serviços. |
+| `seeders/20260527200000-initial-service-availabilities.js` | Substitui a seleção frágil dos “primeiros 7 serviços” pela chave e-mail + título e insere apenas horários ainda inexistentes. |
 
 ## 7. Migrações criadas para a base do chatbot
 

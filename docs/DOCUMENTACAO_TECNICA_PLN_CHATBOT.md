@@ -97,6 +97,12 @@ contém “Terça, 18/08” e o usuário responder apenas “terça”, o sistem
 a terça-feira exibida na lista, em vez de calcular outra ocorrência fora do
 contexto.
 
+O mesmo princípio é aplicado a horas ambíguas. Uma resposta como “seis horas”
+é interpretada como `18:00` quando `06:00` não está na lista apresentada e
+`18:00` está. Formatos explícitos e períodos informados pelo usuário são
+preservados, evitando transformar “06:00” ou “seis da manhã” em um horário
+noturno.
+
 ### 9.1.4. Máquina de estados e respostas controladas
 
 O fluxo da conversa é controlado pelos seguintes estados:
@@ -122,14 +128,15 @@ O chatbot se integra ao produto nas seguintes etapas:
 
 1. o frontend envia a mensagem, o token, a sessão e o fuso horário;
 2. o backend carrega a sessão ativa do usuário;
-3. regras identificam comandos inequívocos e dados estruturados;
-4. mensagens abertas são classificadas pelo serviço Python;
-5. a máquina de estados executa a regra correspondente;
-6. serviços e disponibilidades reais são consultados no banco;
-7. a resposta, o estado e o contexto retornam ao frontend;
-8. o React Native renderiza bolhas, cartões, opções e horários;
-9. mudanças de aceite e pagamento são enviadas por Socket.IO;
-10. polling autenticado funciona como contingência quando o socket falha.
+3. regras separam comandos globais e dados estruturados do estado atual;
+4. as demais mensagens textuais de intenção são classificadas pelo serviço Python;
+5. regras explícitas validam ou corrigem comandos inequívocos após a classificação;
+6. a máquina de estados executa a regra correspondente;
+7. serviços e disponibilidades reais são consultados no banco;
+8. a resposta, o estado e o contexto retornam ao frontend;
+9. o React Native renderiza bolhas, cartões, opções e horários;
+10. mudanças de aceite e pagamento são enviadas por Socket.IO;
+11. polling autenticado funciona como contingência quando o socket falha.
 
 O mesmo contrato é utilizado no navegador e no aplicativo mobile.
 
@@ -171,6 +178,21 @@ Não fazem parte desta implementação:
 | React Native | Interface compartilhada entre web e mobile. |
 | Zustand + AsyncStorage | Estado do chatbot e persistência mínima do `sessionId`. |
 | Docker Compose | Execução local do backend, bancos e classificador Python. |
+
+### Técnicas linguísticas não utilizadas
+
+O classificador atual **não utiliza POS Tagging**, pois a classe gramatical de
+cada token não é necessária para distinguir as intenções previstas. Também
+**não utiliza NER estatístico**: serviço, profissional, data, horário e ID são
+extraídos por expressões regulares, parsers e regras do domínio no backend
+Node.js. Essa extração determinística de entidades não deve ser descrita como
+NER.
+
+O projeto **não utiliza lematização**. A redução morfológica adotada é o stemming
+em português com `SnowballStemmer`, que produz radicais e não necessariamente
+lemas existentes no dicionário. Também não ocorre remoção geral de stopwords;
+isso preserva palavras relevantes em mensagens curtas, especialmente negações,
+enquanto o TF-IDF reduz naturalmente o peso dos termos muito frequentes.
 
 ### 9.2.3. Representação com TF-IDF
 
@@ -250,7 +272,7 @@ Saída:
 {
   "intent": "AGENDAR",
   "confidence": 0.91,
-  "model_version": "tfidf-word-char-linear-svm-92ebfca4a93f"
+  "model_version": "tfidf-word-char-linear-svm-3a39e63a5f3f"
 }
 ```
 
@@ -276,37 +298,45 @@ endereços, telefones ou outros dados pessoais reais.
 
 ### 9.3.2. Tamanho e distribuição
 
-O conjunto atual possui 270 frases e está balanceado:
+O conjunto atual possui 285 frases. A intenção `CONSULTAR` recebeu 15 exemplos
+adicionais para representar perguntas naturais que antes podiam cair em
+`FALLBACK`, como “como vejo os horários que marquei”:
 
 | Intenção | Quantidade | Percentual |
 | --- | ---: | ---: |
-| `SAUDACAO` | 45 | 16,67% |
-| `AGENDAR` | 45 | 16,67% |
-| `CONSULTAR` | 45 | 16,67% |
-| `ALTERAR` | 45 | 16,67% |
-| `CANCELAR` | 45 | 16,67% |
-| `FALLBACK` | 45 | 16,67% |
-| **Total** | **270** | **100%** |
+| `SAUDACAO` | 45 | 15,79% |
+| `AGENDAR` | 45 | 15,79% |
+| `CONSULTAR` | 60 | 21,05% |
+| `ALTERAR` | 45 | 15,79% |
+| `CANCELAR` | 45 | 15,79% |
+| `FALLBACK` | 45 | 15,79% |
+| **Total** | **285** | **100%** |
 
-O balanceamento reduz a tendência de o classificador favorecer uma intenção
-apenas por ela possuir mais exemplos.
+A diferença é moderada e o `LinearSVC` utiliza `class_weight="balanced"` para
+compensar o número de exemplos por classe durante o treinamento. A expansão foi
+mantida porque representa variações reais e relevantes da intenção de consulta.
 
 ### 9.3.3. Pré-processamento
 
 Cada frase passa pelas seguintes etapas:
 
-1. conversão para letras minúsculas;
-2. normalização Unicode NFD;
-3. remoção de acentos;
-4. remoção de pontuação e caracteres que não sejam letras, números ou espaços;
-5. normalização de espaços repetidos;
-6. tokenização com `wordpunct_tokenize`;
-7. stemming em português com `SnowballStemmer`;
-8. preservação de palavras críticas, como `não`, `sim`, `cancelar`, `alterar`,
+1. remoção integral de URLs iniciadas por `http://`, `https://` ou `www.`;
+2. remoção integral de menções no formato `@usuario`;
+3. conversão para letras minúsculas;
+4. normalização Unicode NFD;
+5. remoção de acentos;
+6. remoção de emojis, pontuação e demais caracteres que não sejam letras,
+   números ou espaços;
+7. normalização de espaços repetidos;
+8. tokenização com `wordpunct_tokenize`;
+9. stemming em português com `SnowballStemmer`;
+10. preservação de palavras críticas, como `não`, `sim`, `cancelar`, `alterar`,
    `reagendar` e `agendar`.
 
 A preservação desses termos evita que ações distintas fiquem excessivamente
-parecidas após o stemming.
+parecidas após o stemming. Os testes automatizados cobrem acentos, espaços
+excedentes, emojis, URLs com protocolo, URLs iniciadas por `www.`, menções
+simples e menções com sublinhado.
 
 ### 9.3.4. Separação dos dados
 
@@ -320,14 +350,14 @@ stratify = labels
 
 Assim, a avaliação utilizou:
 
-- 216 frases para treinamento da avaliação;
-- 54 frases para teste;
-- 9 exemplos de teste para cada intenção.
+- 228 frases para treinamento da avaliação;
+- 57 frases para teste;
+- 12 exemplos de teste para `CONSULTAR` e 9 para cada uma das demais intenções.
 
 Após calcular as métricas no conjunto separado, o pipeline utilizado pela
-aplicação é treinado novamente com as 270 frases. Dessa forma, nenhum exemplo
+aplicação é treinado novamente com as 285 frases. Dessa forma, nenhum exemplo
 versionado fica fora do modelo disponibilizado, mas as métricas continuam sendo
-calculadas apenas com as 54 frases que não participaram do treino de avaliação.
+calculadas apenas com as 57 frases que não participaram do treino de avaliação.
 
 ### 9.3.5. Estratégia de treinamento
 
@@ -368,31 +398,32 @@ classe específica.
 Modelo avaliado:
 
 ```text
-tfidf-word-char-linear-svm-92ebfca4a93f
+tfidf-word-char-linear-svm-3a39e63a5f3f
 ```
 
 Resultados gerais:
 
 | Métrica | Resultado |
 | --- | ---: |
-| Acurácia | 0,9074 — 90,74% |
-| F1 macro | 0,9062 — 90,62% |
-| Amostras de teste | 54 |
+| Acurácia | 0,9825 — 98,25% |
+| F1 macro | 0,9835 — 98,35% |
+| Amostras de teste | 57 |
 
 Resultados por intenção:
 
 | Intenção | Precisão | Recall | F1-score | Suporte |
 | --- | ---: | ---: | ---: | ---: |
-| `AGENDAR` | 0,9000 | 1,0000 | 0,9474 | 9 |
+| `AGENDAR` | 1,0000 | 1,0000 | 1,0000 | 9 |
 | `ALTERAR` | 1,0000 | 0,8889 | 0,9412 | 9 |
 | `CANCELAR` | 1,0000 | 1,0000 | 1,0000 | 9 |
-| `CONSULTAR` | 0,9000 | 1,0000 | 0,9474 | 9 |
-| `FALLBACK` | 0,7778 | 0,7778 | 0,7778 | 9 |
-| `SAUDACAO` | 0,8750 | 0,7778 | 0,8235 | 9 |
+| `CONSULTAR` | 0,9231 | 1,0000 | 0,9600 | 12 |
+| `FALLBACK` | 1,0000 | 1,0000 | 1,0000 | 9 |
+| `SAUDACAO` | 1,0000 | 1,0000 | 1,0000 | 9 |
 
-Os resultados mostram desempenho elevado para ações transacionais. As classes
-`FALLBACK` e `SAUDACAO` apresentam maior possibilidade de confusão e devem ser
-priorizadas na expansão futura do corpus.
+Os resultados mostram desempenho elevado no conjunto de teste atual. A única
+confusão registrada envolveu uma frase atribuída a `CONSULTAR`; por isso, novas
+variações devem continuar sendo avaliadas com mensagens que não estejam no
+corpus de treinamento.
 
 ### 9.3.8. Reprodutibilidade
 
@@ -425,7 +456,7 @@ O resultado deve ser interpretado considerando que:
 - não foi aplicada validação cruzada nesta versão;
 - linguagem regional, novos erros de digitação e gírias podem exigir expansão.
 
-Portanto, a acurácia de 90,74% é uma medida do conjunto de teste atual e não uma
+Portanto, a acurácia de 98,25% é uma medida do conjunto de teste atual e não uma
 garantia de desempenho idêntico em qualquer mensagem futura.
 
 ### 9.3.10. Estratégia de evolução
@@ -435,7 +466,7 @@ Para evoluir o modelo, recomenda-se:
 1. registrar casos de `FALLBACK` sem armazenar dados pessoais;
 2. anonimizar qualquer frase originada de uso real;
 3. revisar manualmente o rótulo antes de inserir no corpus;
-4. manter o mesmo número de exemplos entre as intenções;
+4. monitorar a distribuição das classes e compensar eventuais diferenças;
 5. separar um conjunto de teste que não seja usado na criação das frases;
 6. aplicar validação cruzada estratificada;
 7. acompanhar matriz de confusão e F1 por classe;
