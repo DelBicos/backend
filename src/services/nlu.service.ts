@@ -46,9 +46,8 @@ export interface NluResult {
 }
 
 /**
- * Comandos explícitos do domínio. Eles preservam um comportamento previsível
- * para frases curtas; mensagens abertas seguem para a classificação TF-IDF +
- * SVM normalmente.
+ * Comandos explícitos do domínio. As regras validam ou corrigem a classificação
+ * de frases inequívocas, mas não impedem que o texto passe pelo TF-IDF + SVM.
  */
 const RESTART_COMMAND_PATTERN = /^(?:reiniciar|recomecar|comecar\s+(?:de\s+novo|novamente)|novo\s+(?:atendimento|agendamento|pedido)|iniciar\s+novamente|limpar\s+(?:o\s+)?(?:chat|bate\s*papo|conversa)|zerar\s+(?:o\s+)?(?:chat|bate\s*papo|conversa)|cancelar\s+(?:o\s+)?(?:processo|fluxo)|voltar\s+(?:ao\s+)?inicio|sair\s+(?:do\s+)?(?:atendimento|fluxo))$/;
 
@@ -222,13 +221,6 @@ export async function analyzeMessage(
   if (structuredResult) return structuredResult;
 
   const explicitIntent = classifyExplicitIntent(message);
-  if (explicitIntent) {
-    return {
-      intent: explicitIntent,
-      confidence: 1,
-      entities: extractEntities(message, explicitIntent, timeZone),
-    };
-  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), NLU_TIMEOUT_MS);
@@ -241,22 +233,53 @@ export async function analyzeMessage(
     });
     if (!response.ok) {
       logger.warn("NLU: classificador interno indisponível", { status: response.status });
-      return fallback();
+      if (!explicitIntent) return fallback();
+
+      logger.info("NLU: regra explícita usada como contingência", {
+        ruleIntent: explicitIntent,
+      });
+      return {
+        intent: explicitIntent,
+        confidence: 1,
+        entities: extractEntities(message, explicitIntent, timeZone),
+      };
     }
 
     const payload = (await response.json()) as ClassifierResponse;
-    const intent = validIntent(payload.intent);
-    const confidence = validConfidence(payload.confidence);
+    const modelIntent = validIntent(payload.intent);
+    const modelConfidence = validConfidence(payload.confidence);
+    const ruleOverridesModel = explicitIntent !== null && explicitIntent !== modelIntent;
+    const intent = ruleOverridesModel ? explicitIntent : modelIntent;
+    const confidence = ruleOverridesModel ? 1 : modelConfidence;
+    const decisionSource = ruleOverridesModel
+      ? "explicit-rule-override"
+      : explicitIntent
+        ? "svm-rule-validated"
+        : "svm";
     logger.info("NLU: intenção classificada por TF-IDF + SVM", {
       intent,
       confidence,
+      modelIntent,
+      modelConfidence,
+      ruleIntent: explicitIntent ?? undefined,
+      decisionSource,
       modelVersion: typeof payload.model_version === "string" ? payload.model_version : undefined,
     });
     return { intent, confidence, entities: extractEntities(message, intent, timeZone) };
   } catch (error: any) {
     const reason = error?.name === "AbortError" ? "timeout" : "erro de conexão";
     logger.warn("NLU: classificador interno indisponível", { reason });
-    return fallback();
+    if (!explicitIntent) return fallback();
+
+    logger.info("NLU: regra explícita usada como contingência", {
+      ruleIntent: explicitIntent,
+      reason,
+    });
+    return {
+      intent: explicitIntent,
+      confidence: 1,
+      entities: extractEntities(message, explicitIntent, timeZone),
+    };
   } finally {
     clearTimeout(timeout);
   }
