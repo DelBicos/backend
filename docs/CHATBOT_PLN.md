@@ -15,6 +15,21 @@ possível nome de serviço usa regras determinísticas no backend Node. As respo
 do bot, estados da conversa, consultas e alterações no banco também continuam
 sendo regras de negócio.
 
+## Pré-processamento e limites da análise linguística
+
+Antes da vetorização, o serviço remove URLs iniciadas por `http://`, `https://`
+ou `www.`, remove menções como `@usuario`, converte o texto para minúsculas,
+remove acentos, emojis, pontuação e espaços excedentes, tokeniza e aplica
+stemming em português.
+
+Não são utilizados POS Tagging, NER ou lematização. O projeto usa stemming com
+`SnowballStemmer`; portanto, reduz palavras a radicais, sem convertê-las para um
+lema de dicionário. Datas, horários, IDs e nomes candidatos são extraídos por
+regras do domínio no backend Node, o que não equivale a um modelo estatístico de
+NER. As stopwords não são removidas indiscriminadamente, pois mensagens curtas e
+negações como `não` podem perder significado; o próprio TF-IDF reduz o peso de
+termos muito frequentes.
+
 ## Frases de comando e interrupção de fluxo
 
 Além do corpus de treinamento, o backend mantém regras explícitas para comandos
@@ -22,10 +37,13 @@ curtos e inequívocos. Elas tornam o chat previsível quando a pessoa usa frases
 como `quero agendar`, `quero cancelar`, `trocar o horário`, `mostrar meus
 agendamentos`, `reiniciar` ou `começar de novo`.
 
-Essas regras não são IA generativa e não substituem o requisito de PLN: frases
-abertas continuam sendo vetorizadas por TF-IDF e classificadas pela SVM. Para
-comandos claros, a regra tem prioridade e permite trocar de intenção mesmo se a
-sessão anterior estava aguardando a confirmação de outro agendamento.
+Essas regras não são IA generativa e não substituem o requisito de PLN. Toda
+mensagem textual de intenção é enviada ao serviço TF-IDF/SVM. Depois da
+classificação, uma regra explícita pode validar ou corrigir comandos inequívocos,
+permitindo trocar de intenção mesmo se a sessão anterior estava aguardando a
+confirmação de outro agendamento. Entradas estruturadas de um estado, como `sim`,
+números, datas e horas isoladas, permanecem nas regras porque não representam uma
+nova intenção a ser classificada.
 
 O comando `reiniciar` encerra a sessão ativa e cria outra com estado e contexto
 vazios. A API sinaliza `clear_history: true` para que o aplicativo apague as
@@ -71,6 +89,12 @@ Um período sem hora exata não é transformado arbitrariamente em um horário. 
 backend filtra as disponibilidades reais usando faixas locais fixas: manhã das
 06:00 às 11:59, tarde das 12:00 às 17:59 e noite das 18:00 às 23:59. A escolha
 final continua sendo confirmada com data e hora exatas.
+
+Horas informadas no formato de 12 horas também usam o contexto das opções. Se o
+usuário responder `seis horas`, `06:00` não estiver entre os horários exibidos e
+`18:00` estiver, o sistema seleciona `18:00`. A inferência não é aplicada quando
+os dois horários estão disponíveis nem quando o usuário informa explicitamente
+`06:00`, `6h`, `seis da manhã`, `seis da tarde`, `AM` ou `PM`.
 
 O frontend já envia um identificador IANA em `timezone`. O backend valida esse
 valor, usa-o para interpretar `hoje`, `amanhã` e a antecedência mínima, e mantém
@@ -167,9 +191,10 @@ NLU_CONFIDENCE_THRESHOLD=0.65
 BOT_SESSION_TTL_HOURS=24
 ```
 
-Se o classificador não responder dentro do prazo, o backend retorna `FALLBACK`;
-ele não faz nenhuma chamada de contingência a OpenAI, Gemini ou outro modelo
-generativo.
+Se o classificador não responder dentro do prazo, o backend usa uma regra
+explícita somente quando o comando é inequívoco; nos demais casos retorna
+`FALLBACK`. Ele não faz nenhuma chamada de contingência a OpenAI, Gemini ou outro
+modelo generativo.
 
 Sessões ativas com mais de `BOT_SESSION_TTL_HOURS` são encerradas e não são
 restauradas automaticamente. Sessões encerradas continuam disponíveis somente

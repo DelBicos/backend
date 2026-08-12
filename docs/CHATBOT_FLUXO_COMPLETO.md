@@ -116,13 +116,15 @@ O backend analisa a entrada nesta ordem:
 
 1. comandos globais, como `reiniciar` e `começar de novo`;
 2. entradas estruturadas, como `sim`, `não`, números, datas e horas;
-3. comandos explícitos, como `quero agendar`, `cancelar` e `trocar horário`;
-4. extração determinística de entidades;
-5. classificação TF-IDF + SVM quando a intenção não é inequívoca;
+3. classificação TF-IDF + SVM das demais mensagens textuais de intenção;
+4. validação ou correção por regra explícita de comandos inequívocos, como
+   `quero agendar`, `cancelar` e `trocar horário`;
+5. extração determinística de entidades;
 6. `FALLBACK` quando a confiança é insuficiente.
 
-Essa combinação torna comandos importantes previsíveis e mantém o requisito de
-PLN para mensagens abertas.
+Essa combinação faz toda mensagem textual de intenção passar pelo PLN e mantém
+comandos importantes previsíveis. Se o classificador estiver indisponível, uma
+regra explícita ainda pode atuar como contingência para comandos inequívocos.
 
 ### 4.2 Serviço Python
 
@@ -156,6 +158,13 @@ As intenções atuais são:
 - `FALLBACK`.
 
 ### 4.3 Treinamento
+
+Antes do treinamento ou da classificação, o texto é convertido para minúsculas;
+URLs e menções são removidas integralmente; acentos, emojis, pontuação e espaços
+excedentes são normalizados; em seguida, o NLTK tokeniza e aplica stemming em
+português. Não são utilizados POS Tagging, NER nem lematização. A extração de
+entidades do domínio descrita na seção seguinte é determinística e não constitui
+um modelo de NER.
 
 O corpus versionado contém exemplos associados a cada intenção. No build do
 contêiner Python:
@@ -203,6 +212,11 @@ de manhã
 
 O fuso do dispositivo é enviado pelo frontend. Se estiver ausente ou inválido,
 o backend usa `America/Sao_Paulo`.
+
+Quando uma hora em formato de 12 horas não contém período, a lista exibida pode
+eliminar a ambiguidade. Por exemplo, `seis horas` passa de `06:00` para `18:00`
+somente se `06:00` não estiver disponível e `18:00` estiver entre as opções.
+Horários e períodos explícitos não são reinterpretados.
 
 ## 5. Máquina de estados
 
@@ -425,6 +439,42 @@ BOT_SESSION_TTL_HOURS=24
 
 O serviço Python possui healthcheck. O backend só deve começar a usar o
 classificador depois que o modelo estiver carregado.
+
+### 16.1. Disponibilidades para testes locais
+
+Os dados locais possuem duas camadas de disponibilidade:
+
+- `professional_availability`: agenda geral do profissional;
+- `service_availability`: dias e horários específicos de cada serviço.
+
+O seeder `012-initial-availabilities.js` cobre os sete profissionais iniciais.
+O seeder `20260527200000-initial-service-availabilities.js` cobre os respectivos
+serviços sem assumir que eles sejam os primeiros IDs do banco. Já o seeder
+`20260812200000-demo-professional-availabilities.js` complementa os oito
+profissionais demonstrativos e todos os seus serviços ativos com agendas de
+segunda a sábado.
+
+Profissionais e serviços são localizados por chaves estáveis, principalmente
+e-mail do profissional + título do serviço. Os seeders de serviços `007` e
+`010` também verificam registros existentes antes da inserção, evitando
+duplicatas quando forem executados novamente.
+
+Os seeders inserem apenas regras ainda inexistentes. Assim, podem ser executados
+isoladamente em um banco local já populado:
+
+```bash
+npx sequelize-cli db:seed --seed 007-initial-reformas-services.js
+npx sequelize-cli db:seed --seed 010-demo-professional-services.js
+npx sequelize-cli db:seed --seed 012-initial-availabilities.js
+npx sequelize-cli db:seed --seed 20260527200000-initial-service-availabilities.js
+npx sequelize-cli db:seed \
+  --seed 20260812200000-demo-professional-availabilities.js
+```
+
+Em uma instalação nova, `npm run seed` executa a sequência completa. As
+disponibilidades específicas respeitam o intervalo de trabalho definido para
+cada profissional. O chatbot ainda desconta agendamentos `pending` ou
+`confirmed` antes de apresentar os horários ao cliente.
 
 ## 17. Testes
 
