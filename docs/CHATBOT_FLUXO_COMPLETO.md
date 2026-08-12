@@ -230,7 +230,9 @@ stateDiagram-v2
     CONFIRMACAO --> AGUARDANDO_CONFIRMACAO: cliente confirma
     CONFIRMACAO --> COLETANDO_DATA: cliente recusa
     AGUARDANDO_CONFIRMACAO --> INICIO: profissional aceita/recusa
-    INICIO --> AGUARDANDO_ID_AGENDAMENTO: consultar/cancelar/reagendar
+    INICIO --> INICIO: consultar agenda
+    INICIO --> COLETANDO_SERVICO: confirma oferta após consulta vazia
+    INICIO --> AGUARDANDO_ID_AGENDAMENTO: cancelar/reagendar
     AGUARDANDO_ID_AGENDAMENTO --> CONFIRMACAO: ação localizada
 ```
 
@@ -241,7 +243,10 @@ Cada estado implementa três responsabilidades:
 3. devolver texto, próximo estado e atualização de contexto.
 
 O contexto pode conter serviço, profissional, preço, duração, data, hora,
-sugestões, `appointmentId`, status e pagamento.
+sugestões, pergunta pendente, `appointmentId`, status e pagamento. Quando uma
+consulta não encontra agendamentos futuros, a pergunta “Deseja agendar um
+serviço?” é registrada no contexto; assim, “sim” inicia `COLETANDO_SERVICO` e
+“não” retorna ao menu sem depender de classificação isolada dessa resposta.
 
 ## 6. Agendamento pelo chatbot
 

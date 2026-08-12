@@ -122,6 +122,12 @@ Cada estado valida a entrada esperada e devolve uma resposta previamente
 programada. Dessa forma, o chatbot não inventa informações, profissionais,
 preços, horários ou agendamentos.
 
+Respostas curtas também são interpretadas pelo estado e pelo contexto. Depois
+de uma consulta sem resultados, o backend registra que aguarda a confirmação da
+oferta “Deseja agendar um serviço?”. Nesse ponto, respostas afirmativas como
+“sim”, “claro”, “quero” ou “vamos” iniciam a coleta do serviço; respostas
+negativas limpam a oferta pendente e retornam ao menu.
+
 ### 9.1.5. Integração com o produto
 
 O chatbot se integra ao produto nas seguintes etapas:
