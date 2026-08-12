@@ -497,6 +497,55 @@ export function parseTimeFromText(text: string): string | null {
   return null;
 }
 
+/**
+ * Resolve uma hora em formato de 12 horas usando os horários já apresentados.
+ *
+ * Exemplo: "seis horas" é inicialmente 06:00. Se 06:00 não estiver na lista,
+ * mas 18:00 estiver, o contexto permite interpretar a intenção como 18:00.
+ * Horários explícitos (06:00, 6h, AM/PM ou com período) nunca são alterados.
+ */
+export function resolveAmbiguousTimeFromAvailableSlots(
+  text: string,
+  parsedTime: string,
+  availableTimes: string[],
+): string {
+  const timeMatch = parsedTime.match(/^(\d{1,2}):(\d{2})$/);
+  if (!timeMatch) return parsedTime;
+
+  const hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  if (hour < 1 || hour > 11 || minute < 0 || minute > 59) {
+    return parsedTime;
+  }
+
+  if (parseTimePeriodFromText(text)) return parsedTime;
+
+  const normalized = replaceNumberWords(normalizePortugueseText(text));
+  const hasExplicitClockFormat =
+    /\b\d{1,2}\s*(?::|\.)\s*\d{1,2}\b/.test(normalized) ||
+    /\b\d{1,2}\s*h(?:\s*\d{1,2})?\b/.test(normalized) ||
+    /\b\d{1,2}\s*(?:am|pm)\b/.test(normalized);
+  if (hasExplicitClockFormat) return parsedTime;
+
+  const normalizeAvailableTime = (value: string): string | null => {
+    const match = value.match(/^(\d{1,2}):(\d{2})/);
+    if (!match) return null;
+    return `${String(Number(match[1])).padStart(2, "0")}:${match[2]}`;
+  };
+  const available = new Set(
+    availableTimes
+      .map(normalizeAvailableTime)
+      .filter((value): value is string => value !== null),
+  );
+  const normalizedParsed =
+    `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  if (available.has(normalizedParsed)) return normalizedParsed;
+
+  const eveningEquivalent =
+    `${String(hour + 12).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  return available.has(eveningEquivalent) ? eveningEquivalent : parsedTime;
+}
+
 export function parsePortugueseDate(
   text: string,
   options: DateParseOptions = {},
