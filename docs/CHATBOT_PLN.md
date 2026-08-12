@@ -49,6 +49,12 @@ O comando `reiniciar` encerra a sessão ativa e cria outra com estado e contexto
 vazios. A API sinaliza `clear_history: true` para que o aplicativo apague as
 bolhas exibidas antes de mostrar a mensagem inicial da nova conversa.
 
+Perguntas do próprio bot são registradas no contexto quando exigem uma resposta
+curta. Por exemplo, após uma consulta sem agendamentos futuros, `sim`, `claro`,
+`quero`, `vamos` e `pode ser` confirmam a oferta de iniciar um agendamento; `não`
+e `agora não` recusam a oferta. Fora desse contexto, `sim` não inicia uma ação
+arbitrária.
+
 ## Normalização de datas e horários
 
 A classificação da intenção continua sendo feita por TF-IDF e SVM. Datas,

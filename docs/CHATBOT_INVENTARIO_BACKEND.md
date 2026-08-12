@@ -100,9 +100,9 @@ cada fase seja testada e modificada isoladamente.
 | `src/services/nlu.service.ts` | Remove dependência de IA generativa, classifica mensagens textuais pelo TF-IDF/SVM, aplica override ou contingência controlada por regras e extrai entidades determinísticas. |
 | `src/services/botConversation.service.ts` | Passa fuso, reconhece reinício global, cria nova sessão limpa e permite interrupção do fluxo por nova intenção. |
 | `src/services/bot/BotSessionManager.ts` | Adiciona TTL, encerramento por expiração, reinício real, recuperação apenas de sessão ativa e dados de pagamento no histórico. |
-| `src/models/BotChatSession.ts` | Amplia o contexto JSON com fuso, período, status e pagamento. Como são campos dentro de JSON, não exigem nova coluna. |
+| `src/models/BotChatSession.ts` | Amplia o contexto JSON com fuso, período, pergunta pendente, status e pagamento. Como são campos dentro de JSON, não exigem nova coluna. |
 | `src/controllers/botChat.controller.ts` | Recebe `timezone`, devolve `clear_history` e amplia o polling com mensagem e situação de pagamento. |
-| `src/services/bot/states/InicioState.ts` | Ajusta saudação e transições de intenção. |
+| `src/services/bot/states/InicioState.ts` | Ajusta saudação, transições de intenção e respostas afirmativas/negativas à oferta contextual feita após uma consulta vazia. |
 | `src/services/bot/states/ColetandoServicoState.ts` | Evita tratar o verbo “agendar” como nome de serviço e melhora opções. |
 | `src/services/bot/states/ColetandoDataState.ts` | Integra parser expandido e seleção de datas sugeridas por dia da semana. |
 | `src/services/bot/states/ColetandoHorarioState.ts` | Integra horários naturais, períodos e fuso. |
