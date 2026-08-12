@@ -10,6 +10,7 @@ import {
   isTimeInPeriod,
   parseTimeFromText,
   parseTimePeriodFromText,
+  resolveAmbiguousTimeFromAvailableSlots,
 } from "../../../utils/date.util";
 import { getAvailableSlots } from "../../availability.service";
 import { buildConfirmationResponse } from "./stateHelpers";
@@ -48,7 +49,14 @@ export class ColetandoHorarioState implements BotStateNode {
     }
 
     // 2. Tenta obter o horário da mensagem
-    const time = nlu.entities.time ?? parseTimeFromText(userMessage);
+    const parsedTime = nlu.entities.time ?? parseTimeFromText(userMessage);
+    const time = parsedTime
+      ? resolveAmbiguousTimeFromAvailableSlots(
+          userMessage,
+          parsedTime,
+          ctx.suggestedSlotsData?.map((slot) => slot.time) ?? [],
+        )
+      : null;
     if (!time) {
       const requestedPeriod =
         nlu.entities.time_period ?? parseTimePeriodFromText(userMessage);
