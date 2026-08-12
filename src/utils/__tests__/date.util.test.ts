@@ -5,6 +5,7 @@ import {
   parsePortugueseDate,
   parseTimeFromText,
   parseTimePeriodFromText,
+  resolveAmbiguousTimeFromAvailableSlots,
   resolveBotTimeZone,
   selectSuggestedDateByWeekday,
 } from "../date.util";
@@ -75,6 +76,7 @@ describe("parseTimeFromText", () => {
     ["14h30", "14:30"],
     ["duas e meia da tarde", "14:30"],
     ["duas da tarde", "14:00"],
+    ["seis horas", "06:00"],
     ["quinze pras três da tarde", "14:45"],
     ["sete horas da manhã", "07:00"],
     ["meio-dia", "12:00"],
@@ -87,6 +89,42 @@ describe("parseTimeFromText", () => {
   it("não inventa um horário quando foi informado somente o período", () => {
     expect(parseTimeFromText("quero de tarde")).toBeNull();
   });
+
+  it.each([
+    ["seis horas", "06:00", ["09:00", "18:00"], "18:00"],
+    ["às seis", "06:00", ["18:00"], "18:00"],
+    ["seis e meia", "06:30", ["18:30"], "18:30"],
+  ])(
+    "resolve a hora ambígua %s pelo contexto dos horários disponíveis",
+    (text, parsedTime, availableTimes, expected) => {
+      expect(
+        resolveAmbiguousTimeFromAvailableSlots(
+          text,
+          parsedTime,
+          availableTimes as string[],
+        ),
+      ).toBe(expected);
+    },
+  );
+
+  it.each([
+    ["seis horas", ["06:00", "18:00"]],
+    ["06:00", ["18:00"]],
+    ["6h", ["18:00"]],
+    ["seis horas da manhã", ["18:00"]],
+    ["seis horas", ["17:30"]],
+  ])(
+    "preserva 06:00 quando a expressão %s não permite inferir 18:00",
+    (text, availableTimes) => {
+      expect(
+        resolveAmbiguousTimeFromAvailableSlots(
+          text,
+          "06:00",
+          availableTimes as string[],
+        ),
+      ).toBe("06:00");
+    },
+  );
 
   it.each([
     ["pela manhã", "MORNING"],
