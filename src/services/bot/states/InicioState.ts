@@ -2,8 +2,11 @@ import { Op } from "sequelize";
 import { AppointmentModel } from "../../../models/Appointment";
 import { ClientModel } from "../../../models/Client";
 import { ServiceModel } from "../../../models/Service";
-import { BotChatSessionModel, BotSessionContext } from "../../../models/BotChatSession";
-import { NluResult } from "../../nlu.service";
+import type {
+  BotChatSessionModel,
+  BotSessionContext,
+} from "../../../models/BotChatSession";
+import type { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
 
 export class InicioState implements BotStateNode {
@@ -13,6 +16,59 @@ export class InicioState implements BotStateNode {
     session: BotChatSessionModel,
     userId: number
   ): Promise<HandlerResult> {
+    const ctx = (session.context ?? {}) as BotSessionContext;
+    const normalizedReply = userMessage
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim();
+
+    if (ctx.pendingPrompt === "OFFER_CREATE_AFTER_EMPTY_QUERY") {
+      const confirmed = /\b(sim|s|claro|quero|pode|vamos|bora|ok|beleza)\b/.test(
+        normalizedReply,
+      );
+      const denied = /\b(nao|n|agora nao|depois|cancelar|voltar)\b/.test(
+        normalizedReply,
+      );
+
+      if (confirmed) {
+        return {
+          reply:
+            "Ótimo! Qual serviço você gostaria de agendar? " +
+            "(Ex: corte de cabelo, pintura, limpeza...)",
+          nextState: "COLETANDO_SERVICO",
+          contextUpdate: {
+            intent: "AGENDAR",
+            pendingAction: "CREATE",
+            pendingPrompt: undefined,
+          },
+        };
+      }
+
+      if (denied) {
+        return {
+          reply:
+            "Tudo bem. Posso ajudá-lo a consultar seus agendamentos, " +
+            "cancelar, reagendar ou iniciar um agendamento quando desejar.",
+          nextState: "INICIO",
+          contextUpdate: {
+            intent: undefined,
+            pendingAction: undefined,
+            pendingPrompt: undefined,
+          },
+        };
+      }
+
+      if (nlu.intent === "FALLBACK") {
+        return {
+          reply:
+            'Deseja iniciar um agendamento? Responda com "sim" ou "não".',
+          nextState: "INICIO",
+          contextUpdate: {},
+        };
+      }
+    }
+
     switch (nlu.intent) {
       case "SAUDACAO":
         return {
@@ -88,7 +144,11 @@ export class InicioState implements BotStateNode {
           return {
             reply: "Você não possui agendamentos futuros. Deseja agendar um serviço?",
             nextState: "INICIO",
-            contextUpdate: {},
+            contextUpdate: {
+              intent: "CONSULTAR",
+              pendingAction: undefined,
+              pendingPrompt: "OFFER_CREATE_AFTER_EMPTY_QUERY",
+            },
           };
         }
         const lines = upcoming.map((a: any, i: number) => {
