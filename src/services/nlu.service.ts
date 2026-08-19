@@ -37,6 +37,8 @@ export interface NluEntities {
   time_period?: TimePeriod;
   professional?: string;
   appointment_id?: number;
+  /** Origem da entrada, por exemplo web, voice-web ou voice-mobile. */
+  input_channel?: string;
 }
 
 export interface NluResult {
