@@ -35,6 +35,7 @@ export interface BotSessionHistory {
     sender: "user" | "bot";
     content: string;
     intent: string | null;
+    entities: Record<string, unknown> | null;
     createdAt: Date;
   }>;
 }
@@ -129,7 +130,10 @@ export async function processMessage(
   const nlu = await analyzeMessage(trimmedMessage, ctx as Record<string, unknown>);
 
   // Persiste mensagem do usuário
-  await BotSessionManager.createMessage(session.id, "user", trimmedMessage, nlu.intent, nlu.entities as Record<string, unknown>);
+  await BotSessionManager.createMessage(session.id, "user", trimmedMessage, nlu.intent, {
+    ...nlu.entities,
+    input_channel: channel,
+  });
 
   // 3. Verifica redirecionamento explícito
   const isExplicitIntent = ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR"].includes(nlu.intent);
