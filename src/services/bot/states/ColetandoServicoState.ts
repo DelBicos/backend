@@ -15,6 +15,11 @@ import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
 import { normalizeText, calculateMatchScore, findBestOptionMatch } from "../../../utils/nlp.util";
 import { formatCurrency } from "../../../utils/format.util";
+import {
+  rankSemanticCandidates,
+  SemanticSearchUnavailableError,
+} from "../../semanticSearch.service";
+import logger from "../../../utils/logger";
 
 function buildServiceOption(service: any): BotServiceOption {
   const ratings = (service.Appointments ?? [])
@@ -230,16 +235,46 @@ export class ColetandoServicoState implements BotStateNode {
       ],
     });
 
-    const normalizedSearch = normalizeText(searchTerm);
-    const searchKeywords = normalizedSearch.split(" ").filter(w => w.length > 0);
-
-    const scoredServices = services
-      .map((svc: any) => {
-        const score = calculateMatchScore(svc, normalizedSearch, searchKeywords);
-        return { svc, score };
-      })
-      .filter(item => item.score > 0)
-      .sort((a, b) => b.score - a.score);
+    let scoredServices: Array<{ svc: any; score: number }>;
+    try {
+      const semanticHits = await rankSemanticCandidates(
+        searchTerm,
+        services.map((service: any) => ({
+          id: service.id,
+          text: [
+            service.title,
+            service.description,
+            service.Subcategory?.title,
+            service.Subcategory?.Category?.title,
+            service.Professional?.description,
+          ]
+            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            .join(". "),
+        })),
+        { limit: 100 },
+      );
+      const serviceById = new Map(services.map((service: any) => [service.id, service]));
+      scoredServices = semanticHits
+        .map((hit) => ({ svc: serviceById.get(hit.id), score: hit.score }))
+        .filter((item): item is { svc: any; score: number } => Boolean(item.svc));
+    } catch (error) {
+      // O chatbot permanece utilizável durante uma indisponibilidade transitória
+      // do modelo. O catálogo público informa explicitamente esse erro, mas este
+      // fallback evita interromper um agendamento já iniciado.
+      if (!(error instanceof SemanticSearchUnavailableError)) throw error;
+      logger.warn("Bot: busca semântica indisponível; usando compatibilidade textual", {
+        userId,
+      });
+      const normalizedSearch = normalizeText(searchTerm);
+      const searchKeywords = normalizedSearch.split(" ").filter((word) => word.length > 0);
+      scoredServices = services
+        .map((svc: any) => ({
+          svc,
+          score: calculateMatchScore(svc, normalizedSearch, searchKeywords),
+        }))
+        .filter((item) => item.score > 0)
+        .sort((left, right) => right.score - left.score);
+    }
 
     if (scoredServices.length === 0) {
       return {
