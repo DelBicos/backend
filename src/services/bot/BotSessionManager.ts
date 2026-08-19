@@ -207,6 +207,7 @@ export class BotSessionManager {
         sender: message.sender as "user" | "bot",
         content: message.content,
         intent: message.intent,
+        entities: message.entities,
         createdAt: message.createdAt,
       })),
     };
