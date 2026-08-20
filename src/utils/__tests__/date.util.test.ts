@@ -50,6 +50,17 @@ describe("parsePortugueseDate", () => {
     },
   );
 
+  it.each([
+    "duas e meia",
+    "duas e quinze",
+    "duas e quarenta e cinco",
+    "duas da tarde",
+    "seis horas",
+    "2:30",
+  ])("não interpreta a expressão de horário como data: %s", (text) => {
+    expect(parsePortugueseDate(text, options)).toBeNull();
+  });
+
   it("valida a antecedência de 48 horas pelo calendário local", () => {
     expect(isValidBookingDate("2026-08-06", options)).toBe(false);
     expect(isValidBookingDate("2026-08-07", options)).toBe(true);
@@ -59,13 +70,17 @@ describe("parsePortugueseDate", () => {
     "seleciona a data sugerida pelo dia contextual: %s",
     (text) => {
       const suggestions = ["2026-08-15", "2026-08-18", "2026-08-20"];
-      expect(selectSuggestedDateByWeekday(text, suggestions)).toBe("2026-08-18");
+      expect(selectSuggestedDateByWeekday(text, suggestions)).toBe(
+        "2026-08-18",
+      );
     },
   );
 
   it("não aplica a seleção contextual a expressões relativas ou dias não listados", () => {
     const suggestions = ["2026-08-15", "2026-08-18", "2026-08-20"];
-    expect(selectSuggestedDateByWeekday("próxima terça", suggestions)).toBeNull();
+    expect(
+      selectSuggestedDateByWeekday("próxima terça", suggestions),
+    ).toBeNull();
     expect(selectSuggestedDateByWeekday("sexta", suggestions)).toBeNull();
   });
 });
@@ -75,6 +90,7 @@ describe("parseTimeFromText", () => {
     ["14:30", "14:30"],
     ["14h30", "14:30"],
     ["duas e meia da tarde", "14:30"],
+    ["duas e quarenta e cinco", "02:45"],
     ["duas da tarde", "14:00"],
     ["seis horas", "06:00"],
     ["quinze pras três da tarde", "14:45"],
@@ -94,8 +110,39 @@ describe("parseTimeFromText", () => {
     ["seis horas", "06:00", ["09:00", "18:00"], "18:00"],
     ["às seis", "06:00", ["18:00"], "18:00"],
     ["seis e meia", "06:30", ["18:30"], "18:30"],
+    ["duas e meia", "02:30", ["09:00", "14:30"], "14:30"],
   ])(
     "resolve a hora ambígua %s pelo contexto dos horários disponíveis",
+    (text, parsedTime, availableTimes, expected) => {
+      expect(
+        resolveAmbiguousTimeFromAvailableSlots(
+          text,
+          parsedTime,
+          availableTimes as string[],
+        ),
+      ).toBe(expected);
+    },
+  );
+
+  it("entende duas e meia como 14:30 no contexto comercial, mesmo sem um slot exato", () => {
+    expect(
+      resolveAmbiguousTimeFromAvailableSlots("duas e meia", "02:30", [
+        "08:00",
+        "08:30",
+        "09:00",
+        "09:30",
+        "10:00",
+        "10:30",
+        "11:00",
+      ]),
+    ).toBe("14:30");
+  });
+
+  it.each([
+    ["duas e meia da manhã", "02:30", ["14:30"], "02:30"],
+    ["duas e meia da tarde", "14:30", ["02:30"], "14:30"],
+  ])(
+    "preserva o período explícito em %s",
     (text, parsedTime, availableTimes, expected) => {
       expect(
         resolveAmbiguousTimeFromAvailableSlots(
@@ -135,16 +182,24 @@ describe("parseTimeFromText", () => {
   });
 
   it("filtra horários usando faixas locais determinísticas", () => {
-    const slots = ["05:30", "08:00", "11:30", "12:00", "17:30", "18:00", "21:00"];
+    const slots = [
+      "05:30",
+      "08:00",
+      "11:30",
+      "12:00",
+      "17:30",
+      "18:00",
+      "21:00",
+    ];
     expect(filterTimesByPeriod(slots, "MORNING")).toEqual(["08:00", "11:30"]);
     expect(filterTimesByPeriod(slots, "AFTERNOON")).toEqual(["12:00", "17:30"]);
     expect(filterTimesByPeriod(slots, "EVENING")).toEqual(["18:00", "21:00"]);
   });
 
   it("converte o horário local de São Paulo para UTC", () => {
-    expect(parseLocalAppointmentStart("2026-08-13", "14:30").toISOString()).toBe(
-      "2026-08-13T17:30:00.000Z",
-    );
+    expect(
+      parseLocalAppointmentStart("2026-08-13", "14:30").toISOString(),
+    ).toBe("2026-08-13T17:30:00.000Z");
   });
 
   it("aceita somente identificadores IANA válidos para o fuso", () => {
