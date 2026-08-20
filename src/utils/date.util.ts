@@ -28,6 +28,7 @@ interface CalendarDate {
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 
 const NUMBER_WORDS: ReadonlyArray<readonly [string, number]> = [
+  ["quarenta e cinco", 45],
   ["trinta e um", 31],
   ["vinte e nove", 29],
   ["vinte e oito", 28],
@@ -137,10 +138,7 @@ function replaceNumberWords(text: string): string {
   return normalized;
 }
 
-function getCalendarDateInTimeZone(
-  date: Date,
-  timeZone: string,
-): CalendarDate {
+function getCalendarDateInTimeZone(date: Date, timeZone: string): CalendarDate {
   try {
     const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone,
@@ -149,7 +147,9 @@ function getCalendarDateInTimeZone(
       day: "2-digit",
     }).formatToParts(date);
     const values = Object.fromEntries(
-      parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]),
+      parts
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, part.value]),
     );
     return {
       year: Number(values.year),
@@ -164,7 +164,9 @@ function getCalendarDateInTimeZone(
       day: "2-digit",
     }).formatToParts(date);
     const values = Object.fromEntries(
-      fallback.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]),
+      fallback
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, part.value]),
     );
     return {
       year: Number(values.year),
@@ -192,11 +194,21 @@ function addCalendarDays(date: CalendarDate, days: number): CalendarDate {
 }
 
 function isValidCalendarDate(date: CalendarDate): boolean {
-  if (date.year < 1 || date.month < 1 || date.month > 12 || date.day < 1 || date.day > 31) {
+  if (
+    date.year < 1 ||
+    date.month < 1 ||
+    date.month > 12 ||
+    date.day < 1 ||
+    date.day > 31
+  ) {
     return false;
   }
   const parsed = fromCalendarTimestamp(toCalendarTimestamp(date));
-  return parsed.year === date.year && parsed.month === date.month && parsed.day === date.day;
+  return (
+    parsed.year === date.year &&
+    parsed.month === date.month &&
+    parsed.day === date.day
+  );
 }
 
 function formatIsoCalendarDate(date: CalendarDate): string {
@@ -243,8 +255,18 @@ function resolveDayOnly(day: number, today: CalendarDate): CalendarDate | null {
 export function formatDatePtBR(date: string): string {
   const [year, month, day] = date.split("-");
   const months = [
-    "jan", "fev", "mar", "abr", "mai", "jun",
-    "jul", "ago", "set", "out", "nov", "dez",
+    "jan",
+    "fev",
+    "mar",
+    "abr",
+    "mai",
+    "jun",
+    "jul",
+    "ago",
+    "set",
+    "out",
+    "nov",
+    "dez",
   ];
   return `${day}/${months[Number(month) - 1]}/${year}`;
 }
@@ -261,7 +283,9 @@ function timeZoneOffsetAt(date: Date, timeZone: string): number {
     hourCycle: "h23",
   }).formatToParts(date);
   const values = Object.fromEntries(
-    parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]),
+    parts
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value]),
   );
   const zonedTimestamp = Date.UTC(
     Number(values.year),
@@ -284,14 +308,15 @@ export function parseLocalAppointmentStart(
   const localTimestamp = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
 
   try {
-    let utcTimestamp = localTimestamp - timeZoneOffsetAt(new Date(localTimestamp), timeZone);
-    utcTimestamp = localTimestamp - timeZoneOffsetAt(new Date(utcTimestamp), timeZone);
+    let utcTimestamp =
+      localTimestamp - timeZoneOffsetAt(new Date(localTimestamp), timeZone);
+    utcTimestamp =
+      localTimestamp - timeZoneOffsetAt(new Date(utcTimestamp), timeZone);
     return new Date(utcTimestamp);
   } catch {
-    const utcTimestamp = localTimestamp - timeZoneOffsetAt(
-      new Date(localTimestamp),
-      DEFAULT_BOT_TIME_ZONE,
-    );
+    const utcTimestamp =
+      localTimestamp -
+      timeZoneOffsetAt(new Date(localTimestamp), DEFAULT_BOT_TIME_ZONE);
     return new Date(utcTimestamp);
   }
 }
@@ -362,7 +387,11 @@ export function isValidBookingDate(
 }
 
 function applyPeriodToHour(hour: number, period: TimePeriod | null): number {
-  if ((period === "AFTERNOON" || period === "EVENING") && hour >= 1 && hour <= 11) {
+  if (
+    (period === "AFTERNOON" || period === "EVENING") &&
+    hour >= 1 &&
+    hour <= 11
+  ) {
     return hour + 12;
   }
   if (period === "MORNING" && hour === 12) return 0;
@@ -371,13 +400,25 @@ function applyPeriodToHour(hour: number, period: TimePeriod | null): number {
 
 export function parseTimePeriodFromText(text: string): TimePeriod | null {
   const normalized = normalizePortugueseText(text);
-  if (/\b(?:de|da|pela|na)?\s*(?:manha|matutino|matutina|cedo|manhazinha)\b/.test(normalized)) {
+  if (
+    /\b(?:de|da|pela|na)?\s*(?:manha|matutino|matutina|cedo|manhazinha)\b/.test(
+      normalized,
+    )
+  ) {
     return "MORNING";
   }
-  if (/\b(?:de|da|pela|na|a)?\s*(?:tarde|vespertino|vespertina|fim da tarde)\b/.test(normalized)) {
+  if (
+    /\b(?:de|da|pela|na|a)?\s*(?:tarde|vespertino|vespertina|fim da tarde)\b/.test(
+      normalized,
+    )
+  ) {
     return "AFTERNOON";
   }
-  if (/\b(?:de|da|pela|na|a)?\s*(?:noite|noturno|noturna|anoitecer)\b/.test(normalized)) {
+  if (
+    /\b(?:de|da|pela|na|a)?\s*(?:noite|noturno|noturna|anoitecer)\b/.test(
+      normalized,
+    )
+  ) {
     return "EVENING";
   }
   return null;
@@ -429,7 +470,12 @@ export function parseTimeFromText(text: string): string | null {
   if (beforeHour) {
     const minutesBefore = Number(beforeHour[1]);
     let targetHour = applyPeriodToHour(Number(beforeHour[2]), period);
-    if (minutesBefore >= 1 && minutesBefore <= 59 && targetHour >= 0 && targetHour <= 23) {
+    if (
+      minutesBefore >= 1 &&
+      minutesBefore <= 59 &&
+      targetHour >= 0 &&
+      targetHour <= 23
+    ) {
       targetHour = (targetHour + 23) % 24;
       return `${String(targetHour).padStart(2, "0")}:${String(60 - minutesBefore).padStart(2, "0")}`;
     }
@@ -447,7 +493,7 @@ export function parseTimeFromText(text: string): string | null {
   }
 
   const hourWithMinutes = normalized.match(
-    /\b(?:as\s+|por\s+volta\s+d(?:e|as?)\s+)?(\d{1,2})\s+e\s+(meia|15|30|45|um quarto)\b/,
+    /\b(?:as\s+|por\s+volta\s+d(?:e|as?)\s+)?(\d{1,2})\s+e\s+(meia|um quarto|\d{1,2})\b/,
   );
   if (hourWithMinutes) {
     const minuteMap: Record<string, number> = {
@@ -458,8 +504,8 @@ export function parseTimeFromText(text: string): string | null {
       "um quarto": 15,
     };
     const hour = applyPeriodToHour(Number(hourWithMinutes[1]), period);
-    const minute = minuteMap[hourWithMinutes[2]];
-    if (hour >= 0 && hour <= 23) {
+    const minute = minuteMap[hourWithMinutes[2]] ?? Number(hourWithMinutes[2]);
+    if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
       return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
     }
   }
@@ -498,16 +544,20 @@ export function parseTimeFromText(text: string): string | null {
 }
 
 /**
- * Resolve uma hora em formato de 12 horas usando os horários já apresentados.
+ * Resolve uma hora em formato de 12 horas usando o período da conversa e os
+ * horários disponíveis no dia.
  *
  * Exemplo: "seis horas" é inicialmente 06:00. Se 06:00 não estiver na lista,
  * mas 18:00 estiver, o contexto permite interpretar a intenção como 18:00.
+ * Sem um equivalente exato, horas de 1 a 5 usam o período comercial mais
+ * provável (13:00 a 17:59), então "duas e meia" significa 14:30, e não 02:30.
  * Horários explícitos (06:00, 6h, AM/PM ou com período) nunca são alterados.
  */
 export function resolveAmbiguousTimeFromAvailableSlots(
   text: string,
   parsedTime: string,
   availableTimes: string[],
+  preferredPeriod?: TimePeriod | null,
 ): string {
   const timeMatch = parsedTime.match(/^(\d{1,2}):(\d{2})$/);
   if (!timeMatch) return parsedTime;
@@ -527,6 +577,14 @@ export function resolveAmbiguousTimeFromAvailableSlots(
     /\b\d{1,2}\s*(?:am|pm)\b/.test(normalized);
   if (hasExplicitClockFormat) return parsedTime;
 
+  const normalizedParsed = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  const afternoonEquivalent = `${String(hour + 12).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+
+  if (preferredPeriod === "AFTERNOON" || preferredPeriod === "EVENING") {
+    return afternoonEquivalent;
+  }
+  if (preferredPeriod === "MORNING") return normalizedParsed;
+
   const normalizeAvailableTime = (value: string): string | null => {
     const match = value.match(/^(\d{1,2}):(\d{2})/);
     if (!match) return null;
@@ -537,49 +595,69 @@ export function resolveAmbiguousTimeFromAvailableSlots(
       .map(normalizeAvailableTime)
       .filter((value): value is string => value !== null),
   );
-  const normalizedParsed =
-    `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  if (available.has(normalizedParsed)) return normalizedParsed;
+  const hasMorningEquivalent = available.has(normalizedParsed);
+  const hasAfternoonEquivalent = available.has(afternoonEquivalent);
+  if (hasMorningEquivalent !== hasAfternoonEquivalent) {
+    return hasAfternoonEquivalent ? afternoonEquivalent : normalizedParsed;
+  }
 
-  const eveningEquivalent =
-    `${String(hour + 12).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-  return available.has(eveningEquivalent) ? eveningEquivalent : parsedTime;
+  // Em conversas sobre atendimento, 01h–05h sem período quase sempre quer
+  // dizer 13h–17h. Isso também evita afirmar que o cliente pediu um horário
+  // de madrugada só porque o equivalente da tarde está indisponível.
+  if (hour <= 5) return afternoonEquivalent;
+
+  const availableHours = Array.from(available, (value) =>
+    Number(value.slice(0, 2)),
+  );
+  const hasMorningAvailability = availableHours.some((value) => value < 12);
+  const hasAfternoonAvailability = availableHours.some((value) => value >= 12);
+  if (hour >= 7 && !hasMorningAvailability && hasAfternoonAvailability) {
+    return afternoonEquivalent;
+  }
+
+  return normalizedParsed;
 }
 
 export function parsePortugueseDate(
   text: string,
   options: DateParseOptions = {},
 ): string | null {
-  const normalized = replaceNumberWords(normalizePortugueseText(text));
+  const normalizedOriginal = normalizePortugueseText(text);
+  const normalized = replaceNumberWords(normalizedOriginal);
   const today = getCalendarDateInTimeZone(
     options.now ?? new Date(),
     options.timeZone ?? DEFAULT_BOT_TIME_ZONE,
   );
 
-  const addDays = (days: number) => formatIsoCalendarDate(addCalendarDays(today, days));
+  const addDays = (days: number) =>
+    formatIsoCalendarDate(addCalendarDays(today, days));
 
-  if (/\b(?:depois|dps)\s+(?:de|d)\s+(?:amanha|amanh|amnh)\b/.test(normalized)) {
+  if (
+    /\b(?:depois|dps)\s+(?:de|d)\s+(?:amanha|amanh|amnh)\b/.test(normalized)
+  ) {
     return addDays(2);
   }
   if (/\b(?:amanha|amanh|amnh)\b/.test(normalized)) return addDays(1);
   if (/\b(?:hoje|hj)\b/.test(normalized)) return addDays(0);
 
   const nextWeekWeekdayMatch =
-    normalized.match(
-      /\b(?:proxima|prox)\.?\s+(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6])(?:\s*-?\s*feira)?\b/,
+    normalizedOriginal.match(
+      /\b(?:proxima|prox)\.?\s+(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\b/,
     ) ??
-    normalized.match(
-      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6])(?:\s*-?\s*feira)?\s+proxima\b/,
+    normalizedOriginal.match(
+      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\s+proxima\b/,
     ) ??
-    normalized.match(
-      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6])(?:\s*-?\s*feira)?\s+(?:da|de)\s+(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)\b/,
+    normalizedOriginal.match(
+      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\s+(?:da|de)\s+(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)\b/,
     ) ??
-    normalized.match(
-      /\b(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)(?:\s+(?:na|de))?\s+(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6])(?:\s*-?\s*feira)?\b/,
+    normalizedOriginal.match(
+      /\b(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)(?:\s+(?:na|de))?\s+(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\b/,
     );
-  const weekdayMatch = nextWeekWeekdayMatch ?? normalized.match(
-    /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6])(?:\s*-?\s*feira)?(?:\s+(?:que|q)\s+vem)?\b/,
-  );
+  const weekdayMatch =
+    nextWeekWeekdayMatch ??
+    normalizedOriginal.match(
+      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?(?:\s+(?:que|q)\s+vem)?\b/,
+    );
   if (weekdayMatch) {
     const targetWeekday = WEEKDAYS[weekdayMatch[1]];
     const currentWeekday = new Date(toCalendarTimestamp(today)).getUTCDay();
@@ -602,7 +680,9 @@ export function parsePortugueseDate(
       month: Number(isoMatch[2]),
       day: Number(isoMatch[3]),
     };
-    return isValidCalendarDate(candidate) ? formatIsoCalendarDate(candidate) : null;
+    return isValidCalendarDate(candidate)
+      ? formatIsoCalendarDate(candidate)
+      : null;
   }
 
   const numericMatch = normalized.match(
