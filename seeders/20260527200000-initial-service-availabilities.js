@@ -52,10 +52,10 @@ const INITIAL_SERVICE_SCHEDULES = [
   {
     email: "iago@delbicos.com.br",
     title: "Montagem de Móveis",
-    slots: [2, 4, 6].map((day) => ({
+    slots: [1, 2, 3, 4, 5, 6].map((day) => ({
       day,
       start: "08:00:00",
-      end: "13:00:00",
+      end: "19:00:00",
     })),
   },
   {

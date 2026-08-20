@@ -17,9 +17,9 @@ const PROFESSIONAL_SCENARIOS = [
     priceCents: 15000,
     duration: 90,
     availability: {
-      days: [1, 2, 3, 4, 5],
+      days: [1, 2, 3, 4, 5, 6],
       start: "08:00:00",
-      end: "18:00:00",
+      end: "19:00:00",
     },
     reviews: [
       {
