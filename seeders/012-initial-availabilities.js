@@ -37,7 +37,7 @@ const INITIAL_PROFESSIONAL_SCHEDULES = [
   },
   {
     email: "iago@delbicos.com.br",
-    rules: [{ days: "0010101", start: "08:00:00", end: "13:00:00" }],
+    rules: [{ days: "0111111", start: "08:00:00", end: "19:00:00" }],
   },
   {
     email: "lucas@delbicos.com.br",
