@@ -31,6 +31,41 @@ export interface BotServiceOption {
   ratingsCount: number;
 }
 
+/**
+ * Serviço lógico escolhido antes de revelar os profissionais disponíveis.
+ * Um mesmo serviço pode ser oferecido por vários profissionais e, portanto,
+ * corresponder a vários registros da tabela de serviços.
+ */
+export interface BotServiceChoice {
+  title: string;
+  description?: string | null;
+  subcategoryId: number;
+  subcategoryName: string;
+  categoryName?: string | null;
+  matchedServiceIds: number[];
+}
+
+export interface BotProfessionalOption {
+  index: number;
+  serviceId: number;
+  professionalId: number;
+  professionalName: string;
+  professionalAvatarUri?: string | null;
+  professionalRating?: number;
+  professionalRatingsCount?: number;
+  professionalCity?: string | null;
+  professionalState?: string | null;
+  price: number;
+  duration: number;
+  time: string;
+}
+
+/** Resumo exibido depois que o usuário escolhe o dia. */
+export interface BotDayProfessionalOption {
+  professionalId: number;
+  professionalName: string;
+}
+
 export interface BotSessionContext {
   intent?: string;
   pendingAction?: BotPendingAction;
@@ -51,11 +86,11 @@ export interface BotSessionContext {
   serviceSubcategoryId?: number;
   serviceSubcategoryName?: string;
   serviceCategoryName?: string | null;
-  date?: string;        // YYYY-MM-DD
-  time?: string;        // HH:MM
+  date?: string; // YYYY-MM-DD
+  time?: string; // HH:MM
   timePeriod?: TimePeriod;
-  newDate?: string;     // YYYY-MM-DD (para ALTERAR)
-  newTime?: string;     // HH:MM (para ALTERAR)
+  newDate?: string; // YYYY-MM-DD (para ALTERAR)
+  newTime?: string; // HH:MM (para ALTERAR)
   newTimePeriod?: TimePeriod;
   appointmentId?: number;
   appointmentStatus?: "pending" | "confirmed" | "completed" | "canceled";
@@ -63,6 +98,10 @@ export interface BotSessionContext {
   suggestedSlots?: string[];
   serviceOptions?: string[];
   serviceOptionsData?: BotServiceOption[];
+  serviceChoicesData?: BotServiceChoice[];
+  professionalOptionsData?: BotProfessionalOption[];
+  availableDayServiceIds?: number[];
+  availableDayProfessionals?: BotDayProfessionalOption[];
   pendingService?: BotServiceOption | null;
   matchedServiceIds?: number[];
   suggestedSlotsData?: Array<{
@@ -92,7 +131,13 @@ export interface IBotChatSession {
 
 type BotChatSessionCreationalAttributes = Optional<
   IBotChatSession,
-  "id" | "status" | "state" | "context" | "appointment_id" | "started_at" | "ended_at"
+  | "id"
+  | "status"
+  | "state"
+  | "context"
+  | "appointment_id"
+  | "started_at"
+  | "ended_at"
 >;
 
 export class BotChatSessionModel extends Model<
@@ -169,5 +214,5 @@ BotChatSessionModel.init(
     tableName: "bot_chat_session",
     underscored: true,
     timestamps: true,
-  }
+  },
 );
