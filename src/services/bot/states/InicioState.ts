@@ -97,7 +97,7 @@ export class InicioState implements BotStateNode {
         return {
           reply:
             nlu.entities.service
-              ? `Ótimo! Você quer agendar "${nlu.entities.service}". Aguarde enquanto busco os profissionais disponíveis...`
+              ? `Ótimo! Você quer agendar "${nlu.entities.service}". Vou localizar esse serviço...`
               : "Ótimo! Qual serviço você gostaria de agendar? (Ex: corte de cabelo, pintura, limpeza...)",
           nextState: "COLETANDO_SERVICO",
           contextUpdate: newCtx,
