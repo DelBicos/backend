@@ -1,10 +1,17 @@
-import { BotChatSessionModel, BotSessionContext, BotSessionState } from "../../models/BotChatSession";
+import {
+  BotChatSessionModel,
+  BotSessionContext,
+  BotSessionState,
+} from "../../models/BotChatSession";
 import { BotChatMessageModel } from "../../models/BotChatMessage";
 import { AppointmentModel } from "../../models/Appointment";
 import { BotState } from "../../constants/botStates";
-import { BotSessionHistory } from "../botConversation.service";
+import type { BotSessionHistory } from "../botConversation.service";
+import { migrateLegacyServiceOptions } from "./serviceChoice.helpers";
 
-const configuredSessionTtlHours = Number(process.env.BOT_SESSION_TTL_HOURS ?? 24);
+const configuredSessionTtlHours = Number(
+  process.env.BOT_SESSION_TTL_HOURS ?? 24,
+);
 const SESSION_TTL_MS =
   (Number.isFinite(configuredSessionTtlHours) && configuredSessionTtlHours > 0
     ? configuredSessionTtlHours
@@ -14,12 +21,45 @@ const SESSION_TTL_MS =
   1000;
 
 export class BotSessionManager {
-  private static isExpired(session: BotChatSessionModel): boolean {
-    const startedAt = new Date(session.started_at).getTime();
-    return Number.isFinite(startedAt) && Date.now() - startedAt > SESSION_TTL_MS;
+  private static async migrateLegacyContext(
+    session: BotChatSessionModel,
+  ): Promise<void> {
+    if (
+      session.status !== "active" ||
+      session.state !== BotState.COLETANDO_SERVICO
+    ) {
+      return;
+    }
+
+    const current = (session.context ?? {}) as BotSessionContext;
+    const migrated = migrateLegacyServiceOptions(current);
+    if (migrated !== current) {
+      session.context = migrated;
+      await session.save();
+
+      const choices = migrated.serviceChoicesData ?? [];
+      if (choices.length > 0) {
+        const prompt =
+          "Atualizei as opções para seguirmos na ordem correta. Escolha primeiro o tipo de serviço:\n\n" +
+          choices
+            .map((choice, index) => `${index + 1}. ${choice.title}`)
+            .join("\n") +
+          "\n\nDepois vou pedir o dia e o horário.";
+        await this.createMessage(session.id, "bot", prompt);
+      }
+    }
   }
 
-  private static async expireSession(session: BotChatSessionModel): Promise<void> {
+  private static isExpired(session: BotChatSessionModel): boolean {
+    const startedAt = new Date(session.started_at).getTime();
+    return (
+      Number.isFinite(startedAt) && Date.now() - startedAt > SESSION_TTL_MS
+    );
+  }
+
+  private static async expireSession(
+    session: BotChatSessionModel,
+  ): Promise<void> {
     session.status = "completed";
     session.ended_at = new Date();
     await session.save();
@@ -95,6 +135,7 @@ export class BotSessionManager {
       await session.save();
     }
 
+    await this.migrateLegacyContext(session);
     return session;
   }
 
@@ -105,7 +146,7 @@ export class BotSessionManager {
     session: BotChatSessionModel,
     state: BotSessionState,
     context: BotSessionContext,
-    appointmentId?: number | null
+    appointmentId?: number | null,
   ): Promise<void> {
     session.state = state;
     session.context = context;
@@ -123,7 +164,7 @@ export class BotSessionManager {
     sender: "user" | "bot",
     content: string,
     intent?: string | null,
-    entities?: Record<string, unknown>
+    entities?: Record<string, unknown>,
   ): Promise<void> {
     await BotChatMessageModel.create({
       session_id: sessionId,
@@ -151,6 +192,7 @@ export class BotSessionManager {
       return null;
     }
 
+    await this.migrateLegacyContext(session);
     return this.buildHistory(session);
   }
 
@@ -160,6 +202,7 @@ export class BotSessionManager {
   ): Promise<BotSessionHistory | null> {
     const session = await BotChatSessionModel.findByPk(sessionId);
     if (!session || session.user_id !== userId) return null;
+    await this.migrateLegacyContext(session);
     return this.buildHistory(session);
   }
 
