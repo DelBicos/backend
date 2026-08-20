@@ -9,11 +9,12 @@ import { ColetandoHorarioState } from "./states/ColetandoHorarioState";
 import { ConfirmacaoState } from "./states/ConfirmacaoState";
 import { AguardandoIdAgendamentoState } from "./states/AguardandoIdAgendamentoState";
 import { AguardandoConfirmacaoState } from "./states/AguardandoConfirmacaoState";
+import { SelecionandoProfissionalState } from "./states/SelecionandoProfissionalState";
 
 const stateNodes: Record<BotState, BotStateNode> = {
   [BotState.INICIO]: new InicioState(),
   [BotState.COLETANDO_SERVICO]: new ColetandoServicoState(),
-  [BotState.SELECIONANDO_PROFISSIONAL]: new ColetandoServicoState(),
+  [BotState.SELECIONANDO_PROFISSIONAL]: new SelecionandoProfissionalState(),
   [BotState.COLETANDO_DATA]: new ColetandoDataState(),
   [BotState.COLETANDO_HORARIO]: new ColetandoHorarioState(),
   [BotState.VERIFICANDO_DISPONIBILIDADE]: new ColetandoHorarioState(), // Roteia para horário
