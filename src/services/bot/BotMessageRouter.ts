@@ -10,7 +10,10 @@ import { ConfirmacaoState } from "./states/ConfirmacaoState";
 import { AguardandoIdAgendamentoState } from "./states/AguardandoIdAgendamentoState";
 import { AguardandoConfirmacaoState } from "./states/AguardandoConfirmacaoState";
 import { SelecionandoProfissionalState } from "./states/SelecionandoProfissionalState";
+<<<<<<< HEAD
 import { normalizeText } from "../../utils/nlp.util";
+=======
+>>>>>>> 654838d (feat: corrigir estado de seleção de profissional para usar a lógica correta)
 
 const stateNodes: Record<BotState, BotStateNode> = {
   [BotState.INICIO]: new InicioState(),
