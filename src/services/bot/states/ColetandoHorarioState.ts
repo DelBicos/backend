@@ -21,7 +21,10 @@ import {
 import { getAvailableSlots } from "../../availability.service";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
+<<<<<<< HEAD
 import { isAvailableTimesQuestion } from "../contextualMessage";
+=======
+>>>>>>> 6f3ae00 (feat: refatorar lógica de coleta de horários e serviços, incluindo suporte a opções de profissionais e melhorias na validação de horários)
 import { ColetandoDataState } from "./ColetandoDataState";
 import { buildConfirmationResponse } from "./stateHelpers";
 
@@ -235,11 +238,15 @@ export class ColetandoHorarioState implements BotStateNode {
     const requestedDate =
       nlu.entities.date ??
       parsePortugueseDate(userMessage, { timeZone: ctx.timeZone });
+<<<<<<< HEAD
     const availabilityQuestion = isAvailableTimesQuestion(userMessage);
     if (
       requestedDate &&
       (requestedDate !== date || (!time && !availabilityQuestion))
     ) {
+=======
+    if (requestedDate && (!time || requestedDate !== date)) {
+>>>>>>> 6f3ae00 (feat: refatorar lógica de coleta de horários e serviços, incluindo suporte a opções de profissionais e melhorias na validação de horários)
       // Trocar o dia deve repetir a validação de disponibilidade e mostrar
       // novamente quem atende naquela data antes de solicitar o horário. A
       // data tem precedência quando a mesma mensagem também contém uma hora.
@@ -248,6 +255,7 @@ export class ColetandoHorarioState implements BotStateNode {
 
     const matchingServices = await loadMatchingServices(ctx);
 
+<<<<<<< HEAD
     if (date && availabilityQuestion) {
       const availableTimes = new Set<string>();
       for (const service of matchingServices) {
@@ -285,6 +293,8 @@ export class ColetandoHorarioState implements BotStateNode {
       };
     }
 
+=======
+>>>>>>> 6f3ae00 (feat: refatorar lógica de coleta de horários e serviços, incluindo suporte a opções de profissionais e melhorias na validação de horários)
     if (!time) {
       const requestedPeriod =
         nlu.entities.time_period ?? parseTimePeriodFromText(userMessage);
