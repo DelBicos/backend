@@ -32,7 +32,9 @@ describe("analyzeMessage", () => {
     });
     (global as any).fetch = fetchMock;
 
-    const result = await analyzeMessage("Preciso de uma pintura amanhã às 14:30");
+    const result = await analyzeMessage(
+      "Preciso de uma pintura amanhã às 14:30",
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringMatching(/\/classify$/),
@@ -45,15 +47,22 @@ describe("analyzeMessage", () => {
     expect(result.entities.time).toBe("14:30");
   });
 
-  it("não chama o classificador para entradas estruturadas do fluxo", async () => {
-    const fetchMock = jest.fn();
-    (global as any).fetch = fetchMock;
+  it.each(["sim", "Confirmar!", "confirmo", "pode ser", "fechado", "aceito"])(
+    "não chama o classificador para a confirmação estruturada: %s",
+    async (message) => {
+      const fetchMock = jest.fn();
+      (global as any).fetch = fetchMock;
 
-    const result = await analyzeMessage("sim");
+      const result = await analyzeMessage(message);
 
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(result).toEqual({ intent: "FALLBACK", entities: {}, confidence: 1 });
-  });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        intent: "FALLBACK",
+        entities: {},
+        confidence: 1,
+      });
+    },
+  );
 
   it.each([
     ["quero agendar", "AGENDAR"],
@@ -62,21 +71,26 @@ describe("analyzeMessage", () => {
     ["quero trocar o horário", "ALTERAR"],
     ["mostrar meus agendamentos", "CONSULTAR"],
     ["olá", "SAUDACAO"],
-  ])("classifica pelo SVM e valida por regra o comando inequívoco: %s", async (message, intent) => {
-    const fetchMock = mockClassifier(intent);
+    ["Ol", "SAUDACAO"],
+    ["oi", "SAUDACAO"],
+  ])(
+    "classifica pelo SVM e valida por regra o comando inequívoco: %s",
+    async (message, intent) => {
+      const fetchMock = mockClassifier(intent);
 
-    const result = await analyzeMessage(message);
+      const result = await analyzeMessage(message);
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringMatching(/\/classify$/),
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ text: message }),
-      }),
-    );
-    expect(result.intent).toBe(intent);
-    expect(result.confidence).toBe(0.92);
-  });
+      expect(fetchMock).toHaveBeenCalledWith(
+        expect.stringMatching(/\/classify$/),
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ text: message }),
+        }),
+      );
+      expect(result.intent).toBe(intent);
+      expect(result.confidence).toBe(0.92);
+    },
+  );
 
   it("usa a regra como override após consultar o SVM", async () => {
     const fetchMock = mockClassifier("FALLBACK", 0.4);
@@ -88,14 +102,131 @@ describe("analyzeMessage", () => {
     expect(result.confidence).toBe(1);
   });
 
+  it.each([
+    "quero agenda",
+    "eu queria agenda",
+    "gostaria de agenda",
+    "quero ageda",
+    "quero agedar",
+    "quero ajendar",
+    "quero agendr",
+    "quero fazer um agendamento",
+  ])(
+    "tolera flexão ou erro simples ao pedir agendamento: %s",
+    async (message) => {
+      mockClassifier("FALLBACK", 0.4);
+
+      const result = await analyzeMessage(message);
+
+      expect(result.intent).toBe("AGENDAR");
+      expect(result.confidence).toBe(1);
+      expect(result.entities.service).toBeUndefined();
+    },
+  );
+
+  it.each([
+    ["quero agenda limpeza", "limpeza"],
+    ["quero ageda montagem de móveis", "montagem de móveis"],
+    ["quero fazer um agendamento de pintura", "pintura"],
+  ])("separa a ação digitada do serviço: %s", async (message, service) => {
+    mockClassifier("FALLBACK", 0.4);
+
+    const result = await analyzeMessage(message);
+
+    expect(result.intent).toBe("AGENDAR");
+    expect(result.entities.service).toBe(service);
+  });
+
+  it.each([
+    "quero ver minha agenda",
+    "consultar agenda",
+    "mostre minha agenda",
+    "quero consultar agendamento",
+    "quero consultar um agendamento",
+    "quero conferir um agendamento",
+    "quero acompanhar meu agendamento",
+  ])("mantém pedidos de consulta fora de AGENDAR: %s", async (message) => {
+    mockClassifier("FALLBACK", 0.4);
+
+    const result = await analyzeMessage(message);
+
+    expect(result.intent).toBe("CONSULTAR");
+  });
+
+  it.each(["quero atender agora", "a agenda cultural foi publicada"])(
+    "não aplica correção aproximada fora de um pedido de agendamento: %s",
+    async (message) => {
+      mockClassifier("FALLBACK", 0.4);
+
+      const result = await analyzeMessage(message);
+
+      expect(result.intent).toBe("FALLBACK");
+    },
+  );
+
+  it.each([
+    ["quero agendar limpeza na minha agenda", "limpeza"],
+    ["quero agendar minha agenda", undefined],
+    ["quero agenda para amanhã", undefined],
+    ["quero um agendamento de limpeza", "limpeza"],
+    ["quero novo agendamento", undefined],
+    ["quero fazer um novo agendamento", undefined],
+    ["quero iniciar um novo agendamento", undefined],
+    ["quero marcar limpeza na agenda", "limpeza"],
+    ["oi quero agenda", undefined],
+    ["olá, quero agenda pintura", "pintura"],
+  ])(
+    "prioriza a ação e limpa qualificadores/preposições: %s",
+    async (message, service) => {
+      mockClassifier("FALLBACK", 0.4);
+
+      const result = await analyzeMessage(message);
+
+      expect(result.intent).toBe("AGENDAR");
+      expect(result.entities.service).toBe(service);
+    },
+  );
+
+  it("usa a correção de português mesmo sem o classificador", async () => {
+    (global as any).fetch = jest
+      .fn()
+      .mockRejectedValue(new Error("connection refused"));
+
+    const result = await analyzeMessage("quero agenda");
+
+    expect(result).toEqual({
+      intent: "AGENDAR",
+      entities: {},
+      confidence: 1,
+    });
+  });
+
+  it.each(["Ol", "oi", "Oi!"])(
+    "corrige pelo padrão explícito a saudação curta: %s",
+    async (message) => {
+      mockClassifier("FALLBACK", 0.4);
+
+      const result = await analyzeMessage(message);
+
+      expect(result.intent).toBe("SAUDACAO");
+      expect(result.confidence).toBe(1);
+    },
+  );
+
   it("usa a regra como contingência quando o classificador está indisponível", async () => {
-    const fetchMock = jest.fn().mockRejectedValue(new Error("connection refused"));
+    const fetchMock = jest
+      .fn()
+      .mockRejectedValue(new Error("connection refused"));
     (global as any).fetch = fetchMock;
 
     const result = await analyzeMessage("mostrar meus agendamentos");
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ intent: "CONSULTAR", entities: {}, confidence: 1 });
+    expect(result).toEqual({
+      intent: "CONSULTAR",
+      entities: {},
+      confidence: 1,
+    });
   });
 
   it("não interpreta o verbo agendar como nome de serviço", async () => {
@@ -106,6 +237,27 @@ describe("analyzeMessage", () => {
     expect(result.intent).toBe("AGENDAR");
     expect(result.entities.service).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["quero agendar,", "quero agendar,&#x20;"])(
+    "não interpreta espaço ou entidade HTML como serviço: %s",
+    async (message) => {
+      mockClassifier("AGENDAR");
+
+      const result = await analyzeMessage(message);
+
+      expect(result.intent).toBe("AGENDAR");
+      expect(result.entities.service).toBeUndefined();
+    },
+  );
+
+  it("não interpreta uma resposta de data como nome de serviço", async () => {
+    mockClassifier("AGENDAR");
+
+    const result = await analyzeMessage("quero segunda");
+
+    expect(result.intent).toBe("AGENDAR");
+    expect(result.entities.service).toBeUndefined();
   });
 
   it("extrai data por extenso e período sem confundir com o serviço", async () => {
@@ -138,6 +290,17 @@ describe("analyzeMessage", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it('extrai "duas e meia" como horário sem inventar uma data', async () => {
+    const fetchMock = mockClassifier("AGENDAR");
+
+    const result = await analyzeMessage("duas e meia");
+
+    expect(result.entities.time).toBe("02:30");
+    expect(result.entities.date).toBeUndefined();
+    expect(result.entities.service).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     "reiniciar",
     "recomeçar",
@@ -157,6 +320,10 @@ describe("analyzeMessage", () => {
 
     const result = await analyzeMessage("pode me ajudar");
 
-    expect(result).toEqual({ intent: "FALLBACK", entities: {}, confidence: 0.9 });
+    expect(result).toEqual({
+      intent: "FALLBACK",
+      entities: {},
+      confidence: 0.9,
+    });
   });
 });
