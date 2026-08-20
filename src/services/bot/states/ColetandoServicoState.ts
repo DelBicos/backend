@@ -8,24 +8,33 @@ import { UserModel } from "../../../models/User";
 import { AddressModel } from "../../../models/Address";
 import {
   BotChatSessionModel,
+  BotServiceChoice,
   BotServiceOption,
   BotSessionContext,
 } from "../../../models/BotChatSession";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
-import { normalizeText, calculateMatchScore, findBestOptionMatch } from "../../../utils/nlp.util";
-import { formatCurrency } from "../../../utils/format.util";
+import {
+  normalizeText,
+  calculateMatchScore,
+  findBestOptionMatch,
+} from "../../../utils/nlp.util";
 import {
   rankSemanticCandidates,
   SemanticSearchUnavailableError,
 } from "../../semanticSearch.service";
 import logger from "../../../utils/logger";
+import {
+  groupServiceOptions,
+  migrateLegacyServiceOptions,
+} from "../serviceChoice.helpers";
 
 function buildServiceOption(service: any): BotServiceOption {
   const ratings = (service.Appointments ?? [])
     .map((appointment: AppointmentModel) => appointment.rating)
-    .filter((rating: number | null | undefined): rating is number =>
-      typeof rating === "number",
+    .filter(
+      (rating: number | null | undefined): rating is number =>
+        typeof rating === "number",
     );
 
   return {
@@ -41,8 +50,7 @@ function buildServiceOption(service: any): BotServiceOption {
     professionalDescription: service.Professional?.description ?? null,
     professionalCity: service.Professional?.MainAddress?.city ?? null,
     professionalState: service.Professional?.MainAddress?.state ?? null,
-    price:
-      service.price_cents ?? Math.round(Number(service.price) * 100),
+    price: service.price_cents ?? Math.round(Number(service.price) * 100),
     duration: service.duration,
     rating:
       ratings.length > 0
@@ -59,63 +67,53 @@ function buildServiceOption(service: any): BotServiceOption {
   };
 }
 
-function selectionResponse(option: BotServiceOption): HandlerResult {
-  const subcategoryName = option.subcategoryName ?? "Não informada";
-  const rating =
-    option.ratingsCount > 0
-      ? `${option.rating.toFixed(1)} de 5 (${option.ratingsCount} ${
-          option.ratingsCount === 1 ? "avaliação" : "avaliações"
-        })`
-      : "ainda sem avaliações neste serviço";
-
+function serviceChoiceResponse(choice: BotServiceChoice): HandlerResult {
   return {
     reply:
-      `Você escolheu "${option.title}" com ${option.professionalName}.\n\n` +
-      `Subcategoria: ${subcategoryName}\n` +
-      `Avaliação neste serviço: ${rating}\n` +
-      `Valor: ${formatCurrency(option.price, undefined)}\n` +
-      `Duração: ${option.duration} minutos\n\n` +
-      "Agora informe a data desejada (ex.: 13/08, dia 13, 13 de agosto ou \"próxima segunda\").",
+      `Perfeito! Vamos agendar "${choice.title}".\n\n` +
+      "Para qual dia você quer o serviço? " +
+      '(Ex.: 13/08, dia 13, 13 de agosto ou "próxima segunda")',
     nextState: "COLETANDO_DATA",
     contextUpdate: {
-      serviceId: option.id,
-      serviceName: option.title,
-      serviceDescription: option.description,
-      serviceSubcategoryId: option.subcategoryId,
-      serviceSubcategoryName: subcategoryName,
-      serviceCategoryName: option.categoryName,
-      servicePrice: option.price,
-      serviceDuration: option.duration,
-      professionalId: option.professionalId,
-      professionalName: option.professionalName,
-      professionalAvatarUri: option.professionalAvatarUri,
-      professionalRating: option.rating,
-      professionalRatingsCount: option.ratingsCount,
-      professionalCity: option.professionalCity,
-      professionalState: option.professionalState,
-      matchedServiceIds: [option.id],
+      serviceId: undefined,
+      serviceName: choice.title,
+      serviceDescription: choice.description,
+      serviceSubcategoryId: choice.subcategoryId,
+      serviceSubcategoryName: choice.subcategoryName,
+      serviceCategoryName: choice.categoryName,
+      servicePrice: undefined,
+      serviceDuration: undefined,
+      professionalId: undefined,
+      professionalName: undefined,
+      professionalAvatarUri: undefined,
+      professionalRating: undefined,
+      professionalRatingsCount: undefined,
+      professionalCity: undefined,
+      professionalState: undefined,
+      matchedServiceIds: choice.matchedServiceIds,
       pendingService: null,
       serviceOptions: undefined,
       serviceOptionsData: undefined,
+      serviceChoicesData: undefined,
+      suggestedSlots: undefined,
+      suggestedSlotsData: undefined,
+      availableDayServiceIds: undefined,
+      availableDayProfessionals: undefined,
+      date: undefined,
+      time: undefined,
+      timePeriod: undefined,
+      newDate: undefined,
+      newTime: undefined,
+      newTimePeriod: undefined,
     },
   };
 }
 
-function optionSummary(option: BotServiceOption, index: number): string {
-  const rating =
-    option.ratingsCount > 0
-      ? `⭐ ${option.rating.toFixed(1)} (${option.ratingsCount})`
-      : "Novo neste serviço";
-  const location =
-    option.professionalCity && option.professionalState
-      ? ` • ${option.professionalCity}/${option.professionalState}`
-      : "";
-
-  return (
-    `${index + 1}. ${option.professionalName} — ${option.title}\n` +
-    `   ${option.subcategoryName} • ${formatCurrency(option.price, undefined)} • ` +
-    `${option.duration} min • ${rating}${location}`
-  );
+function serviceChoiceSummary(choice: BotServiceChoice, index: number): string {
+  const category = [choice.categoryName, choice.subcategoryName]
+    .filter(Boolean)
+    .join(" › ");
+  return `${index + 1}. ${choice.title}${category ? ` — ${category}` : ""}`;
 }
 
 export class ColetandoServicoState implements BotStateNode {
@@ -123,14 +121,18 @@ export class ColetandoServicoState implements BotStateNode {
     userMessage: string,
     nlu: NluResult,
     session: BotChatSessionModel,
-    userId: number
+    userId: number,
   ): Promise<HandlerResult> {
-    const ctx = (session.context ?? {}) as BotSessionContext;
+    const ctx = migrateLegacyServiceOptions(
+      (session.context ?? {}) as BotSessionContext,
+    );
 
     // 1. Se estamos aguardando confirmação do serviço selecionado
     if (ctx.pendingService) {
       const lower = userMessage.toLowerCase().trim();
-      const confirmed = /\b(sim|s|yes|confirmar|confirmo|ok|pode|vamos)\b/.test(lower);
+      const confirmed = /\b(sim|s|yes|confirmar|confirmo|ok|pode|vamos)\b/.test(
+        lower,
+      );
       const denied = /\b(n[aã]o|nao|no|cancelar|desistir|voltar)\b/.test(lower);
 
       if (!confirmed && !denied) {
@@ -146,7 +148,8 @@ export class ColetandoServicoState implements BotStateNode {
 
       if (denied) {
         return {
-          reply: "Ok, escolha cancelada. Qual serviço você gostaria de agendar? (Ex: corte de cabelo, pintura, limpeza...)",
+          reply:
+            "Ok, escolha cancelada. Qual serviço você gostaria de agendar? (Ex: corte de cabelo, pintura, limpeza...)",
           nextState: "COLETANDO_SERVICO",
           contextUpdate: {
             pendingService: null,
@@ -156,41 +159,41 @@ export class ColetandoServicoState implements BotStateNode {
         };
       }
 
-      return selectionResponse(ctx.pendingService);
+      return serviceChoiceResponse({
+        title: ctx.pendingService.title,
+        description: ctx.pendingService.description,
+        subcategoryId: ctx.pendingService.subcategoryId,
+        subcategoryName: ctx.pendingService.subcategoryName,
+        categoryName: ctx.pendingService.categoryName,
+        matchedServiceIds: [ctx.pendingService.id],
+      });
     }
 
-    // 2. Se há opções listadas, tenta selecionar por número ou por correspondência de texto
-    if (ctx.serviceOptionsData && ctx.serviceOptionsData.length > 0) {
+    // 2. Escolhe primeiro o tipo de serviço, sem antecipar a lista de profissionais.
+    if (ctx.serviceChoicesData && ctx.serviceChoicesData.length > 0) {
       const choice = parseInt(userMessage.trim(), 10);
-      let picked = null;
-      
-      if (!isNaN(choice) && choice >= 1 && choice <= ctx.serviceOptionsData.length) {
-        picked = ctx.serviceOptionsData[choice - 1];
-      } else {
-        // Tenta correspondência textual (ex: "Serv geral" correspondendo a "Serviços Gerais")
-        picked = findBestOptionMatch(userMessage, ctx.serviceOptionsData);
-        if (!picked) {
-          const normalizedInput = normalizeText(userMessage);
-          picked =
-            ctx.serviceOptionsData.find((option) => {
-              const professionalName = normalizeText(option.professionalName);
-              return (
-                professionalName === normalizedInput ||
-                professionalName.includes(normalizedInput) ||
-                normalizedInput.includes(professionalName)
-              );
-            }) ?? null;
-        }
-      }
+      const picked =
+        !isNaN(choice) && choice >= 1 && choice <= ctx.serviceChoicesData.length
+          ? ctx.serviceChoicesData[choice - 1]
+          : findBestOptionMatch(userMessage, ctx.serviceChoicesData);
 
-      if (picked) return selectionResponse(picked);
+      if (picked) return serviceChoiceResponse(picked);
+
+      return {
+        reply:
+          "Não identifiquei essa opção. Escolha um dos serviços pelo número ou pelo nome:\n\n" +
+          ctx.serviceChoicesData.map(serviceChoiceSummary).join("\n"),
+        nextState: "COLETANDO_SERVICO",
+        contextUpdate: {},
+      };
     }
 
     // 3. Caso contrário, faz a busca pelo termo
     const searchTerm = nlu.entities.service ?? userMessage.trim();
     if (!searchTerm) {
       return {
-        reply: "Por favor, informe o nome ou tipo de serviço que deseja agendar.",
+        reply:
+          "Por favor, informe o nome ou tipo de serviço que deseja agendar.",
         nextState: "COLETANDO_SERVICO",
         contextUpdate: {},
       };
@@ -248,25 +251,37 @@ export class ColetandoServicoState implements BotStateNode {
             service.Subcategory?.Category?.title,
             service.Professional?.description,
           ]
-            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            .filter(
+              (value): value is string =>
+                typeof value === "string" && value.trim().length > 0,
+            )
             .join(". "),
         })),
         { limit: 100 },
       );
-      const serviceById = new Map(services.map((service: any) => [service.id, service]));
+      const serviceById = new Map(
+        services.map((service: any) => [service.id, service]),
+      );
       scoredServices = semanticHits
         .map((hit) => ({ svc: serviceById.get(hit.id), score: hit.score }))
-        .filter((item): item is { svc: any; score: number } => Boolean(item.svc));
+        .filter((item): item is { svc: any; score: number } =>
+          Boolean(item.svc),
+        );
     } catch (error) {
       // O chatbot permanece utilizável durante uma indisponibilidade transitória
       // do modelo. O catálogo público informa explicitamente esse erro, mas este
       // fallback evita interromper um agendamento já iniciado.
       if (!(error instanceof SemanticSearchUnavailableError)) throw error;
-      logger.warn("Bot: busca semântica indisponível; usando compatibilidade textual", {
-        userId,
-      });
+      logger.warn(
+        "Bot: busca semântica indisponível; usando compatibilidade textual",
+        {
+          userId,
+        },
+      );
       const normalizedSearch = normalizeText(searchTerm);
-      const searchKeywords = normalizedSearch.split(" ").filter((word) => word.length > 0);
+      const searchKeywords = normalizedSearch
+        .split(" ")
+        .filter((word) => word.length > 0);
       scoredServices = services
         .map((svc: any) => ({
           svc,
@@ -288,29 +303,26 @@ export class ColetandoServicoState implements BotStateNode {
     }
 
     const options = scoredServices.map(({ svc }) => buildServiceOption(svc));
-    const distinctServices = new Set(
-      options.map(
-        (option) => `${option.title}|${option.subcategoryName}`,
-      ),
+    const choices = groupServiceOptions(options).slice(0, 6);
+    const normalizedSearchTerm = normalizeText(searchTerm);
+    const exactChoice = choices.find(
+      (choice) => normalizeText(choice.title) === normalizedSearchTerm,
     );
-    const heading =
-      distinctServices.size === 1
-        ? `Encontrei ${options.length} ${
-            options.length === 1 ? "profissional" : "profissionais"
-          } para "${options[0].title}", na subcategoria "${options[0].subcategoryName}".`
-        : `Encontrei ${options.length} opções relacionadas a "${searchTerm}".`;
+
+    if (exactChoice || choices.length === 1) {
+      return serviceChoiceResponse(exactChoice ?? choices[0]);
+    }
 
     return {
       reply:
-        `${heading}\n\n` +
-        `${options.map(optionSummary).join("\n\n")}\n\n` +
-        "Escolha uma opção pelo cartão ou envie o número do profissional.",
+        `Encontrei estes tipos de serviço relacionados a "${searchTerm}":\n\n` +
+        `${choices.map(serviceChoiceSummary).join("\n")}\n\n` +
+        "Qual deles você quer agendar? Envie o número ou o nome do serviço.",
       nextState: "COLETANDO_SERVICO",
       contextUpdate: {
-        serviceOptions: options.map(
-          (option) => `${option.title} — ${option.professionalName}`,
-        ),
-        serviceOptionsData: options,
+        serviceOptions: choices.map((choice) => choice.title),
+        serviceOptionsData: undefined,
+        serviceChoicesData: choices,
         pendingService: null,
       },
     };
