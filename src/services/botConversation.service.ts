@@ -5,6 +5,8 @@ import { BotMessageRouter } from "./bot/BotMessageRouter";
 import { BotState } from "../constants/botStates";
 import { logError } from "../utils/logger";
 import { resolveBotTimeZone } from "../utils/date.util";
+import { buildGreetingReply } from "./bot/greetingReply";
+import { normalizeText } from "../utils/nlp.util";
 
 export interface BotMessageResponse {
   sessionId: number;
@@ -101,7 +103,9 @@ export async function processMessage(
         suggestedSlots: undefined,
       };
 
-      const replyText = `Entendido. Vamos escolher outro profissional. Aqui estão os profissionais disponíveis:\n\n${result.reply}`;
+      const replyText =
+        "Entendido. Vamos procurar outro profissional para esse serviço.\n\n" +
+        result.reply;
       await BotSessionManager.saveSession(session, result.nextState, mergedContext);
       await BotSessionManager.createMessage(session.id, "bot", replyText);
 
@@ -135,14 +139,46 @@ export async function processMessage(
     input_channel: channel,
   });
 
+  // Saudações são globais: elas nunca devem ser interpretadas como nome de
+  // serviço nem apagar um agendamento parcialmente preenchido.
+  if (nlu.intent === "SAUDACAO") {
+    const replyText = buildGreetingReply(session.state, ctx);
+    await BotSessionManager.saveSession(session, session.state, ctx);
+    await BotSessionManager.createMessage(session.id, "bot", replyText);
+
+    return {
+      sessionId: session.id,
+      message: replyText,
+      state: session.state,
+      context: ctx,
+    };
+  }
+
   // 3. Verifica redirecionamento explícito
   const isExplicitIntent = ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR"].includes(nlu.intent);
   let shouldRedirectToInicio = false;
   if (isExplicitIntent) {
     if (nlu.intent === "AGENDAR") {
-      if (!nlu.entities.service || session.state !== BotState.COLETANDO_SERVICO || ctx.pendingService) {
-        shouldRedirectToInicio = true;
-      }
+      const schedulingStates: BotSessionState[] = [
+        BotState.COLETANDO_SERVICO,
+        BotState.COLETANDO_DATA,
+        BotState.COLETANDO_HORARIO,
+        BotState.SELECIONANDO_PROFISSIONAL,
+        BotState.CONFIRMACAO,
+      ];
+      const isContinuingCurrentBooking =
+        ctx.pendingAction === "CREATE" && schedulingStates.includes(session.state);
+      const requestedService = nlu.entities.service
+        ? normalizeText(nlu.entities.service)
+        : "";
+      const currentService = ctx.serviceName ? normalizeText(ctx.serviceName) : "";
+      const requestsDifferentService =
+        requestedService.length > 0 &&
+        (currentService.length === 0 ||
+          (!currentService.includes(requestedService) &&
+            !requestedService.includes(currentService)));
+      shouldRedirectToInicio =
+        !isContinuingCurrentBooking || requestsDifferentService;
     } else {
       // Cancelar, alterar ou consultar representam uma nova ação explícita;
       // portanto também interrompem confirmações e pedidos de ID anteriores.
