@@ -5,13 +5,50 @@ import {
 } from "../../models/BotChatSession";
 import { normalizeText } from "../../utils/nlp.util";
 
+const SERVICE_TOKEN_CANONICAL_FORMS = new Map<string, string>([
+  ["ambientes", "ambiente"],
+  ["armarios", "armario"],
+  ["azulejos", "azulejo"],
+  ["disjuntores", "disjuntor"],
+  ["fechaduras", "fechadura"],
+  ["jardins", "jardim"],
+  ["maos", "mao"],
+  ["moveis", "movel"],
+  ["muros", "muro"],
+  ["pes", "pe"],
+  ["pias", "pia"],
+  ["profissionais", "profissional"],
+  ["servicos", "servico"],
+  ["tomadas", "tomada"],
+  ["unhas", "unha"],
+  ["vazamentos", "vazamento"],
+  ["ventiladores", "ventilador"],
+  ["vidros", "vidro"],
+]);
+
+/**
+ * Canonicalização deliberadamente limitada ao vocabulário do catálogo.
+ * Evita uma regra genérica de plural que corromperia palavras como gás e pés.
+ */
+export function canonicalizeServiceToken(token: string): string {
+  return SERVICE_TOKEN_CANONICAL_FORMS.get(token) ?? token;
+}
+
+export function normalizeServiceChoiceTitleKey(title: string): string {
+  return normalizeText(title)
+    .split(" ")
+    .filter(Boolean)
+    .map(canonicalizeServiceToken)
+    .join(" ");
+}
+
 export function groupServiceOptions(
   options: BotServiceOption[],
 ): BotServiceChoice[] {
   const groups = new Map<string, BotServiceChoice>();
 
   for (const option of options) {
-    const key = `${normalizeText(option.title)}|${option.subcategoryId}`;
+    const key = `${normalizeServiceChoiceTitleKey(option.title)}|${option.subcategoryId}`;
     const current = groups.get(key);
     if (current) {
       if (!current.matchedServiceIds.includes(option.id)) {
