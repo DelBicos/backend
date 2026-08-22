@@ -1,6 +1,7 @@
 import { Router } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import authMiddleware from "../middlewares/auth.middleware";
+import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 import {
   getChatMessages,
   getChatRooms,
@@ -18,12 +19,19 @@ import {
  * Keyed pelo user ID (req.user.id) para isolar por conta, não por IP.
  */
 const botMessageRateLimit = rateLimit({
-  windowMs: 60 * 1000,           // janela de 1 minuto
-  max: 30,                        // máx 30 mensagens/min por usuário
-  keyGenerator: (req: any) => String(req.user?.id ?? req.ip),
-  standardHeaders: true,          // expõe RateLimit-* headers
+  windowMs: 60 * 1000, // janela de 1 minuto
+  max: 30, // máx 30 mensagens/min por usuário
+  keyGenerator: (req) => {
+    const userId = (req as AuthenticatedRequest).user?.id;
+    return userId != null
+      ? `user:${userId}`
+      : `ip:${ipKeyGenerator(req.ip ?? "")}`;
+  },
+  standardHeaders: true, // expõe RateLimit-* headers
   legacyHeaders: false,
-  message: { error: "Muitas mensagens enviadas. Aguarde um momento antes de continuar." },
+  message: {
+    error: "Muitas mensagens enviadas. Aguarde um momento antes de continuar.",
+  },
   skipFailedRequests: false,
 });
 
@@ -239,15 +247,28 @@ chatRouter.get("/rooms/:roomId/messages", authMiddleware, getChatMessages);
  * @access  Private
  * @body    { message: string, session_id?: number, channel?: string }
  */
-chatRouter.post("/bot/message", authMiddleware, botMessageRateLimit, sendBotMessage as any);
+chatRouter.post(
+  "/bot/message",
+  authMiddleware,
+  botMessageRateLimit,
+  sendBotMessage as any,
+);
 
 /**
  * @route   GET /api/chat/bot/session/:id
  * @desc    Retorna o histórico completo de uma sessão de chatbot
  * @access  Private
  */
-chatRouter.get("/bot/session/active", authMiddleware, getActiveBotSession as any);
-chatRouter.get("/bot/appointments/:id/status", authMiddleware, getBotAppointmentStatus as any);
+chatRouter.get(
+  "/bot/session/active",
+  authMiddleware,
+  getActiveBotSession as any,
+);
+chatRouter.get(
+  "/bot/appointments/:id/status",
+  authMiddleware,
+  getBotAppointmentStatus as any,
+);
 chatRouter.get("/bot/session/:id", authMiddleware, getBotSession as any);
 
 export default chatRouter;
