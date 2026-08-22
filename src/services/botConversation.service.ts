@@ -26,7 +26,8 @@ export interface BotSessionHistory {
     started_at: Date;
     ended_at: Date | null;
     appointment_id: number | null;
-    appointment_status: "pending" | "confirmed" | "completed" | "canceled" | null;
+    appointment_status:
+      "pending" | "confirmed" | "completed" | "canceled" | null;
     appointment_paid: boolean;
     payment_pending: boolean;
     waiting_for_professional: boolean;
@@ -52,15 +53,24 @@ export async function processMessage(
   timeZone?: string,
 ): Promise<BotMessageResponse> {
   // 1. Carregar ou criar sessão
-  let session = await BotSessionManager.getOrCreateSession(userId, authSessionId, channel, sessionId);
+  let session = await BotSessionManager.getOrCreateSession(
+    userId,
+    authSessionId,
+    channel,
+    sessionId,
+  );
 
   const trimmedMessage = userMessage.trim().slice(0, 2000);
   const lowerMsg = trimmedMessage.toLowerCase().trim();
 
   // A. Recomeçar/Reiniciar fluxo globalmente
-  if (isRestartCommand(lowerMsg) || /^(?:outro\s+servi[cç]o|nova\s+solicita[cç][aã]o)$/i.test(lowerMsg)) {
+  if (
+    isRestartCommand(lowerMsg) ||
+    /^(?:outro\s+servi[cç]o|nova\s+solicita[cç][aã]o)$/i.test(lowerMsg)
+  ) {
     session = await BotSessionManager.restartSession(session, authSessionId);
-    const replyText = "Entendido! Vamos recomeçar. Que tipo de serviço você precisa hoje?";
+    const replyText =
+      "Entendido! Vamos recomeçar. Que tipo de serviço você precisa hoje?";
     await BotSessionManager.createMessage(session.id, "bot", replyText);
 
     return {
@@ -76,10 +86,18 @@ export async function processMessage(
   ctx.timeZone = resolveBotTimeZone(timeZone ?? ctx.timeZone);
 
   // B. Escolher outro profissional
-  if (/^(outro\s+profissional|mudar\s+de\s+profissional|outro\s+prestador)$/i.test(lowerMsg)) {
+  if (
+    /^(outro\s+profissional|mudar\s+de\s+profissional|outro\s+prestador)$/i.test(
+      lowerMsg,
+    )
+  ) {
     if (ctx.serviceName) {
-      const nluFake = { intent: "AGENDAR" as const, entities: { service: ctx.serviceName }, confidence: 1.0 };
-      
+      const nluFake = {
+        intent: "AGENDAR" as const,
+        entities: { service: ctx.serviceName },
+        confidence: 1.0,
+      };
+
       // Roteia diretamente para o estado COLETANDO_SERVICO
       const result = await BotMessageRouter.route(
         BotState.COLETANDO_SERVICO,
@@ -87,9 +105,9 @@ export async function processMessage(
         nluFake,
         session,
         userId,
-        selectedTimeIso
+        selectedTimeIso,
       );
-      
+
       const mergedContext = {
         ...(session.context ?? {}),
         ...result.contextUpdate,
@@ -101,12 +119,23 @@ export async function processMessage(
         newTime: undefined,
         suggestedDates: undefined,
         suggestedSlots: undefined,
+        suggestedSlotsData: undefined,
+        availableDayServiceIds: undefined,
+        availableDayProfessionals: undefined,
+        appointmentId: undefined,
+        appointmentStatus: undefined,
+        appointmentPaid: undefined,
       };
 
       const replyText =
         "Entendido. Vamos procurar outro profissional para esse serviço.\n\n" +
         result.reply;
-      await BotSessionManager.saveSession(session, result.nextState, mergedContext);
+      await BotSessionManager.saveSession(
+        session,
+        result.nextState,
+        mergedContext,
+        null,
+      );
       await BotSessionManager.createMessage(session.id, "bot", replyText);
 
       return {
@@ -116,8 +145,9 @@ export async function processMessage(
         context: session.context as BotSessionContext,
       };
     } else {
-      await BotSessionManager.saveSession(session, BotState.INICIO, {});
-      const replyText = "Você ainda não escolheu um serviço. Vamos recomeçar — qual tipo de serviço você precisa?";
+      await BotSessionManager.saveSession(session, BotState.INICIO, {}, null);
+      const replyText =
+        "Você ainda não escolheu um serviço. Vamos recomeçar — qual tipo de serviço você precisa?";
       await BotSessionManager.createMessage(session.id, "bot", replyText);
       return {
         sessionId: session.id,
@@ -131,13 +161,22 @@ export async function processMessage(
   // 2. Entradas estruturadas (sim/não, número, data e hora) são tratadas por
   // regras dentro de analyzeMessage. As demais podem interromper o fluxo atual
   // por uma intenção explícita, mesmo durante um agendamento pendente.
-  const nlu = await analyzeMessage(trimmedMessage, ctx as Record<string, unknown>);
+  const nlu = await analyzeMessage(
+    trimmedMessage,
+    ctx as Record<string, unknown>,
+  );
 
   // Persiste mensagem do usuário
-  await BotSessionManager.createMessage(session.id, "user", trimmedMessage, nlu.intent, {
-    ...nlu.entities,
-    input_channel: channel,
-  });
+  await BotSessionManager.createMessage(
+    session.id,
+    "user",
+    trimmedMessage,
+    nlu.intent,
+    {
+      ...nlu.entities,
+      input_channel: channel,
+    },
+  );
 
   // Saudações são globais: elas nunca devem ser interpretadas como nome de
   // serviço nem apagar um agendamento parcialmente preenchido.
@@ -155,7 +194,12 @@ export async function processMessage(
   }
 
   // 3. Verifica redirecionamento explícito
-  const isExplicitIntent = ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR"].includes(nlu.intent);
+  const isExplicitIntent = [
+    "AGENDAR",
+    "ALTERAR",
+    "CANCELAR",
+    "CONSULTAR",
+  ].includes(nlu.intent);
   let shouldRedirectToInicio = false;
   if (isExplicitIntent) {
     if (nlu.intent === "AGENDAR") {
@@ -167,11 +211,14 @@ export async function processMessage(
         BotState.CONFIRMACAO,
       ];
       const isContinuingCurrentBooking =
-        ctx.pendingAction === "CREATE" && schedulingStates.includes(session.state);
+        ctx.pendingAction === "CREATE" &&
+        schedulingStates.includes(session.state);
       const requestedService = nlu.entities.service
         ? normalizeText(nlu.entities.service)
         : "";
-      const currentService = ctx.serviceName ? normalizeText(ctx.serviceName) : "";
+      const currentService = ctx.serviceName
+        ? normalizeText(ctx.serviceName)
+        : "";
       const requestsDifferentService =
         requestedService.length > 0 &&
         (currentService.length === 0 ||
@@ -203,7 +250,7 @@ export async function processMessage(
       nlu,
       session,
       userId,
-      selectedTimeIso
+      selectedTimeIso,
     );
   } catch (error: any) {
     logError("Bot: erro inesperado no roteamento de mensagem", error, {
@@ -212,7 +259,8 @@ export async function processMessage(
       state: session.state,
     });
     result = {
-      reply: "Desculpe, ocorreu um erro inesperado. Por favor, tente novamente.",
+      reply:
+        "Desculpe, ocorreu um erro inesperado. Por favor, tente novamente.",
       nextState: session.state,
       contextUpdate: {},
     };
@@ -241,12 +289,19 @@ export async function processMessage(
   }
 
   // Se finalizou e transicionou para INICIO na mesma rota, cuida do encerramento e inicializa nova sessão
-  if (result.nextState === BotState.FINALIZADO || (result.finalize && result.nextState === BotState.INICIO)) {
+  if (
+    result.nextState === BotState.FINALIZADO ||
+    (result.finalize && result.nextState === BotState.INICIO)
+  ) {
     session.status = "completed";
     session.ended_at = new Date();
     await session.save();
 
-    const newSession = await BotSessionManager.getOrCreateSession(userId, authSessionId, session.channel);
+    const newSession = await BotSessionManager.getOrCreateSession(
+      userId,
+      authSessionId,
+      session.channel,
+    );
     await BotSessionManager.createMessage(newSession.id, "bot", result.reply);
 
     return {
@@ -259,7 +314,12 @@ export async function processMessage(
 
   session.status = finalStatus;
   session.ended_at = finalEndedAt;
-  await BotSessionManager.saveSession(session, finalState, mergedContext, result.appointmentId);
+  await BotSessionManager.saveSession(
+    session,
+    finalState,
+    mergedContext,
+    result.appointmentId,
+  );
 
   return {
     sessionId: session.id,
@@ -273,9 +333,14 @@ export async function getSessionHistory(
   sessionId: number,
   userId: number,
 ): Promise<BotSessionHistory> {
-  const history = await BotSessionManager.getHistoryBySessionId(sessionId, userId);
+  const history = await BotSessionManager.getHistoryBySessionId(
+    sessionId,
+    userId,
+  );
   if (!history) {
-    throw new Error("Histórico de sessão não encontrado ou não pertence a este usuário");
+    throw new Error(
+      "Histórico de sessão não encontrado ou não pertence a este usuário",
+    );
   }
   return history;
 }
