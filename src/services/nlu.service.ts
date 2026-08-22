@@ -154,6 +154,15 @@ function isSimpleAgendarVariant(word: string): boolean {
   return levenshteinDistance(word, "agendar") <= 1;
 }
 
+/**
+ * Expõe a mesma política restrita de variações de "agendar" para as etapas
+ * do bot que precisam distinguir um comando genérico de um nome de serviço.
+ */
+export function isSchedulingActionWord(value: string): boolean {
+  const normalized = normalizeForRules(value);
+  return !normalized.includes(" ") && isSimpleAgendarVariant(normalized);
+}
+
 /** Reconhece flexões/erros apenas quando há uma frase clara de solicitação. */
 function isContextualSchedulingRequest(normalized: string): boolean {
   const words = normalized.split(" ").filter(Boolean);
@@ -175,6 +184,174 @@ function isContextualSchedulingRequest(normalized: string): boolean {
   return words.some((word) => isSimpleAgendarVariant(word));
 }
 
+const APPOINTMENT_CONTEXT_PATTERN =
+  /\b(?:agenda|agendamento|agendamentos|reserva|reservas|data|dia|hora|horario|horarios|turno|periodo|profissional|prestador|compromisso|compromissos)\b/;
+
+const ALTERATION_TARGET_WORDS = new Set([
+  "agenda",
+  "agendamento",
+  "agendamentos",
+  "reserva",
+  "reservas",
+  "data",
+  "dia",
+  "hora",
+  "horario",
+  "horarios",
+  "turno",
+  "periodo",
+  "profissional",
+  "prestador",
+  "compromisso",
+  "compromissos",
+]);
+
+const UNAMBIGUOUS_ALTER_TYPOS = new Set(["auterar", "alterra"]);
+const CONTEXTUAL_ALTER_TYPOS = new Set(["atera"]);
+const FREQUENT_RESCHEDULE_TYPOS = new Set(["remaca"]);
+const EXCHANGE_WORDS = new Set([
+  "trocar",
+  "troca",
+  "troque",
+  "mudar",
+  "muda",
+  "mude",
+]);
+
+/** Considera uma troca entre duas letras vizinhas como um único erro. */
+function isSingleEditVariant(word: string, expected: string): boolean {
+  if (levenshteinDistance(word, expected) <= 1) return true;
+  if (word.length !== expected.length) return false;
+
+  const mismatches: number[] = [];
+  for (let index = 0; index < word.length; index += 1) {
+    if (word[index] !== expected[index]) mismatches.push(index);
+  }
+  return (
+    mismatches.length === 2 &&
+    mismatches[1] === mismatches[0] + 1 &&
+    word[mismatches[0]] === expected[mismatches[1]] &&
+    word[mismatches[1]] === expected[mismatches[0]]
+  );
+}
+
+/**
+ * Reconhece erros de uma edição em "cancelar". O prefixo restrito impede que
+ * verbos não relacionados, como "contratar", sejam promovidos a cancelamento.
+ */
+function isSimpleCancelarVariant(word: string): boolean {
+  if (!/^(?:cac|can)[a-z]{3,6}$/.test(word)) return false;
+  return isSingleEditVariant(word, "cancelar");
+}
+
+/** Erros em flexões curtas só são seguros quando citam o agendamento. */
+function isContextualCancelInflectionVariant(word: string): boolean {
+  if (!/^(?:cac|canc|cans)[a-z]{2,5}$/.test(word)) return false;
+  return (
+    isSingleEditVariant(word, "cancela") || isSingleEditVariant(word, "cancele")
+  );
+}
+
+function isSimpleAlterarVariant(word: string): boolean {
+  if (!/^a[a-z]{4,7}$/.test(word)) return false;
+  return isSingleEditVariant(word, "alterar");
+}
+
+/** Reagendar/remarcar são verbos próprios do domínio e seguros isoladamente. */
+function isSimpleRescheduleVariant(word: string): boolean {
+  if (FREQUENT_RESCHEDULE_TYPOS.has(word)) return true;
+  if (!/^re[a-z]{4,8}$/.test(word)) return false;
+  return (
+    isSingleEditVariant(word, "reagendar") ||
+    isSingleEditVariant(word, "remarcar")
+  );
+}
+
+/** Trocas só representam alteração quando o objeto é um agendamento. */
+function isSimpleExchangeVariant(word: string): boolean {
+  if (EXCHANGE_WORDS.has(word)) return true;
+  if (!/^t[a-z]{3,6}$/.test(word)) return false;
+  return (
+    isSingleEditVariant(word, "trocar") || isSingleEditVariant(word, "troque")
+  );
+}
+
+/**
+ * Distingue um serviço ("troca de pneu") de uma alteração do compromisso
+ * ("troca de horário"). A forma curta sem verbo introdutório é aceita porque
+ * nomes de serviços são frequentemente enviados sozinhos no chat.
+ */
+function isExchangeServiceRequest(normalized: string): boolean {
+  const directMatch = normalized.match(/^(?:troca|trocar)\s+de\s+(.+)$/);
+  const contextualMatch = normalized.match(
+    /^(?:(?:eu\s+)?(?:quero|queria|preciso|gostaria|desejo|pretendo|vamos)|pode|podem|tem\s+como|da\s+pra)\s+(?:de\s+)?(?:fazer\s+)?(?:(?:um|uma|o|a)\s+)?(?:troca|trocar)\s+de\s+(.+)$/,
+  );
+  const rawObject = directMatch?.[1] ?? contextualMatch?.[1];
+  if (!rawObject) return false;
+
+  const objectWords = rawObject.split(" ").filter(Boolean);
+  while (/^(?:um|uma|o|a|meu|minha|meus|minhas)$/.test(objectWords[0] ?? "")) {
+    objectWords.shift();
+  }
+  const objectHead = objectWords[0];
+  return Boolean(objectHead && !ALTERATION_TARGET_WORDS.has(objectHead));
+}
+
+/**
+ * Corrige somente verbos de cancelamento/alteração em contexto seguro. Esta
+ * etapa antecede CONSULTAR para que "canelar meu agendamento", por exemplo,
+ * não seja classificado apenas pela presença de "meu agendamento".
+ */
+function classifyCorrectedAppointmentIntent(
+  normalized: string,
+): NluIntent | null {
+  const words = normalized.split(" ").filter(Boolean);
+  const hasAppointmentContext = APPOINTMENT_CONTEXT_PATTERN.test(normalized);
+  const hasRequestCue =
+    words.some((word) => SCHEDULING_REQUEST_CUES.has(word)) ||
+    /\b(?:tem\s+como|da\s+pra)\b/.test(normalized);
+
+  if (
+    words.some((word) => isSimpleCancelarVariant(word)) ||
+    (hasAppointmentContext &&
+      words.some((word) => isContextualCancelInflectionVariant(word)))
+  ) {
+    return "CANCELAR";
+  }
+
+  if (
+    words.some((word) => isSimpleRescheduleVariant(word)) ||
+    words.some((word) => UNAMBIGUOUS_ALTER_TYPOS.has(word))
+  ) {
+    return "ALTERAR";
+  }
+
+  if (
+    (hasAppointmentContext || hasRequestCue) &&
+    words.some((word) => CONTEXTUAL_ALTER_TYPOS.has(word))
+  ) {
+    return "ALTERAR";
+  }
+
+  if (
+    hasAppointmentContext &&
+    words.some((word) => isSimpleAlterarVariant(word))
+  ) {
+    return "ALTERAR";
+  }
+
+  if (isExchangeServiceRequest(normalized)) return "AGENDAR";
+
+  if (
+    hasAppointmentContext &&
+    words.some((word) => isSimpleExchangeVariant(word))
+  ) {
+    return "ALTERAR";
+  }
+
+  return null;
+}
+
 /** Identifica frases que encerram o contexto atual e iniciam um novo fluxo. */
 export function isRestartCommand(message: string): boolean {
   return RESTART_COMMAND_PATTERN.test(normalizeForRules(message));
@@ -183,6 +360,10 @@ export function isRestartCommand(message: string): boolean {
 function classifyExplicitIntent(message: string): NluIntent | null {
   const normalized = normalizeForRules(message);
   if (!normalized || isRestartCommand(normalized)) return null;
+
+  const correctedAppointmentIntent =
+    classifyCorrectedAppointmentIntent(normalized);
+  if (correctedAppointmentIntent) return correctedAppointmentIntent;
 
   let greetingIntent: NluIntent | null = null;
   for (const [pattern, intent] of EXPLICIT_INTENT_RULES) {
@@ -223,6 +404,7 @@ function extractServiceCandidate(message: string): string | undefined {
     " ",
   );
   const patterns = [
+    /^\s*((?:troca|trocar)\s+de\s+.+)$/i,
     /\b(?:agendar|marcar|contratar|reservar|chamar)\s+(?:(?:um|uma|o|a)\s+)?(.+)$/i,
     /\b(?:quero|preciso|gostaria|desejo)\s+(?:de\s+)?(?:(?:um|uma|o|a)\s+)?(.+)$/i,
   ];
@@ -246,6 +428,8 @@ function extractServiceCandidate(message: string): string | undefined {
     .replace(/\s+(?:de|da|pela|na)\s+(?:manh[ãa]|tarde|noite).*$/i, "")
     .trim()
     .replace(/[,.!?]+$/, "");
+
+  candidate = candidate.replace(/^trocar\s+de\s+/i, "troca de ");
 
   // Quando a pessoa escreve "quero agenda limpeza" ou erra "agendar", a
   // primeira palavra representa a ação, não o nome do serviço.
