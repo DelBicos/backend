@@ -125,6 +125,140 @@ describe("analyzeMessage", () => {
   );
 
   it.each([
+    "quero cacelar meu agendamento",
+    "quero cancalar meu agendamento",
+    "quero canselar meu agendamento",
+    "quero cancelr meu agendamento",
+    "quero canelar meu agendamento",
+  ])("tolera erro simples ao pedir cancelamento: %s", async (message) => {
+    const fetchMock = mockClassifier("FALLBACK", 0.4);
+
+    const result = await analyzeMessage(message);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.intent).toBe("CANCELAR");
+    expect(result.confidence).toBe(1);
+    expect(result.entities.service).toBeUndefined();
+  });
+
+  it.each([
+    "quero auterar meu agendamento",
+    "quero alterra meu agendamento",
+    "quero reagenda meu agendamento",
+    "quero reajendar meu agendamento",
+    "quero reagendr meu agendamento",
+    "quero reagndar meu agendamento",
+    "quero remaca meu agendamento",
+    "quero trocar agendamento",
+    "quero trocr meu agendamento",
+    "quero torcar meu agendamento",
+    "quero trocar meu agendamento",
+    "quero trocar meu horário",
+    "quero troca de agendamento",
+    "quero troca de horário",
+  ])(
+    "tolera flexão ou erro simples ao pedir alteração/reagendamento: %s",
+    async (message) => {
+      const fetchMock = mockClassifier("FALLBACK", 0.4);
+
+      const result = await analyzeMessage(message);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result.intent).toBe("ALTERAR");
+      expect(result.confidence).toBe(1);
+      expect(result.entities.service).toBeUndefined();
+    },
+  );
+
+  it.each([
+    ["quero canelar meu agendamento", "CANCELAR"],
+    ["quero reagndar meu agendamento", "ALTERAR"],
+  ] as const)(
+    "usa a tolerância a erro como contingência sem o classificador: %s",
+    async (message, intent) => {
+      const fetchMock = jest
+        .fn()
+        .mockRejectedValue(new Error("connection refused"));
+      (global as any).fetch = fetchMock;
+
+      const result = await analyzeMessage(message);
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({
+        intent,
+        entities: {},
+        confidence: 1,
+      });
+    },
+  );
+
+  it("não confunde cancelamento digitado incorretamente com consulta", async () => {
+    mockClassifier("CONSULTAR", 0.92);
+
+    const result = await analyzeMessage("quero canelar meu agendamento");
+
+    expect(result.intent).toBe("CANCELAR");
+    expect(result.confidence).toBe(1);
+  });
+
+  it.each([
+    ["quero troca de pneu", "troca de pneu"],
+    ["preciso de troca de óleo", "troca de óleo"],
+  ])(
+    "preserva troca como nome de serviço mesmo se o SVM responder ALTERAR: %s",
+    async (message, service) => {
+      mockClassifier("ALTERAR", 0.97);
+
+      const result = await analyzeMessage(message);
+
+      expect(result.intent).toBe("AGENDAR");
+      expect(result.confidence).toBe(1);
+      expect(result.entities.service).toBe(service);
+    },
+  );
+
+  it("não confunde alternar com alterar", async () => {
+    mockClassifier("FALLBACK", 0.4);
+
+    const result = await analyzeMessage("quero alternar");
+
+    expect(result).toEqual({
+      intent: "FALLBACK",
+      entities: {},
+      confidence: 0.4,
+    });
+  });
+
+  it.each(["quero consultar meu agendamento", "quero ver meu agendamento"])(
+    "mantém consulta de agendamento como CONSULTAR: %s",
+    async (message) => {
+      mockClassifier("FALLBACK", 0.4);
+
+      const result = await analyzeMessage(message);
+
+      expect(result.intent).toBe("CONSULTAR");
+    },
+  );
+
+  it("não confunde contratar com cancelar", async () => {
+    mockClassifier("FALLBACK", 0.4);
+
+    const result = await analyzeMessage("quero contratar encanador");
+
+    expect(result.intent).toBe("AGENDAR");
+    expect(result.entities.service).toBe("encanador");
+  });
+
+  it("não transforma uma agenda cultural em intenção do domínio", async () => {
+    mockClassifier("FALLBACK", 0.4);
+
+    const result = await analyzeMessage("agenda cultural");
+
+    expect(result.intent).toBe("FALLBACK");
+    expect(result.entities.service).toBeUndefined();
+  });
+
+  it.each([
     ["quero agenda limpeza", "limpeza"],
     ["quero ageda montagem de móveis", "montagem de móveis"],
     ["quero fazer um agendamento de pintura", "pintura"],

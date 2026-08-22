@@ -36,7 +36,9 @@ describe("processMessage - saudação global", () => {
         matchedServiceIds: [10, 11],
       },
     };
-    (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(session);
+    (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(
+      session,
+    );
     (analyzeMessage as jest.Mock).mockResolvedValue({
       intent: "SAUDACAO",
       entities: {},
@@ -73,7 +75,9 @@ describe("processMessage - saudação global", () => {
         matchedServiceIds: [10, 11],
       },
     };
-    (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(session);
+    (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(
+      session,
+    );
     (analyzeMessage as jest.Mock).mockResolvedValue({
       intent: "AGENDAR",
       entities: { service: "pintura" },
@@ -107,5 +111,40 @@ describe("processMessage - saudação global", () => {
     );
     expect(session.appointment_id).toBeNull();
     expect(result.context.serviceName).toBe("Pintura");
+  });
+
+  it("remove o vínculo antigo ao pedir outro profissional sem serviço no contexto", async () => {
+    const session = {
+      id: 79,
+      state: "CONFIRMACAO",
+      status: "active",
+      channel: "mobile",
+      appointment_id: 999,
+      context: {
+        appointmentId: 999,
+        appointmentStatus: "confirmed",
+        appointmentPaid: true,
+      },
+    };
+    (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(
+      session,
+    );
+
+    const result = await processMessage(
+      1,
+      "auth-1",
+      "outro profissional",
+      79,
+      "mobile",
+    );
+
+    expect(BotSessionManager.saveSession).toHaveBeenCalledWith(
+      session,
+      "INICIO",
+      {},
+      null,
+    );
+    expect(result.state).toBe("INICIO");
+    expect(result.context).toEqual({});
   });
 });
