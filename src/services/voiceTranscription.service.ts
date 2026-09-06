@@ -44,6 +44,13 @@ export class VoiceTranscriptionProviderError extends Error {
   }
 }
 
+export class VoiceTranscriptionRateLimitError extends Error {
+  public constructor() {
+    super("Limite de requisições de transcrição excedido");
+    this.name = "VoiceTranscriptionRateLimitError";
+  }
+}
+
 function readEnvironment(name: string): string | undefined {
   const value = process.env[name]?.trim();
   return value || undefined;
@@ -304,7 +311,7 @@ async function requestProvider(
         attempt,
       });
       const isTransientGeminiFailure =
-        config.provider === "gemini" && (response.status === 429 || response.status === 503);
+        config.provider === "gemini" && response.status === 503;
       if (!isTransientGeminiFailure || attempt === maxAttempts) {
         if (!response.ok) {
           const errText = await response.text().catch(() => "");
@@ -313,12 +320,8 @@ async function requestProvider(
             status: response.status,
             errorBody: errText.slice(0, 500),
           });
-          const env = readEnvironment("ENVIRONMENT") || readEnvironment("NODE_ENV");
-          if (env === "development") {
-            logger.warn(
-              "Transcrição de voz: usando fallback mock para ambiente local devido a erro do provedor externo",
-            );
-            return "Quero agendar um serviço de faxina";
+          if (response.status === 429) {
+            throw new VoiceTranscriptionRateLimitError();
           }
           throw new VoiceTranscriptionProviderError();
         }
@@ -482,7 +485,8 @@ export async function transcribeVoiceAudio(
   } catch (error) {
     if (
       error instanceof VoiceTranscriptionConfigurationError ||
-      error instanceof VoiceTranscriptionProviderError
+      error instanceof VoiceTranscriptionProviderError ||
+      error instanceof VoiceTranscriptionRateLimitError
     ) {
       throw error;
     }
