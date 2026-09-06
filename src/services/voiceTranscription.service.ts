@@ -314,7 +314,7 @@ async function requestProvider(
         config.provider === "gemini" && response.status === 503;
       if (!isTransientGeminiFailure || attempt === maxAttempts) {
         if (!response.ok) {
-          const errText = await response.text().catch(() => "");
+          const errText = typeof response.text === "function" ? await response.text().catch(() => "") : "";
           logger.warn("Transcrição de voz: provedor retornou erro HTTP", {
             provider: config.provider,
             status: response.status,
