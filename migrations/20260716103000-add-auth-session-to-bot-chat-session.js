@@ -3,19 +3,27 @@
 /** Scope bot conversations to the JWT login that created them. */
 module.exports = {
   async up(queryInterface, Sequelize) {
-    await queryInterface.addColumn("bot_chat_session", "auth_session_id", {
-      type: Sequelize.STRING(64),
-      allowNull: true,
-    });
+    try {
+      await queryInterface.addColumn("bot_chat_session", "auth_session_id", {
+        type: Sequelize.STRING(64),
+        allowNull: true,
+      });
+    } catch (err) {
+      console.log("Coluna auth_session_id já existe, ignorando...");
+    }
 
     // Existing records have no trustworthy login identifier; do not restore them.
     await queryInterface.sequelize.query(
       "UPDATE bot_chat_session SET status = 'abandoned', ended_at = CURRENT_TIMESTAMP WHERE status = 'active'"
     );
 
-    await queryInterface.addIndex("bot_chat_session", ["user_id", "auth_session_id", "status"], {
-      name: "idx_bot_session_auth_scope",
-    });
+    try {
+      await queryInterface.addIndex("bot_chat_session", ["user_id", "auth_session_id", "status"], {
+        name: "idx_bot_session_auth_scope",
+      });
+    } catch (err) {
+      console.log("Índice idx_bot_session_auth_scope já existe, ignorando...");
+    }
   },
 
   async down(queryInterface) {

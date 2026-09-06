@@ -64,12 +64,20 @@ module.exports = {
         defaultValue: Sequelize.literal("CURRENT_TIMESTAMP"),
       },
     });
-    await queryInterface.addIndex("service", ["active"], {
-      name: "idx_service_active",
-    });
-    await queryInterface.addIndex("service", ["professional_id"], {
-      name: "idx_service_professional",
-    });
+    try {
+      await queryInterface.addIndex("service", ["active"], {
+        name: "idx_service_active",
+      });
+    } catch (err) {
+      console.log("Índice idx_service_active já existe, ignorando...");
+    }
+    try {
+      await queryInterface.addIndex("service", ["professional_id"], {
+        name: "idx_service_professional",
+      });
+    } catch (err) {
+      console.log("Índice idx_service_professional já existe, ignorando...");
+    }
   },
   async down(queryInterface, Sequelize) {
     await queryInterface.dropTable("service");

@@ -68,12 +68,20 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex("bot_chat_session", ["user_id"], {
-      name: "idx_bot_session_user_id",
-    });
-    await queryInterface.addIndex("bot_chat_session", ["status"], {
-      name: "idx_bot_session_status",
-    });
+    try {
+      await queryInterface.addIndex("bot_chat_session", ["user_id"], {
+        name: "idx_bot_session_user_id",
+      });
+    } catch (err) {
+      console.log("Índice idx_bot_session_user_id já existe, ignorando...");
+    }
+    try {
+      await queryInterface.addIndex("bot_chat_session", ["status"], {
+        name: "idx_bot_session_status",
+      });
+    } catch (err) {
+      console.log("Índice idx_bot_session_status já existe, ignorando...");
+    }
   },
 
   async down(queryInterface) {

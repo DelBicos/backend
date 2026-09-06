@@ -30,14 +30,18 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex(
-      "professional_amenities",
-      ["professional_id", "amenity_id"],
-      {
-        unique: true,
-        name: "idx_unique_professional_amenity",
-      }
-    );
+    try {
+      await queryInterface.addIndex(
+        "professional_amenities",
+        ["professional_id", "amenity_id"],
+        {
+          unique: true,
+          name: "idx_unique_professional_amenity",
+        }
+      );
+    } catch (err) {
+      console.log("Índice idx_unique_professional_amenity já existe, ignorando...");
+    }
   },
   async down(queryInterface, Sequelize) {
     await queryInterface.dropTable("professional_amenities");

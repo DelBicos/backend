@@ -73,12 +73,16 @@ module.exports = {
         defaultValue: Sequelize.literal("CURRENT_TIMESTAMP"),
       },
     });
-    await queryInterface.addIndex("address", ["active"], {
-      name: "idx_address_active",
-    });
-    await queryInterface.addIndex("address", ["lat", "lng"], {
-      name: "idx_address_location",
-    });
+    try {
+      await queryInterface.addIndex("address", ["active"], {
+        name: "idx_address_active",
+      });
+    } catch (e) {}
+    try {
+      await queryInterface.addIndex("address", ["lat", "lng"], {
+        name: "idx_address_location",
+      });
+    } catch (e) {}
   },
   async down(queryInterface, Sequelize) {
     await queryInterface.dropTable("address");
