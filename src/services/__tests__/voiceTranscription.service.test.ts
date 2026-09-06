@@ -11,6 +11,7 @@ import {
   transcribeVoiceAudio,
   VoiceTranscriptionConfigurationError,
   VoiceTranscriptionProviderError,
+  VoiceTranscriptionRateLimitError,
 } from "../voiceTranscription.service";
 
 describe("transcribeVoiceAudio", () => {
@@ -91,7 +92,7 @@ describe("transcribeVoiceAudio", () => {
     const [url, request] = (global as any).fetch.mock.calls[0];
     const body = JSON.parse(request.body);
     expect(url).toBe(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=legacy-gemini-key",
     );
     expect(request.headers).toEqual({
       "Content-Type": "application/json",
@@ -250,6 +251,17 @@ describe("transcribeVoiceAudio", () => {
       "Quero agendar",
     );
     expect((global as any).fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("lança VoiceTranscriptionRateLimitError ao receber 429 do Gemini", async () => {
+    process.env.VOICE_TRANSCRIPTION_PROVIDER = "gemini";
+    process.env.GEMINI_API_KEY = "gemini-key";
+    (global as any).fetch = jest.fn().mockResolvedValue({ ok: false, status: 429 });
+
+    await expect(transcribeVoiceAudio(Buffer.from("audio"), "audio/wav")).rejects.toBeInstanceOf(
+      VoiceTranscriptionRateLimitError,
+    );
+    expect((global as any).fetch).toHaveBeenCalledTimes(1);
   });
 
   it("repete uma exceção transitória do Gemini com um novo signal", async () => {
