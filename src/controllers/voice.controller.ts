@@ -6,6 +6,7 @@ import {
   transcribeVoiceAudio,
   VoiceTranscriptionConfigurationError,
   VoiceTranscriptionProviderError,
+  VoiceTranscriptionRateLimitError,
 } from "../services/voiceTranscription.service";
 import { processMessage } from "../services/botConversation.service";
 import { BotSessionContext } from "../models/BotChatSession";
@@ -115,6 +116,11 @@ function transcriptionErrorResponse(
   if (error instanceof VoiceTranscriptionConfigurationError) {
     return res.status(503).json({
       error: "Transcrição de voz ainda não está configurada neste ambiente",
+    });
+  }
+  if (error instanceof VoiceTranscriptionRateLimitError) {
+    return res.status(429).json({
+      error: "Limite de requisições de transcrição excedido. Aguarde alguns instantes e tente novamente.",
     });
   }
   if (error instanceof VoiceTranscriptionProviderError) {
