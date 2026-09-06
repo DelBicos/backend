@@ -7,7 +7,7 @@ const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 20_000;
 const GEMINI_MAX_ATTEMPTS = 2;
 const GEMINI_RETRY_DELAY_MS = 250;
 
-type VoiceTranscriptionProvider = "gemini" | "openai-compatible";
+type VoiceTranscriptionProvider = "gemini" | "openai-compatible" | "mock";
 
 interface ResolvedProvider {
   provider: VoiceTranscriptionProvider;
@@ -72,6 +72,10 @@ function resolveExplicitProvider(value: string): VoiceTranscriptionProvider {
     case "openai":
     case "openai-compatible":
       return "openai-compatible";
+    case "mock":
+    case "test":
+    case "local":
+      return "mock";
     default:
       throw new VoiceTranscriptionConfigurationError();
   }
@@ -92,6 +96,13 @@ function resolveProvider(): ResolvedProvider {
 
   if (explicitProvider) {
     const provider = resolveExplicitProvider(explicitProvider);
+    if (provider === "mock") {
+      return {
+        provider: "mock",
+        endpoint: "mock",
+        model: "mock",
+      };
+    }
     if (provider === "openai-compatible") {
       if (!endpoint) throw new VoiceTranscriptionConfigurationError();
       return {
@@ -125,18 +136,24 @@ function resolveProvider(): ResolvedProvider {
     };
   }
 
-  const detectedGeminiModel = isGeminiModel(voiceModel)
-    ? voiceModel
-    : isGeminiModel(legacyModel)
-      ? legacyModel
-      : undefined;
-  if (geminiApiKey && detectedGeminiModel) {
-    const model = normalizeGeminiModel(detectedGeminiModel);
+  if (geminiApiKey) {
+    const model = normalizeGeminiModel(
+      isGeminiModel(voiceModel) ? voiceModel : legacyModel,
+    );
     return {
       provider: "gemini",
       endpoint: geminiEndpoint(model),
       apiKey: geminiApiKey,
       model,
+    };
+  }
+
+  const env = readEnvironment("ENVIRONMENT") || readEnvironment("NODE_ENV");
+  if (env === "development") {
+    return {
+      provider: "mock",
+      endpoint: "mock",
+      model: "mock",
     };
   }
 
@@ -363,6 +380,11 @@ async function callProvider(
   deadline: number,
   geminiAttemptTimeoutMs: number,
 ): Promise<string> {
+  if (config.provider === "mock") {
+    logger.info("Transcrição de voz: usando provedor mock para ambiente local");
+    return "Quero agendar um serviço de faxina";
+  }
+
   if (config.provider === "gemini") {
     const geminiMimeType = normalizeGeminiMimeType(audio, mimeType);
     return requestProvider(

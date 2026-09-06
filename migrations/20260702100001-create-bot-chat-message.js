@@ -47,9 +47,13 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex("bot_chat_message", ["session_id"], {
-      name: "idx_bot_message_session_id",
-    });
+    try {
+      await queryInterface.addIndex("bot_chat_message", ["session_id"], {
+        name: "idx_bot_message_session_id",
+      });
+    } catch (err) {
+      console.log("Índice idx_bot_message_session_id já existe, ignorando...");
+    }
   },
 
   async down(queryInterface) {
