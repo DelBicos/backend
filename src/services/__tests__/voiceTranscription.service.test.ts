@@ -256,7 +256,9 @@ describe("transcribeVoiceAudio", () => {
   it("lança VoiceTranscriptionRateLimitError ao receber 429 do Gemini", async () => {
     process.env.VOICE_TRANSCRIPTION_PROVIDER = "gemini";
     process.env.GEMINI_API_KEY = "gemini-key";
-    (global as any).fetch = jest.fn().mockResolvedValue({ ok: false, status: 429 });
+    (global as any).fetch = jest
+      .fn()
+      .mockResolvedValue({ ok: false, status: 429, text: async () => "Quota exceeded" });
 
     await expect(transcribeVoiceAudio(Buffer.from("audio"), "audio/wav")).rejects.toBeInstanceOf(
       VoiceTranscriptionRateLimitError,
