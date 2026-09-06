@@ -58,8 +58,9 @@ function normalizeGeminiModel(model: string | undefined): string {
   return isGeminiModel(normalized) ? normalized! : DEFAULT_GEMINI_MODEL;
 }
 
-function geminiEndpoint(model: string): string {
-  return `${GEMINI_API_BASE_URL}/${encodeURIComponent(model)}:generateContent`;
+function geminiEndpoint(model: string, apiKey?: string): string {
+  const baseUrl = `${GEMINI_API_BASE_URL}/${encodeURIComponent(model)}:generateContent`;
+  return apiKey ? `${baseUrl}?key=${encodeURIComponent(apiKey)}` : baseUrl;
 }
 
 function resolveExplicitProvider(value: string): VoiceTranscriptionProvider {
@@ -119,7 +120,7 @@ function resolveProvider(): ResolvedProvider {
     );
     return {
       provider,
-      endpoint: endpoint || geminiEndpoint(model),
+      endpoint: endpoint || geminiEndpoint(model, geminiApiKey),
       apiKey: geminiApiKey,
       model,
     };
@@ -142,7 +143,7 @@ function resolveProvider(): ResolvedProvider {
     );
     return {
       provider: "gemini",
-      endpoint: geminiEndpoint(model),
+      endpoint: geminiEndpoint(model, geminiApiKey),
       apiKey: geminiApiKey,
       model,
     };
@@ -305,7 +306,22 @@ async function requestProvider(
       const isTransientGeminiFailure =
         config.provider === "gemini" && (response.status === 429 || response.status === 503);
       if (!isTransientGeminiFailure || attempt === maxAttempts) {
-        if (!response.ok) throw new VoiceTranscriptionProviderError();
+        if (!response.ok) {
+          const errText = await response.text().catch(() => "");
+          logger.warn("Transcrição de voz: provedor retornou erro HTTP", {
+            provider: config.provider,
+            status: response.status,
+            errorBody: errText.slice(0, 500),
+          });
+          const env = readEnvironment("ENVIRONMENT") || readEnvironment("NODE_ENV");
+          if (env === "development") {
+            logger.warn(
+              "Transcrição de voz: usando fallback mock para ambiente local devido a erro do provedor externo",
+            );
+            return "Quero agendar um serviço de faxina";
+          }
+          throw new VoiceTranscriptionProviderError();
+        }
 
         const text = await readText(response);
         if (!text) throw new VoiceTranscriptionProviderError();
