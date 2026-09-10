@@ -1426,4 +1426,96 @@ describe("ColetandoServicoState", () => {
     expect(result.reply).not.toContain('Vamos agendar "Montagem de Móveis"');
     expect(result.contextUpdate.matchedServiceIds).toBeUndefined();
   });
+
+  it("reconhece o termo da subcategoria 'Chaveiro' ao responder uma escolha pendente", async () => {
+    const choices: BotServiceChoice[] = [
+      {
+        title: "Abertura de Fechaduras",
+        description: "Serviço de chaveiro para residência e automóvel",
+        subcategoryId: 301,
+        subcategoryName: "Chaveiro",
+        categoryName: "Reformas & Reparos",
+        matchedServiceIds: [301],
+      },
+    ];
+
+    const result = await new ColetandoServicoState().handle(
+      "chaveiro",
+      { intent: "FALLBACK", entities: {}, confidence: 0.8 },
+      {
+        context: {
+          pendingAction: "CREATE",
+          serviceChoicesData: choices,
+        },
+      } as BotChatSessionModel,
+      1,
+    );
+
+    expect(result.nextState).toBe("COLETANDO_DATA");
+    expect(result.reply).toContain('Vamos agendar "Abertura de Fechaduras"');
+    expect(result.contextUpdate.matchedServiceIds).toEqual([301]);
+  });
+
+  it("reconhece a subcategoria 'Chaveiro' diretamente na busca de serviço", async () => {
+    (ServiceModel.findAll as jest.Mock).mockResolvedValue([
+      serviceFixture(302, "Marcos Chaveiro", {
+        title: "Abertura de Fechaduras",
+        subcategoryId: 302,
+        subcategoryName: "Chaveiro",
+        categoryName: "Reformas & Reparos",
+      }),
+    ]);
+    (SubCategoryModel.findAll as jest.Mock).mockResolvedValue([
+      subcategoryFixture(302, "Chaveiro", "Reformas & Reparos"),
+    ]);
+
+    const result = await new ColetandoServicoState().handle(
+      "chaveiro",
+      { intent: "FALLBACK", entities: {}, confidence: 0.8 },
+      { context: { pendingAction: "CREATE" } } as BotChatSessionModel,
+      1,
+    );
+
+    expect(result.nextState).toBe("COLETANDO_DATA");
+    expect(result.reply).toContain('Vamos agendar "Abertura de Fechaduras"');
+    expect(result.contextUpdate.matchedServiceIds).toEqual([302]);
+  });
+
+  it.each([
+    "gostaria de marcar um chaveiro por favor",
+    "eu quero agendar um chaveiro por favor",
+    "preciso chamar um chaveiro",
+  ])(
+    "reconhece a subcategoria 'Chaveiro' em frases completas com verbos de ação e polidez: '%s'",
+    async (userSentence) => {
+      (ServiceModel.findAll as jest.Mock).mockResolvedValue([
+        serviceFixture(303, "Marcos Chaveiro", {
+          title: "Abertura de Fechaduras",
+          subcategoryId: 303,
+          subcategoryName: "Chaveiro",
+          categoryName: "Reformas & Reparos",
+        }),
+      ]);
+      (SubCategoryModel.findAll as jest.Mock).mockResolvedValue([
+        subcategoryFixture(303, "Chaveiro", "Reformas & Reparos"),
+      ]);
+
+      const result = await new ColetandoServicoState().handle(
+        userSentence,
+        {
+          intent: "AGENDAR",
+          entities: { service: "chaveiro" },
+          confidence: 1,
+        },
+        { context: { pendingAction: "CREATE" } } as BotChatSessionModel,
+        1,
+      );
+
+      expect(result.nextState).toBe("COLETANDO_DATA");
+      expect(result.reply).toContain('Vamos agendar "Abertura de Fechaduras"');
+      expect(result.contextUpdate.matchedServiceIds).toEqual([303]);
+    },
+  );
 });
+
+

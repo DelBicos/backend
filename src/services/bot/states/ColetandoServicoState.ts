@@ -121,18 +121,28 @@ function serviceChoiceSummary(choice: BotServiceChoice, index: number): string {
 
 const SERVICE_SEARCH_STOP_WORDS = new Set([
   "a",
+  "agendar",
+  "agendamento",
   "alguem",
   "ao",
   "aos",
   "as",
+  "atendimento",
+  "busco",
+  "buscar",
+  "chamar",
   "com",
+  "contratar",
+  "contratacao",
   "da",
   "das",
   "de",
+  "desejo",
   "do",
   "dos",
   "e",
   "em",
+  "encontrar",
   "esta",
   "estou",
   "eu",
@@ -141,25 +151,44 @@ const SERVICE_SEARCH_STOP_WORDS = new Set([
   "gentileza",
   "gostaria",
   "aqui",
+  "marcar",
+  "marcacao",
+  "marcao",
   "meu",
   "minha",
   "na",
   "nas",
+  "necessito",
+  "necessita",
   "no",
   "nos",
   "o",
+  "obter",
   "os",
   "para",
+  "pedir",
+  "pedido",
+  "pfv",
+  "pode",
+  "podem",
+  "poderia",
   "por",
   "porfavor",
   "pra",
+  "precisa",
+  "precisando",
   "preciso",
-  "pfv",
+  "procuro",
+  "procurar",
   "que",
   "queria",
   "quero",
+  "reservar",
+  "reserva",
   "servico",
   "servicos",
+  "solicitar",
+  "solicitacao",
   "um",
   "uma",
   "urgente",
@@ -471,7 +500,12 @@ function findServiceChoiceByName(
 ): BotServiceChoice | null {
   const normalizedInput = normalizeText(userInput);
   const exact = choices.find(
-    (choice) => normalizeText(choice.title) === normalizedInput,
+    (choice) =>
+      normalizeText(choice.title) === normalizedInput ||
+      (choice.subcategoryName &&
+        normalizeText(choice.subcategoryName) === normalizedInput) ||
+      (choice.categoryName &&
+        normalizeText(choice.categoryName) === normalizedInput),
   );
   if (exact) return exact;
 
@@ -479,7 +513,11 @@ function findServiceChoiceByName(
   if (searchTokens.length === 0) return null;
 
   const matches = choices.filter((choice) => {
-    const match = calculateLexicalMatch(searchTokens, [choice.title]);
+    const match = calculateLexicalMatch(searchTokens, [
+      choice.title,
+      choice.subcategoryName,
+      choice.categoryName,
+    ]);
     return match?.coverage === 1;
   });
 
