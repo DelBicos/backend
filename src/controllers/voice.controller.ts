@@ -119,6 +119,9 @@ function transcriptionErrorResponse(
     });
   }
   if (error instanceof VoiceTranscriptionRateLimitError) {
+    const resetEpochSeconds = Math.floor(Date.now() / 1000) + 60;
+    res.setHeader("Retry-After", "60");
+    res.setHeader("RateLimit-Reset", String(resetEpochSeconds));
     return res.status(429).json({
       error: "Limite de requisições de transcrição excedido. Aguarde alguns instantes e tente novamente.",
     });

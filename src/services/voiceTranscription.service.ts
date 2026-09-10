@@ -7,7 +7,7 @@ const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 20_000;
 const GEMINI_MAX_ATTEMPTS = 2;
 const GEMINI_RETRY_DELAY_MS = 250;
 
-type VoiceTranscriptionProvider = "gemini" | "openai-compatible" | "mock";
+type VoiceTranscriptionProvider = "gemini" | "openai-compatible" | "deepgram" | "mock";
 
 interface ResolvedProvider {
   provider: VoiceTranscriptionProvider;
@@ -76,6 +76,9 @@ function resolveExplicitProvider(value: string): VoiceTranscriptionProvider {
     case "google":
     case "google-gemini":
       return "gemini";
+    case "deepgram":
+    case "deep-gram":
+      return "deepgram";
     case "generic":
     case "openai":
     case "openai-compatible":
@@ -96,6 +99,9 @@ function resolveProvider(): ResolvedProvider {
   const voiceModel = readEnvironment("VOICE_TRANSCRIPTION_MODEL");
   const legacyModel = readEnvironment("OPENAI_MODEL");
   const legacyApiKey = readEnvironment("OPENAI_API_KEY");
+  const deepgramApiKey =
+    readEnvironment("DEEPGRAM_API_KEY") ||
+    (explicitProvider === "deepgram" ? voiceApiKey || legacyApiKey : undefined);
   const geminiApiKey =
     voiceApiKey ||
     readEnvironment("GEMINI_API_KEY") ||
@@ -111,13 +117,23 @@ function resolveProvider(): ResolvedProvider {
         model: "mock",
       };
     }
-    if (provider === "openai-compatible") {
-      if (!endpoint) throw new VoiceTranscriptionConfigurationError();
+    if (provider === "deepgram") {
+      if (!deepgramApiKey) throw new VoiceTranscriptionConfigurationError();
       return {
         provider,
-        endpoint,
-        apiKey: voiceApiKey,
-        model: voiceModel || "whisper-1",
+        endpoint: endpoint || "https://api.deepgram.com/v1/listen",
+        apiKey: deepgramApiKey,
+        model: voiceModel || "nova-2",
+      };
+    }
+    if (provider === "openai-compatible") {
+      const openAiApiKey = voiceApiKey || legacyApiKey;
+      if (!openAiApiKey) throw new VoiceTranscriptionConfigurationError();
+      return {
+        provider,
+        endpoint: endpoint || "https://api.openai.com/v1/audio/transcriptions",
+        apiKey: openAiApiKey,
+        model: voiceModel || legacyModel || "whisper-1",
       };
     }
 
@@ -130,6 +146,15 @@ function resolveProvider(): ResolvedProvider {
       endpoint: endpoint || geminiEndpoint(model, geminiApiKey),
       apiKey: geminiApiKey,
       model,
+    };
+  }
+
+  if (deepgramApiKey) {
+    return {
+      provider: "deepgram",
+      endpoint: endpoint || "https://api.deepgram.com/v1/listen",
+      apiKey: deepgramApiKey,
+      model: voiceModel || "nova-2",
     };
   }
 
@@ -218,6 +243,22 @@ function readPositiveTimeout(name: string, fallback: number): number {
 function cleanTranscription(text: string): string | null {
   const cleaned = text.replace(/[^\P{C}\n\t]/gu, "").trim();
   return cleaned.length > 0 ? cleaned : null;
+}
+
+function readDeepgramText(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const results = (payload as Record<string, unknown>).results;
+  if (!results || typeof results !== "object") return null;
+  const channels = (results as Record<string, unknown>).channels;
+  if (!Array.isArray(channels) || channels.length === 0) return null;
+  const firstChannel = channels[0];
+  if (!firstChannel || typeof firstChannel !== "object") return null;
+  const alternatives = (firstChannel as Record<string, unknown>).alternatives;
+  if (!Array.isArray(alternatives) || alternatives.length === 0) return null;
+  const firstAlt = alternatives[0];
+  if (!firstAlt || typeof firstAlt !== "object") return null;
+  const transcript = (firstAlt as Record<string, unknown>).transcript;
+  return typeof transcript === "string" ? cleanTranscription(transcript) : null;
 }
 
 function readOpenAiCompatibleText(payload: unknown): string | null {
@@ -419,6 +460,29 @@ async function callProvider(
       geminiMimeType,
       audio.byteLength,
       async (response) => readGeminiText(await response.json()),
+      deadline,
+      geminiAttemptTimeoutMs,
+    );
+  }
+
+  if (config.provider === "deepgram") {
+    const lang = language === "pt" || language === "pt-BR" ? "pt-BR" : language;
+    const url = `${config.endpoint}?model=${encodeURIComponent(config.model)}&language=${encodeURIComponent(lang)}&smart_formatting=true`;
+    const audioBytes = new Uint8Array(audio.byteLength);
+    audioBytes.set(audio);
+    return requestProvider(
+      { ...config, endpoint: url },
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Token ${config.apiKey}`,
+          "Content-Type": mimeType,
+        },
+        body: audioBytes,
+      },
+      mimeType,
+      audio.byteLength,
+      async (response) => readDeepgramText(await response.json()),
       deadline,
       geminiAttemptTimeoutMs,
     );

@@ -216,14 +216,31 @@ export async function processMessage(
       const requestedService = nlu.entities.service
         ? normalizeText(nlu.entities.service)
         : "";
-      const currentService = ctx.serviceName
+      const currentServiceTitle = ctx.serviceName
         ? normalizeText(ctx.serviceName)
         : "";
+      const currentSubcategory = ctx.serviceSubcategoryName
+        ? normalizeText(ctx.serviceSubcategoryName)
+        : "";
+      const currentCategory = ctx.serviceCategoryName
+        ? normalizeText(ctx.serviceCategoryName)
+        : "";
+
+      const matchesCurrent =
+        (currentServiceTitle.length > 0 &&
+          (currentServiceTitle.includes(requestedService) ||
+            requestedService.includes(currentServiceTitle))) ||
+        (currentSubcategory.length > 0 &&
+          (currentSubcategory.includes(requestedService) ||
+            requestedService.includes(currentSubcategory))) ||
+        (currentCategory.length > 0 &&
+          (currentCategory.includes(requestedService) ||
+            requestedService.includes(currentCategory)));
+
       const requestsDifferentService =
         requestedService.length > 0 &&
-        (currentService.length === 0 ||
-          (!currentService.includes(requestedService) &&
-            !requestedService.includes(currentService)));
+        (currentServiceTitle.length === 0 || !matchesCurrent);
+
       shouldRedirectToInicio =
         !isContinuingCurrentBooking || requestsDifferentService;
     } else {

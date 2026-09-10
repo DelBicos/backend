@@ -426,6 +426,7 @@ function extractServiceCandidate(message: string): string | undefined {
     .replace(/\s+(?:dia\s+\d{1,2}|hoje|hj|amanh[ãa]|amnh)(?:\s|$).*$/i, "")
     .replace(/(?:[àa]s?)\s+\d{1,2}(?::\d{2})?(?:\s*(?:h|horas))?.*$/i, "")
     .replace(/\s+(?:de|da|pela|na)\s+(?:manh[ãa]|tarde|noite).*$/i, "")
+    .replace(/\s+(?:por\s+favor|porfavor|pfv|por\s+gentileza|gentileza|obrigad[oa])$/i, "")
     .trim()
     .replace(/[,.!?]+$/, "");
 
