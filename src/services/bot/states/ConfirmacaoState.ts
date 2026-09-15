@@ -98,6 +98,7 @@ export class ConfirmacaoState implements BotStateNode {
           appointmentId: appointment.id,
           appointmentStatus: "pending",
           appointmentPaid: false,
+          serviceOptions: ["Pagar Agora"],
         },
         appointmentId: appointment.id,
       };
