@@ -223,6 +223,9 @@ export const PaymentService = {
       }
 
       try {
+        // O pagamento já foi confirmado e persistido. Uma falha no push não
+        // pode provocar reembolso nem desfazer o agendamento; o polling do
+        // frontend continuará consultando o status gravado no banco.
         await syncBotSessionsForAppointmentStatus(appointment);
       } catch (syncError: any) {
         console.error(
@@ -255,7 +258,7 @@ export const PaymentService = {
    * Busca o recibo (receipt_url) do pagamento via Stripe.
    */
   getAppointmentReceipt: async (
-    appointmentId: number, // ainda pode ser o ID numérico interno, mas futuramente podemos usar short_id
+    appointmentId: number,
     authenticatedUserId: number
   ): Promise<string> => {
     const client = await ClientModel.findOne({
@@ -267,18 +270,22 @@ export const PaymentService = {
 
     const appointment = await AppointmentModel.findOne({
       where: {
-        id: appointmentId,   // mantenha id interno para consulta
+        id: appointmentId,
         client_id: client.id,
       },
     });
 
     if (!appointment) {
-      throw new Error("Agendamento não encontrado ou não pertence a este usuário.");
+      throw new Error(
+        "Agendamento não encontrado ou não pertence a este usuário."
+      );
     }
 
     const paymentIntentId = appointment.payment_intent_id;
     if (!paymentIntentId) {
-      throw new Error("Este agendamento não possui um recibo de pagamento online.");
+      throw new Error(
+        "Este agendamento não possui um recibo de pagamento online."
+      );
     }
 
     try {
@@ -306,6 +313,17 @@ export const PaymentService = {
         error.message
       );
       throw new Error(`Erro ao buscar recibo: ${error.message}`);
+    }
+  },
+
+  refundPaymentIntent: async (paymentIntentId: string): Promise<boolean> => {
+    try {
+      await stripe.refunds.create({ payment_intent: paymentIntentId });
+      console.log(`[PaymentService] Reembolso acionado com sucesso no Stripe para PI: ${paymentIntentId}`);
+      return true;
+    } catch (error: any) {
+      console.error(`[PaymentService] Erro ao processar reembolso no Stripe para PI: ${paymentIntentId}`, error.message);
+      return false;
     }
   },
 };
