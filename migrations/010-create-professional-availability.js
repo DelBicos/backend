@@ -65,13 +65,17 @@ module.exports = {
         defaultValue: Sequelize.literal("CURRENT_TIMESTAMP"),
       },
     });
-    await queryInterface.addIndex(
-      "professional_availability",
-      ["professional_id", "recurrence_pattern", "start_day", "end_day"],
-      {
-        name: "idx_prof_availability_recurrence",
-      }
-    );
+    try {
+      await queryInterface.addIndex(
+        "professional_availability",
+        ["professional_id", "recurrence_pattern", "start_day", "end_day"],
+        {
+          name: "idx_prof_availability_recurrence",
+        }
+      );
+    } catch (err) {
+      console.log("Índice idx_prof_availability_recurrence já existe, ignorando...");
+    }
   },
   async down(queryInterface, Sequelize) {
     await queryInterface.dropTable("professional_availability");

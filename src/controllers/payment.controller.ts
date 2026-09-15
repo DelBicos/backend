@@ -14,6 +14,7 @@ export const createPaymentIntentController = async (
     selectedTime,
     serviceId,
     addressId,
+    appointmentId,
   } = req.body;
 
   // 2. Validação dos dados de entrada
@@ -59,6 +60,7 @@ export const createPaymentIntentController = async (
     serviceId: serviceId.toString(),
     selectedTime: selectedTime, // Já deve ser uma string (data ISO ou similar)
     addressId: addressId.toString(),
+    ...(appointmentId ? { appointmentId: appointmentId.toString() } : {}),
   };
 
   try {

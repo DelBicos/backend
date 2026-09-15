@@ -156,6 +156,10 @@ AppointmentModel.init(
         name: "idx_prof_status_completed_at",
         fields: ["professional_id", "status", "completed_at"],
       },
+      {
+        name: "idx_appointment_service_status_rating",
+        fields: ["service_id", "status", "rating"],
+      },
     ],
     timestamps: true,
   }

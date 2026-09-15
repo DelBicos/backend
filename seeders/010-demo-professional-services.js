@@ -1,5 +1,51 @@
 "use strict";
 
+const DEMO_EMAILS = [
+  "carlos.silva@delbicos.com",
+  "maria.costa@delbicos.com",
+  "joao.oliveira@delbicos.com",
+  "ana.rodrigues@delbicos.com",
+  "ricardo.souza@delbicos.com",
+  "patricia.lima@delbicos.com",
+  "fernando.dias@delbicos.com",
+  "juliana.martins@delbicos.com",
+];
+
+const DEMO_SERVICE_TITLES = [
+  "Instalação Elétrica Completa",
+  "Manutenção Preventiva",
+  "Troca de Disjuntores",
+  "Instalação de Ventiladores",
+  "Faxina Completa",
+  "Limpeza Pesada",
+  "Limpeza de Vidros",
+  "Organização de Ambientes",
+  "Desentupimento de Pias",
+  "Conserto de Vazamentos",
+  "Instalação de Aquecedor",
+  "Manutenção de Gás",
+  "Consultoria de Decoração",
+  "Projeto 3D",
+  "Personal Shopper Decor",
+  "Construção de Muros",
+  "Reboco e Emboço",
+  "Pisos e Azulejos",
+  "Reforma de Banheiro",
+  "Limpeza Pós Reforma",
+  "Manicure Completa",
+  "Pedicure Completa",
+  "Unhas de Gel",
+  "Spa de Pés e Mãos",
+  "Manutenção de Jardim",
+  "Paisagismo",
+  "Organização de Armários",
+  "Organização de Cozinha",
+];
+
+function serviceKey(professionalId, title) {
+  return `${professionalId}|${title}`;
+}
+
 module.exports = {
   async up(queryInterface, Sequelize) {
     const subcategories = await queryInterface.sequelize.query(
@@ -24,6 +70,16 @@ module.exports = {
       professionalMap[prof.email] = prof.id;
     });
 
+    const existingServices = await queryInterface.sequelize.query(
+      `SELECT professional_id, title FROM service`,
+      { type: Sequelize.QueryTypes.SELECT }
+    );
+    const existingKeys = new Set(
+      existingServices.map((service) =>
+        serviceKey(Number(service.professional_id), service.title)
+      )
+    );
+
     const now = new Date();
     const services = [];
 
@@ -39,6 +95,9 @@ module.exports = {
       const subId = subcategoryMap[subCategoryTitle];
 
       if (profId && subId) {
+        const key = serviceKey(Number(profId), title);
+        if (existingKeys.has(key)) return;
+        existingKeys.add(key);
         services.push({
           professional_id: profId,
           subcategory_id: subId,
@@ -300,28 +359,31 @@ module.exports = {
     if (services.length > 0) {
       await queryInterface.bulkInsert("service", services);
     } else {
-      console.warn(
-        "⚠️ Nenhum serviço foi criado. Verifique se as subcategorias e usuários existem."
-      );
+      console.log("Nenhum serviço demonstrativo novo precisou ser criado.");
     }
   },
 
   async down(queryInterface, Sequelize) {
-    const professionals = await queryInterface.sequelize.query(
-      `SELECT id FROM professional p 
-       INNER JOIN users u ON p.user_id = u.id 
-       WHERE u.email IN (
-         'carlos.silva@delbicos.com', 'maria.costa@delbicos.com', 
-         'joao.oliveira@delbicos.com', 'ana.rodrigues@delbicos.com', 
-         'ricardo.souza@delbicos.com', 'patricia.lima@delbicos.com', 
-         'fernando.dias@delbicos.com', 'juliana.martins@delbicos.com'
-       )`,
-      { type: Sequelize.QueryTypes.SELECT }
+    const services = await queryInterface.sequelize.query(
+      `SELECT s.id
+       FROM service s
+       INNER JOIN professional p ON p.id = s.professional_id
+       INNER JOIN users u ON u.id = p.user_id
+       WHERE u.email IN (:emails)
+         AND s.title IN (:titles)`,
+      {
+        replacements: {
+          emails: DEMO_EMAILS,
+          titles: DEMO_SERVICE_TITLES,
+        },
+        type: Sequelize.QueryTypes.SELECT,
+      }
     );
 
-    if (professionals.length > 0) {
-      const ids = professionals.map((p) => p.id);
-      await queryInterface.bulkDelete("service", { professional_id: ids });
+    if (services.length > 0) {
+      await queryInterface.bulkDelete("service", {
+        id: { [Sequelize.Op.in]: services.map((service) => service.id) },
+      });
     }
   },
 };

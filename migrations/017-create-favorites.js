@@ -40,15 +40,23 @@ module.exports = {
       },
     });
 
-    await queryInterface.addConstraint("favorites", {
-      fields: ["user_id", "professional_id"],
-      type: "unique",
-      name: "unique_user_professional_favorite",
-    });
+    try {
+      await queryInterface.addConstraint("favorites", {
+        fields: ["user_id", "professional_id"],
+        type: "unique",
+        name: "unique_user_professional_favorite",
+      });
+    } catch (err) {
+      console.log("Constraint unique_user_professional_favorite já existe, ignorando...");
+    }
 
-    await queryInterface.addIndex("favorites", ["user_id"], {
-      name: "idx_user_favorites",
-    });
+    try {
+      await queryInterface.addIndex("favorites", ["user_id"], {
+        name: "idx_user_favorites",
+      });
+    } catch (err) {
+      console.log("Índice idx_user_favorites já existe, ignorando...");
+    }
   },
 
   async down(queryInterface, Sequelize) {
