@@ -14,6 +14,7 @@ import {
   ensureChatRoomForAppointment,
   syncChatRoomStatusForAppointment,
 } from "../utils/chatRoom";
+import { syncBotSessionsForAppointmentStatus } from "../services/botAppointmentStatus.service";
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -54,6 +55,19 @@ export const createAppointment = async (req: Request, res: Response) => {
       return res.status(400).json({
         error:
           "Campos obrigatórios: service_id, professional_id, start_time, end_time (ou forneça address_id ou client_lat/client_lng)",
+      });
+    }
+
+    // Regra de antecedência: no mínimo 48 horas (2 dias)
+    const startDate = new Date(start_time);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const minAdvanceDate = new Date(today);
+    minAdvanceDate.setDate(minAdvanceDate.getDate() + 2);
+
+    if (startDate < minAdvanceDate) {
+      return res.status(400).json({
+        error: "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
       });
     }
 
@@ -327,6 +341,7 @@ export const getAllAppointments = async (req: Request, res: Response) => {
 export const confirmAppointment = async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
+    const authReq = req as AuthenticatedRequest;
     const appointment = await AppointmentModel.findByPk(id);
     if (!appointment) {
       return res.status(404).json({ error: "Agendamento não encontrado" });
@@ -336,8 +351,16 @@ export const confirmAppointment = async (req: Request, res: Response) => {
         error: `Não é possível aceitar um agendamento com status '${appointment.status}'`,
       });
     }
+    const professional = await ProfessionalModel.findByPk(appointment.professional_id);
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional respons\u00e1vel pode aceitar este agendamento",
+      });
+    }
+
     appointment.status = "confirmed";
     await appointment.save();
+    await syncBotSessionsForAppointmentStatus(appointment);
     logger.info("Appointment confirmado", { appointmentId: id });
     res.json(appointment);
   } catch (error: any) {
@@ -366,6 +389,13 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
 
     if (!appointment) {
       return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const appointmentProfessional = (appointment as any).Professional;
+    if (!authReq.user || appointmentProfessional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional respons\u00e1vel pode alterar este agendamento",
+      });
     }
 
     if (appointment.status !== "pending") {
@@ -405,6 +435,8 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
         });
       }
     }
+
+    await syncBotSessionsForAppointmentStatus(appointment);
 
     logger.info(`Appointment status updated to ${status}`, { appointmentId: id });
     res.json(appointment);

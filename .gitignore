@@ -15,4 +15,10 @@ coverage
 avatarBucket
 
 ## Build Output ##
-dist/
+dist/scratch/
+
+## Python / NLP artifacts ##
+__pycache__/
+*.py[cod]
+nlp-service/artifacts/*
+!nlp-service/artifacts/.gitkeep

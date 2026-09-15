@@ -6,6 +6,7 @@ import { ClientModel } from "../models/Client";
 import { NotificationModel } from "../models/Notification";
 import { ServiceModel } from "../models/Service";
 import { ensureChatRoomForAppointment } from "../utils/chatRoom";
+import { syncBotSessionsForAppointmentStatus } from "./botAppointmentStatus.service";
 
 dotenv.config();
 
@@ -114,38 +115,68 @@ export const PaymentService = {
     const clientId = client.id;
 
     try {
-      const newAppointment = await AppointmentModel.create({
-        professional_id: Number(professionalId),
-        client_id: clientId,
-        service_id: Number(serviceId),
-        address_id: Number(addressId),
-        rating: undefined,
-        review: undefined,
-        start_time: new Date(selectedTime),
-        end_time: new Date(selectedTime),
-        status: "pending",
-        payment_intent_id: paymentIntentId,
-      });
-
-      // Cria automaticamente a sala de chat para este agendamento
-      await ensureChatRoomForAppointment(newAppointment);
-
+      let appointment: AppointmentModel;
       const service = await ServiceModel.findByPk(Number(serviceId));
-
       if (!service) {
         throw new Error("Serviço não encontrado.");
       }
 
-      await NotificationModel.create({
-        user_id: clientId,
-        title: "Agendamento Criado com Sucesso",
-        message: `Seu agendamento para o serviço '${service.title}' no dia ${selectedTime} foi criado. Aguardando confirmação do profissional.`,
-        notification_type: "appointment",
-        related_entity_id: newAppointment.id,
-        is_read: false,
-      });
+      if (metadata.appointmentId) {
+        const existing = await AppointmentModel.findByPk(Number(metadata.appointmentId));
+        if (!existing) {
+          throw new Error("Agendamento pré-existente não encontrado.");
+        }
+        existing.payment_intent_id = paymentIntentId;
+        await existing.save();
+        appointment = existing;
 
-      return newAppointment;
+        await NotificationModel.create({
+          user_id: client.user_id,
+          title: "Pagamento Confirmado",
+          message: `O pagamento para o seu agendamento do serviço '${service.title}' no dia ${selectedTime} foi confirmado!`,
+          notification_type: "appointment",
+          related_entity_id: appointment.id,
+          is_read: false,
+        });
+      } else {
+        appointment = await AppointmentModel.create({
+          professional_id: Number(professionalId),
+          client_id: clientId,
+          service_id: Number(serviceId),
+          address_id: Number(addressId),
+          rating: undefined,
+          review: undefined,
+          start_time: new Date(selectedTime),
+          end_time: new Date(selectedTime),
+          status: "pending",
+          payment_intent_id: paymentIntentId,
+        });
+
+        // Cria automaticamente a sala de chat para este agendamento
+        await ensureChatRoomForAppointment(appointment);
+
+        await NotificationModel.create({
+          user_id: client.user_id,
+          title: "Agendamento Criado com Sucesso",
+          message: `Seu agendamento para o serviço '${service.title}' no dia ${selectedTime} foi criado. Aguardando confirmação do profissional.`,
+          notification_type: "appointment",
+          related_entity_id: appointment.id,
+          is_read: false,
+        });
+      }
+
+      try {
+        await syncBotSessionsForAppointmentStatus(appointment);
+      } catch (syncError: any) {
+        // O pagamento j\u00e1 foi confirmado e persistido. Uma falha no push n\u00e3o
+        // pode provocar reembolso nem desfazer o agendamento; o polling do
+        // frontend continuar\u00e1 consultando o status gravado no banco.
+        console.error(
+          "[PaymentService] Falha ao sincronizar status no chatbot:",
+          syncError.message,
+        );
+      }
+      return appointment;
     } catch (dbError: any) {
       console.error(
         "[PaymentService] Erro ao salvar agendamento no DB:",
