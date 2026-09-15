@@ -87,17 +87,18 @@ export class ConfirmacaoState implements BotStateNode {
       const appointment = await createBotAppointment(userId, ctx, selectedTimeIso);
       return {
         reply:
-          `✅ Agendamento criado com sucesso!\n\n` +
+          `✅ Agendamento pré-criado com sucesso!\n\n` +
           `ID: ${appointment.id}\n` +
           `Serviço: ${ctx.serviceName}\n` +
           `Data: ${formatDatePtBR(ctx.date!)}\n` +
           `Horário: ${ctx.time}\n\n` +
-          `Aguarde a confirmação do profissional. Você receberá uma notificação.`,
+          `Efetue o pagamento via Stripe para concluir o pedido. Após a confirmação do pagamento, o agendamento aguardará o aceite do profissional.`,
         nextState: "AGUARDANDO_CONFIRMACAO",
         contextUpdate: {
           appointmentId: appointment.id,
           appointmentStatus: "pending",
           appointmentPaid: false,
+          serviceOptions: ["Pagar Agora"],
         },
         appointmentId: appointment.id,
       };
