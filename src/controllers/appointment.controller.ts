@@ -425,10 +425,17 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
           is_read: false,
         });
       } else if (status === "canceled") {
+        let refundMsg = "";
+        if (appointment.payment_intent_id) {
+          const refunded = await PaymentService.refundPaymentIntent(appointment.payment_intent_id);
+          refundMsg = refunded
+            ? " O valor do pagamento foi estornado com sucesso."
+            : " O estorno do pagamento está sendo processado.";
+        }
         await NotificationModel.create({
           user_id: clientUser.id,
           title: "Agendamento Recusado",
-          message: `O profissional não pôde aceitar o serviço '${service?.title}'.`,
+          message: `O profissional não pôde aceitar o serviço '${service?.title}'.${refundMsg}`,
           notification_type: "appointment",
           related_entity_id: appointment.id,
           is_read: false,

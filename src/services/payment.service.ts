@@ -168,9 +168,9 @@ export const PaymentService = {
       try {
         await syncBotSessionsForAppointmentStatus(appointment);
       } catch (syncError: any) {
-        // O pagamento j\u00e1 foi confirmado e persistido. Uma falha no push n\u00e3o
+        // O pagamento já foi confirmado e persistido. Uma falha no push não
         // pode provocar reembolso nem desfazer o agendamento; o polling do
-        // frontend continuar\u00e1 consultando o status gravado no banco.
+        // frontend continuará consultando o status gravado no banco.
         console.error(
           "[PaymentService] Falha ao sincronizar status no chatbot:",
           syncError.message,
@@ -195,6 +195,7 @@ export const PaymentService = {
       throw new Error("Erro ao salvar o agendamento no banco de dados.");
     }
   },
+
   getAppointmentReceipt: async (
     appointmentId: number,
     authenticatedUserId: number
@@ -252,6 +253,17 @@ export const PaymentService = {
         error.message
       );
       throw new Error(`Erro ao buscar recibo: ${error.message}`);
+    }
+  },
+
+  refundPaymentIntent: async (paymentIntentId: string): Promise<boolean> => {
+    try {
+      await stripe.refunds.create({ payment_intent: paymentIntentId });
+      console.log(`[PaymentService] Reembolso acionado com sucesso no Stripe para PI: ${paymentIntentId}`);
+      return true;
+    } catch (error: any) {
+      console.error(`[PaymentService] Erro ao processar reembolso no Stripe para PI: ${paymentIntentId}`, error.message);
+      return false;
     }
   },
 };
