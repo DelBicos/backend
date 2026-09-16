@@ -1,9 +1,14 @@
 import { DataTypes, Model, Optional } from "sequelize";
 import { sequelize } from "../config/database";
+import { customAlphabet } from 'nanoid';
+
+const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const generateShortId = customAlphabet(alphabet, 6);
 
 /*
 CREATE TABLE appointment (
     id INT AUTO_INCREMENT PRIMARY KEY,
+    short_id CHAR(6) NOT NULL UNIQUE,
     professional_id INT NOT NULL,
     client_id INT NOT NULL,
     service_id INT NOT NULL,
@@ -25,6 +30,7 @@ CREATE TABLE appointment (
 
 export interface IAppointment {
   id?: number;
+  short_id: string;
   professional_id: number;
   client_id: number;
   service_id: number;
@@ -40,13 +46,14 @@ export interface IAppointment {
   createdAt?: Date;
 }
 
-type AppointmentCreationalAttributes = Optional<IAppointment, "id" | "status">;
+type AppointmentCreationalAttributes = Optional<IAppointment, "id" | "status" | "short_id">;
 
 export class AppointmentModel extends Model<
   IAppointment,
   AppointmentCreationalAttributes
 > {
   public id!: number;
+  public short_id!: string;
   public professional_id!: number;
   public client_id!: number;
   public service_id!: number;
@@ -71,6 +78,11 @@ AppointmentModel.init(
       autoIncrement: true,
       primaryKey: true,
       allowNull: false,
+    },
+    short_id: {
+      type: DataTypes.STRING(6),
+      allowNull: false,
+      unique: true
     },
     professional_id: {
       type: DataTypes.INTEGER,
@@ -156,7 +168,30 @@ AppointmentModel.init(
         name: "idx_prof_status_completed_at",
         fields: ["professional_id", "status", "completed_at"],
       },
+      {
+        name: "idx_appointment_short_id",
+        fields: ["short_id"],
+      }
     ],
     timestamps: true,
+    hooks: {
+      beforeCreate: async (appointment: AppointmentModel) => {
+        let shortId: string;
+        let attempts = 0;
+        let unique = false;
+        while (!unique) {
+          shortId = generateShortId();
+          attempts++;
+          if (attempts > 100) {
+            throw new Error('Não foi possível gerar short_id único após 100 tentativas');
+          }
+          const existing = await AppointmentModel.findOne({ where: { short_id: shortId } });
+          if (!existing) {
+            appointment.short_id = shortId;
+            unique = true;
+          }
+        }
+      }
+    }
   }
 );

@@ -1,5 +1,9 @@
 "use strict";
 
+const { customAlphabet } = require('nanoid');
+const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const generateShortId = customAlphabet(alphabet, 6);
+
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
@@ -74,8 +78,16 @@ module.exports = {
           const basePrice = service && service.price ? parseFloat(service.price) : 0;
           final_price = parseFloat((basePrice + statusIndex).toFixed(2));
         }
+        const usedShortIds = new Set();
+
+        const shortId = generateShortId();
+        while (usedShortIds.has(shortId)) {
+          shortId = generateShortId();
+        }
+        usedShortIds.add(shortId);
 
         appointments.push({
+          short_id: shortId,
           professional_id: professional.id,
           client_id: client.id,
           service_id: service.id,
@@ -96,6 +108,9 @@ module.exports = {
         });
       });
     });
+
+    const shortId = generateShortId();
+
 
     await queryInterface.bulkInsert("appointment", appointments);
   },
