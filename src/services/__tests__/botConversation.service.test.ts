@@ -113,6 +113,98 @@ describe("processMessage - saudação global", () => {
     expect(result.context.serviceName).toBe("Pintura");
   });
 
+  it("mantém a pergunta por horários disponíveis no fluxo da data escolhida", async () => {
+    const session = {
+      id: 80,
+      state: "COLETANDO_HORARIO",
+      status: "active",
+      channel: "voice-web",
+      appointment_id: null,
+      context: {
+        pendingAction: "CREATE",
+        serviceName: "Conserto de Vazamentos",
+        matchedServiceIds: [10],
+        date: "2026-09-23",
+      },
+    };
+    (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(
+      session,
+    );
+    (analyzeMessage as jest.Mock).mockResolvedValue({
+      intent: "CONSULTAR",
+      entities: {},
+      confidence: 0.91,
+    });
+    (BotMessageRouter.route as jest.Mock).mockResolvedValue({
+      reply: "Tenho estes horários disponíveis: 09:00 • 14:30",
+      nextState: "COLETANDO_HORARIO",
+      contextUpdate: { suggestedSlots: ["09:00", "14:30"] },
+    });
+
+    await processMessage(
+      1,
+      "auth-1",
+      "quais os horários",
+      80,
+      "voice-web",
+    );
+
+    expect(BotMessageRouter.route).toHaveBeenCalledWith(
+      "COLETANDO_HORARIO",
+      "quais os horários",
+      expect.objectContaining({ intent: "CONSULTAR" }),
+      session,
+      1,
+      undefined,
+    );
+  });
+
+  it("continua tratando 'meus agendamentos' como consulta global", async () => {
+    const session = {
+      id: 81,
+      state: "COLETANDO_HORARIO",
+      status: "active",
+      channel: "web",
+      appointment_id: null,
+      context: {
+        pendingAction: "CREATE",
+        serviceName: "Conserto de Vazamentos",
+        matchedServiceIds: [10],
+        date: "2026-09-23",
+      },
+    };
+    (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(
+      session,
+    );
+    (analyzeMessage as jest.Mock).mockResolvedValue({
+      intent: "CONSULTAR",
+      entities: {},
+      confidence: 1,
+    });
+    (BotMessageRouter.route as jest.Mock).mockResolvedValue({
+      reply: "Seus próximos agendamentos",
+      nextState: "INICIO",
+      contextUpdate: {},
+    });
+
+    await processMessage(
+      1,
+      "auth-1",
+      "mostrar meus agendamentos",
+      81,
+      "web",
+    );
+
+    expect(BotMessageRouter.route).toHaveBeenCalledWith(
+      "INICIO",
+      "mostrar meus agendamentos",
+      expect.objectContaining({ intent: "CONSULTAR" }),
+      session,
+      1,
+      undefined,
+    );
+  });
+
   it("remove o vínculo antigo ao pedir outro profissional sem serviço no contexto", async () => {
     const session = {
       id: 79,
