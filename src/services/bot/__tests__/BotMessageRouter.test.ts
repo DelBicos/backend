@@ -31,19 +31,20 @@ jest.mock("../../../utils/logger", () => ({
   default: { warn: jest.fn() },
 }));
 
+const mockColetandoDataHandle = jest.fn();
+const mockColetandoHorarioHandle = jest.fn();
+
 jest.mock("../states/ColetandoDataState", () => ({
   ColetandoDataState: class ColetandoDataState {
-    public async handle() {
-      throw new Error("ColetandoDataState não deveria ser chamado neste teste");
+    public async handle(...args: unknown[]) {
+      return mockColetandoDataHandle(...args);
     }
   },
 }));
 jest.mock("../states/ColetandoHorarioState", () => ({
   ColetandoHorarioState: class ColetandoHorarioState {
-    public async handle() {
-      throw new Error(
-        "ColetandoHorarioState não deveria ser chamado neste teste",
-      );
+    public async handle(...args: unknown[]) {
+      return mockColetandoHorarioHandle(...args);
     }
   },
 }));
@@ -144,6 +145,14 @@ function fallbackNlu(): NluResult {
 describe("BotMessageRouter no estado INICIO", () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockColetandoDataHandle.mockImplementation(async () => {
+      throw new Error("ColetandoDataState não deveria ser chamado neste teste");
+    });
+    mockColetandoHorarioHandle.mockImplementation(async () => {
+      throw new Error(
+        "ColetandoHorarioState não deveria ser chamado neste teste",
+      );
+    });
     (ServiceModel.findAll as jest.Mock).mockResolvedValue([]);
     (SubCategoryModel.findAll as jest.Mock).mockResolvedValue([]);
     (CategoryModel.findAll as jest.Mock).mockResolvedValue([]);
@@ -261,8 +270,9 @@ describe("BotMessageRouter no estado INICIO", () => {
       expect(result.nextState).toBe(BotState.COLETANDO_SERVICO);
       expect(result.serviceSearchOutcome).toBe("NOT_FOUND");
       expect(result.reply).toContain(
-        "Não encontrei serviços nem profissionais",
+        "Não consegui identificar um serviço disponível",
       );
+      expect(result.reply).not.toContain("profissionais relacionados");
       expect(result.contextUpdate.matchedServiceIds).toBeUndefined();
     },
   );
@@ -278,6 +288,9 @@ describe("BotMessageRouter no estado INICIO", () => {
     },
     { message: "como você está", nlu: fallbackNlu() },
     { message: "obrigado", nlu: fallbackNlu() },
+    { message: "estou triste hoje", nlu: fallbackNlu() },
+    { message: "hoje estou cansado", nlu: fallbackNlu() },
+    { message: "gosto de música", nlu: fallbackNlu() },
   ])(
     "mantém conversa casual '$message' no INICIO",
     async ({ message, nlu }) => {
@@ -291,6 +304,14 @@ describe("BotMessageRouter no estado INICIO", () => {
 
       expect(result.nextState).toBe(BotState.INICIO);
       expect(result.contextUpdate.matchedServiceIds).toBeUndefined();
+      if (nlu.intent === "FALLBACK") {
+        expect(result.reply).toContain(
+          "consigo ajudar com serviços e agendamentos do DelBicos",
+        );
+        expect(result.reply).not.toContain(
+          "Não consegui identificar um serviço disponível",
+        );
+      }
     },
   );
 
@@ -372,5 +393,67 @@ describe("BotMessageRouter no estado INICIO", () => {
 
     expect(result.nextState).toBe(BotState.COLETANDO_DATA);
     expect(result.contextUpdate.matchedServiceIds).toEqual([330]);
+  });
+
+  it("aproveita serviço, data e horário informados no mesmo comando", async () => {
+    (ServiceModel.findAll as jest.Mock).mockResolvedValue([
+      serviceFixture(340, "Limpeza Residencial", 340, "Limpeza"),
+    ]);
+    mockColetandoDataHandle.mockImplementation(
+      async (_message, _nlu, session) => {
+        expect(session.context).toMatchObject({
+          serviceName: "Limpeza Residencial",
+          matchedServiceIds: [340],
+        });
+        return {
+          reply: "Data encontrada",
+          nextState: BotState.COLETANDO_HORARIO,
+          contextUpdate: {
+            date: "2026-09-19",
+            availableDayServiceIds: [340],
+          },
+        };
+      },
+    );
+    mockColetandoHorarioHandle.mockImplementation(
+      async (_message, _nlu, session) => {
+        expect(session.context).toMatchObject({
+          serviceName: "Limpeza Residencial",
+          matchedServiceIds: [340],
+          date: "2026-09-19",
+          availableDayServiceIds: [340],
+        });
+        return {
+          reply: "Profissional encontrado",
+          nextState: BotState.SELECIONANDO_PROFISSIONAL,
+          contextUpdate: { time: "14:30" },
+        };
+      },
+    );
+
+    const session = sessionFixture();
+    const result = await BotMessageRouter.route(
+      BotState.INICIO,
+      "quero agendar limpeza residencial sábado às 14:30",
+      {
+        intent: "AGENDAR",
+        entities: {
+          service: "limpeza residencial",
+          date: "2026-09-19",
+          time: "14:30",
+        },
+        confidence: 1,
+      },
+      session,
+      1,
+    );
+
+    expect(mockColetandoDataHandle).toHaveBeenCalledTimes(1);
+    expect(mockColetandoHorarioHandle).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      reply: "Profissional encontrado",
+      nextState: BotState.SELECIONANDO_PROFISSIONAL,
+      contextUpdate: { time: "14:30" },
+    });
   });
 });
