@@ -1023,8 +1023,8 @@ export class ColetandoServicoState implements BotStateNode {
     if (scoredServices.length === 0) {
       return {
         reply:
-          `Não encontrei serviços nem profissionais relacionados a "${searchTerm}". ` +
-          'Tente outro termo (ex.: "limpeza", "tomada" ou "montagem de móveis").',
+          "Não consegui identificar um serviço disponível a partir dessa mensagem. " +
+          'Informe somente o tipo de serviço que procura (ex.: "limpeza", "tomada" ou "montagem de móveis").',
         nextState: "COLETANDO_SERVICO",
         contextUpdate: clearedServiceSearchContext(),
         serviceSearchOutcome: "NOT_FOUND",
