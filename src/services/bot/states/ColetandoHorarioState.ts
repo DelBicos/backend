@@ -21,6 +21,7 @@ import {
 import { getAvailableSlots } from "../../availability.service";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
+import { isAvailableTimesQuestion } from "../contextualMessage";
 import { ColetandoDataState } from "./ColetandoDataState";
 import { buildConfirmationResponse } from "./stateHelpers";
 
@@ -234,7 +235,11 @@ export class ColetandoHorarioState implements BotStateNode {
     const requestedDate =
       nlu.entities.date ??
       parsePortugueseDate(userMessage, { timeZone: ctx.timeZone });
-    if (requestedDate && (!time || requestedDate !== date)) {
+    const availabilityQuestion = isAvailableTimesQuestion(userMessage);
+    if (
+      requestedDate &&
+      (requestedDate !== date || (!time && !availabilityQuestion))
+    ) {
       // Trocar o dia deve repetir a validação de disponibilidade e mostrar
       // novamente quem atende naquela data antes de solicitar o horário. A
       // data tem precedência quando a mesma mensagem também contém uma hora.
@@ -242,6 +247,43 @@ export class ColetandoHorarioState implements BotStateNode {
     }
 
     const matchingServices = await loadMatchingServices(ctx);
+
+    if (date && availabilityQuestion) {
+      const availableTimes = new Set<string>();
+      for (const service of matchingServices) {
+        const slots = await availableTimesForService(service, date);
+        slots.forEach((slot) => availableTimes.add(slot));
+      }
+
+      const suggestions = Array.from(availableTimes)
+        .sort()
+        .slice(0, MAX_TIME_SUGGESTIONS);
+      if (suggestions.length > 0) {
+        return {
+          reply:
+            `Tenho estes horários disponíveis em ${formatDatePtBR(date)}:\n\n` +
+            `${suggestions.join(" • ")}\n\nQual horário você prefere?`,
+          nextState: "COLETANDO_HORARIO",
+          contextUpdate: {
+            suggestedSlots: suggestions,
+            suggestedSlotsData: undefined,
+            professionalOptionsData: undefined,
+          },
+        };
+      }
+
+      return {
+        reply:
+          `Não encontrei horários disponíveis em ${formatDatePtBR(date)}. ` +
+          "Você quer informar outro dia?",
+        nextState: "COLETANDO_HORARIO",
+        contextUpdate: {
+          suggestedSlots: undefined,
+          suggestedSlotsData: undefined,
+          professionalOptionsData: undefined,
+        },
+      };
+    }
 
     if (!time) {
       const requestedPeriod =
