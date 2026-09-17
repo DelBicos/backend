@@ -167,8 +167,12 @@ export class InicioState implements BotStateNode {
       default:
         return {
           reply:
-            "Não entendi sua solicitação. Posso ajudá-lo a:\n" +
-            "• Agendar um serviço\n• Consultar seus agendamentos\n• Cancelar ou reagendar",
+            "Entendi. No momento, consigo ajudar com serviços e agendamentos do DelBicos. " +
+            "Você pode:\n" +
+            "• Agendar um serviço\n" +
+            "• Consultar seus agendamentos\n" +
+            "• Cancelar ou reagendar\n\n" +
+            'Por exemplo, diga: "quero agendar uma limpeza".',
           nextState: "INICIO",
           contextUpdate: {},
         };
