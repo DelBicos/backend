@@ -94,10 +94,9 @@ function looksLikeServiceDescription(message: string): boolean {
   const words = normalized.split(" ").filter(Boolean);
   return (
     words.length > 0 &&
-    (words.length <= 5 ||
-      /\b(?:troca|trocar|conserto|consertar|manutencao|instalacao|instalar|limpeza|limpar|reforma|reformar|montagem|montar|servico|profissional)\b/.test(
-        normalized,
-      ))
+    /\b(?:troca|trocar|conserto|consertar|manutencao|instalacao|instalar|limpeza|limpar|reforma|reformar|montagem|montar|servico|profissional)\b/.test(
+      normalized,
+    )
   );
 }
 
@@ -168,6 +167,43 @@ export class BotMessageRouter {
           session.context = originalContext;
         }
       }
+    }
+
+    // Uma única fala costuma trazer mais de uma etapa do agendamento, por
+    // exemplo: "quero limpeza sexta às 14:30". O NLU já extrai essas
+    // entidades, mas antes o roteador descartava data e horário assim que o
+    // serviço era localizado e obrigava o usuário a repeti-los. Avança apenas
+    // pelas etapas que possuem uma entidade explícita, mantendo as validações
+    // de disponibilidade dos mesmos handlers usados em mensagens separadas.
+    if (result.nextState === BotState.COLETANDO_DATA && nlu.entities.date) {
+      session.context = {
+        ...(session.context ?? {}),
+        ...result.contextUpdate,
+      };
+      result = await stateNodes[BotState.COLETANDO_DATA].handle(
+        userMessage,
+        nlu,
+        session,
+        userId,
+        selectedTimeIso,
+      );
+    }
+
+    if (
+      result.nextState === BotState.COLETANDO_HORARIO &&
+      (nlu.entities.time || nlu.entities.time_period)
+    ) {
+      session.context = {
+        ...(session.context ?? {}),
+        ...result.contextUpdate,
+      };
+      result = await stateNodes[BotState.COLETANDO_HORARIO].handle(
+        userMessage,
+        nlu,
+        session,
+        userId,
+        selectedTimeIso,
+      );
     }
 
     return result;
