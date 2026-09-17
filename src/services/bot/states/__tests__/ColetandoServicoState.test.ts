@@ -448,7 +448,9 @@ describe("ColetandoServicoState", () => {
     );
 
     expect(result.nextState).toBe("COLETANDO_SERVICO");
-    expect(result.reply).toContain("Não encontrei serviços");
+    expect(result.reply).toContain(
+      "Não consegui identificar um serviço disponível",
+    );
     expect(result.reply).not.toContain("Para qual dia");
     expect(result.contextUpdate.matchedServiceIds).toBeUndefined();
     expect(result.contextUpdate).toHaveProperty(
@@ -471,8 +473,10 @@ describe("ColetandoServicoState", () => {
     );
 
     expect(result.nextState).toBe("COLETANDO_SERVICO");
-    expect(result.reply).toContain("Não encontrei serviços");
-    expect(result.reply).toContain("cabeamento");
+    expect(result.reply).toContain(
+      "Não consegui identificar um serviço disponível",
+    );
+    expect(result.reply).not.toContain("cabeamento");
     expect(result.reply).not.toContain("Cabelo & Barba");
     expect(result.contextUpdate).toHaveProperty(
       "serviceChoicesData",
@@ -529,8 +533,10 @@ describe("ColetandoServicoState", () => {
       );
 
       expect(result.nextState).toBe("COLETANDO_SERVICO");
-      expect(result.reply).toContain("Não encontrei serviços");
-      expect(result.reply).toContain(query);
+      expect(result.reply).toContain(
+        "Não consegui identificar um serviço disponível",
+      );
+      expect(result.reply).not.toContain(query);
       expect(result.reply).not.toContain(title);
       expect(result.contextUpdate.matchedServiceIds).toBeUndefined();
       expect(result.contextUpdate).toHaveProperty(
@@ -759,7 +765,9 @@ describe("ColetandoServicoState", () => {
     );
 
     expect(result.nextState).toBe("COLETANDO_SERVICO");
-    expect(result.reply).toContain("Não encontrei serviços");
+    expect(result.reply).toContain(
+      "Não consegui identificar um serviço disponível",
+    );
     expect(result.reply).not.toContain("Animação de Festa");
     expect(result.contextUpdate).toHaveProperty(
       "serviceChoicesData",
@@ -796,7 +804,9 @@ describe("ColetandoServicoState", () => {
     );
 
     expect(result.nextState).toBe("COLETANDO_SERVICO");
-    expect(result.reply).toContain("Não encontrei serviços");
+    expect(result.reply).toContain(
+      "Não consegui identificar um serviço disponível",
+    );
     expect(result.reply).not.toContain("Animação de Festa");
     expect(result.reply).not.toContain("Fotografia de Eventos");
     expect(result.contextUpdate).toHaveProperty(

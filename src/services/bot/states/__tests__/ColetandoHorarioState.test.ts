@@ -42,6 +42,42 @@ function serviceFixture(
 describe("ColetandoHorarioState", () => {
   beforeEach(() => jest.clearAllMocks());
 
+  it('lista os horários do dia quando o usuário pergunta "quais os horários"', async () => {
+    const date = futureDate();
+    (ServiceModel.findAll as jest.Mock).mockResolvedValue([
+      serviceFixture(10, 100, "Ana", 30),
+      serviceFixture(11, 101, "Bruno", 60),
+    ]);
+    (getAvailableSlots as jest.Mock)
+      .mockResolvedValueOnce(["09:00", "14:30"])
+      .mockResolvedValueOnce(["11:00", "14:30"]);
+
+    const result = await new ColetandoHorarioState().handle(
+      "quais os horários",
+      { intent: "CONSULTAR", entities: {}, confidence: 0.9 },
+      {
+        context: {
+          pendingAction: "CREATE",
+          serviceName: "Conserto de Vazamentos",
+          matchedServiceIds: [10, 11],
+          availableDayServiceIds: [10, 11],
+          date,
+        },
+      } as BotChatSessionModel,
+      1,
+    );
+
+    expect(result.nextState).toBe("COLETANDO_HORARIO");
+    expect(result.contextUpdate.suggestedSlots).toEqual([
+      "09:00",
+      "11:00",
+      "14:30",
+    ]);
+    expect(result.reply).toContain("horários disponíveis");
+    expect(result.reply).toContain("09:00 • 11:00 • 14:30");
+    expect(result.reply).toContain("Qual horário você prefere?");
+  });
+
   it("só mostra profissionais disponíveis depois de receber o horário", async () => {
     const date = futureDate();
     (ServiceModel.findAll as jest.Mock).mockResolvedValue([
