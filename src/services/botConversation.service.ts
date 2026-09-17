@@ -6,6 +6,7 @@ import { BotState } from "../constants/botStates";
 import { logError } from "../utils/logger";
 import { resolveBotTimeZone } from "../utils/date.util";
 import { buildGreetingReply } from "./bot/greetingReply";
+import { isAvailableTimesQuestion } from "./bot/contextualMessage";
 import { normalizeText } from "../utils/nlp.util";
 
 export interface BotMessageResponse {
@@ -194,12 +195,13 @@ export async function processMessage(
   }
 
   // 3. Verifica redirecionamento explícito
-  const isExplicitIntent = [
-    "AGENDAR",
-    "ALTERAR",
-    "CANCELAR",
-    "CONSULTAR",
-  ].includes(nlu.intent);
+  const isContextualAvailabilityQuestion =
+    session.state === BotState.COLETANDO_HORARIO &&
+    nlu.intent === "CONSULTAR" &&
+    isAvailableTimesQuestion(trimmedMessage);
+  const isExplicitIntent =
+    !isContextualAvailabilityQuestion &&
+    ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR"].includes(nlu.intent);
   let shouldRedirectToInicio = false;
   if (isExplicitIntent) {
     if (nlu.intent === "AGENDAR") {
