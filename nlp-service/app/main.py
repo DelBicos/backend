@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import os
+import secrets
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.model import classify, load_model
@@ -14,6 +15,18 @@ from app.semantic import SemanticCandidate, rank_candidates
 
 app = FastAPI(title="DelBicos Intent Classifier", docs_url=None, redoc_url=None)
 artifact: dict[str, Any] | None = None
+
+
+def require_api_key(x_api_key: str = Header(default="", alias="X-API-Key")) -> None:
+    """Exige a chave de API compartilhada com o backend Express.
+
+    Falha fechado: se NLU_SERVICE_API_KEY nao estiver configurada no ambiente,
+    toda chamada e recusada -- nunca ha um modo sem autenticacao por engano.
+    Usa comparacao em tempo constante para nao vazar a chave por timing.
+    """
+    expected = os.getenv("NLU_SERVICE_API_KEY", "")
+    if not expected or not secrets.compare_digest(x_api_key, expected):
+        raise HTTPException(status_code=401, detail="Chave de API ausente ou invalida.")
 
 
 class ClassifyRequest(BaseModel):
@@ -78,7 +91,7 @@ def health() -> dict[str, str]:
     return {"status": "ok", "model_version": str(artifact["metadata"]["model_version"])}
 
 
-@app.post("/classify", response_model=ClassifyResponse)
+@app.post("/classify", response_model=ClassifyResponse, dependencies=[Depends(require_api_key)])
 def classify_intent(request: ClassifyRequest) -> ClassifyResponse:
     if artifact is None:
         raise HTTPException(status_code=503, detail="Modelo indisponível.")
@@ -90,7 +103,7 @@ def classify_intent(request: ClassifyRequest) -> ClassifyResponse:
     )
 
 
-@app.post("/semantic-search", response_model=SemanticSearchResponse)
+@app.post("/semantic-search", response_model=SemanticSearchResponse, dependencies=[Depends(require_api_key)])
 def semantic_search(request: SemanticSearchRequest) -> SemanticSearchResponse:
     """Ordena documentos de serviços enviados pela API principal.
 

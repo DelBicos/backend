@@ -29,6 +29,7 @@ services:
       - SEMANTIC_MODEL_NAME=${SEMANTIC_MODEL_NAME:-sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2}
       - SEMANTIC_MIN_SCORE=${SEMANTIC_MIN_SCORE:-0.35}
       - SEMANTIC_EMBEDDING_CACHE_SIZE=${SEMANTIC_EMBEDDING_CACHE_SIZE:-5000}
+      - NLU_SERVICE_API_KEY=${NLU_SERVICE_API_KEY:-dev-local-only-key}
     expose:
       - "8000"
     healthcheck:
@@ -70,6 +71,7 @@ services:
       - MONGODB_URI=mongodb://mongo:27017/logs_db
       - MONGODB_CHAT_URI=mongodb://mongo:27017/delbicos_chat
       - NLU_SERVICE_URL=http://nlu-service:8000
+      - NLU_SERVICE_API_KEY=${NLU_SERVICE_API_KEY:-dev-local-only-key}
       - NLU_CLASSIFIER_TIMEOUT_MS=${NLU_CLASSIFIER_TIMEOUT_MS:-1000}
       - SEMANTIC_SEARCH_TIMEOUT_MS=${SEMANTIC_SEARCH_TIMEOUT_MS:-5000}
       - SEMANTIC_MIN_SCORE=${SEMANTIC_MIN_SCORE:-0.35}
