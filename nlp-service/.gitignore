@@ -2,3 +2,4 @@ __pycache__/
 *.pyc
 .venv-train/
 .pytest_cache/
+deploy.zip
