@@ -1,0 +1,42 @@
+name: 04 - Deploy do backend no Azure App Service
+
+# Gatilho: roda em paralelo ao "02 - Buildar e publicar imagem Docker",
+# assim que a análise semântica pós-merge (workflow "01") terminar com sucesso.
+# Não depende do Docker Hub: o Azure App Service (Free F1) usa deploy nativo (Oryx),
+# sem contêiner customizado.
+on:
+  workflow_run:
+    workflows: ["01 - Análise Semântica Pós-Merge"]
+    types:
+      - completed
+
+jobs:
+  deploy:
+    name: Build e deploy no Azure App Service (delbicos-backend-edu)
+    runs-on: ubuntu-latest
+    if: github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: Instalar dependências (com devDependencies, necessárias para o build)
+        run: npm ci
+
+      - name: Buildar TypeScript
+        run: npm run build
+
+      - name: Remover devDependencies antes do deploy (reduz o pacote e a superfície de ataque)
+        run: npm prune --omit=dev
+
+      - name: Deploy no Azure App Service
+        uses: azure/webapps-deploy@v3
+        with:
+          app-name: delbicos-backend-edu
+          publish-profile: ${{ secrets.AZURE_BACKEND_PUBLISH_PROFILE }}
+          package: .
