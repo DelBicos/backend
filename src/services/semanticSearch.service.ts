@@ -6,6 +6,7 @@ const SEMANTIC_SEARCH_TIMEOUT_MS =
     ? configuredTimeoutMs
     : 5000;
 const NLU_SERVICE_URL = (process.env.NLU_SERVICE_URL ?? "http://nlu-service:8000").replace(/\/$/, "");
+const NLU_SERVICE_API_KEY = process.env.NLU_SERVICE_API_KEY ?? "";
 const NLU_MAX_CANDIDATES_PER_REQUEST = 500;
 const MAX_SEMANTIC_RESULTS = 500;
 
@@ -68,7 +69,10 @@ async function rankCandidateBatch(
     const response = await fetch(`${NLU_SERVICE_URL}/semantic-search`, {
       method: "POST",
       signal: controller.signal,
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": NLU_SERVICE_API_KEY,
+      },
       body: JSON.stringify({
         query: query.trim(),
         candidates,

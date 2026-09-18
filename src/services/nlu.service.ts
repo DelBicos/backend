@@ -18,6 +18,7 @@ const NLU_TIMEOUT_MS =
 const NLU_SERVICE_URL = (
   process.env.NLU_SERVICE_URL ?? "http://nlu-service:8000"
 ).replace(/\/$/, "");
+const NLU_SERVICE_API_KEY = process.env.NLU_SERVICE_API_KEY ?? "";
 
 const VALID_INTENTS = new Set([
   "AGENDAR",
@@ -626,7 +627,10 @@ export async function analyzeMessage(
     const response = await fetch(`${NLU_SERVICE_URL}/classify`, {
       method: "POST",
       signal: controller.signal,
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-API-Key": NLU_SERVICE_API_KEY,
+      },
       body: JSON.stringify({ text: message }),
     });
     if (!response.ok) {
