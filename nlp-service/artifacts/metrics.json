@@ -1,0 +1,67 @@
+{
+  "model_version": "tfidf-word-char-linear-svm-3a39e63a5f3f",
+  "trained_at": "2026-09-18T03:35:04.551572+00:00",
+  "corpus_sha256": "3a39e63a5f3f",
+  "samples": 285,
+  "labels": [
+    "AGENDAR",
+    "ALTERAR",
+    "CANCELAR",
+    "CONSULTAR",
+    "FALLBACK",
+    "SAUDACAO"
+  ],
+  "accuracy": 0.9825,
+  "f1_macro": 0.9835,
+  "classification_report": {
+    "AGENDAR": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 9.0
+    },
+    "ALTERAR": {
+      "precision": 1.0,
+      "recall": 0.8888888888888888,
+      "f1-score": 0.9411764705882353,
+      "support": 9.0
+    },
+    "CANCELAR": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 9.0
+    },
+    "CONSULTAR": {
+      "precision": 0.9230769230769231,
+      "recall": 1.0,
+      "f1-score": 0.96,
+      "support": 12.0
+    },
+    "FALLBACK": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 9.0
+    },
+    "SAUDACAO": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 9.0
+    },
+    "accuracy": 0.9824561403508771,
+    "macro avg": {
+      "precision": 0.9871794871794872,
+      "recall": 0.9814814814814815,
+      "f1-score": 0.9835294117647059,
+      "support": 57.0
+    },
+    "weighted avg": {
+      "precision": 0.9838056680161944,
+      "recall": 0.9824561403508771,
+      "f1-score": 0.9822910216718266,
+      "support": 57.0
+    }
+  }
+}

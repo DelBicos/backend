@@ -66,7 +66,8 @@ def get_semantic_min_score() -> float:
 @app.on_event("startup")
 def startup() -> None:
     global artifact
-    model_path = Path(os.getenv("MODEL_PATH", "/app/artifacts/intent_classifier.joblib"))
+    default_model_path = Path(__file__).resolve().parent.parent / "artifacts" / "intent_classifier.joblib"
+    model_path = Path(os.getenv("MODEL_PATH", str(default_model_path)))
     artifact = load_model(model_path)
 
 
