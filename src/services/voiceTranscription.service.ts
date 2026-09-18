@@ -1,13 +1,8 @@
 import logger from "../utils/logger";
 
-const GEMINI_API_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models";
-const DEFAULT_GEMINI_MODEL = "gemini-flash-latest";
 const DEFAULT_TOTAL_TIMEOUT_MS = 45_000;
-const DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS = 20_000;
-const GEMINI_MAX_ATTEMPTS = 2;
-const GEMINI_RETRY_DELAY_MS = 250;
 
-type VoiceTranscriptionProvider = "gemini" | "openai-compatible" | "deepgram" | "mock";
+type VoiceTranscriptionProvider = "openai-compatible" | "deepgram" | "mock";
 
 interface ResolvedProvider {
   provider: VoiceTranscriptionProvider;
@@ -56,26 +51,8 @@ function readEnvironment(name: string): string | undefined {
   return value || undefined;
 }
 
-function isGeminiModel(model: string | undefined): boolean {
-  return Boolean(model && /^(?:models\/)?gemini(?:[-_.]|$)/i.test(model));
-}
-
-function normalizeGeminiModel(model: string | undefined): string {
-  const normalized = model?.replace(/^models\//i, "");
-  return isGeminiModel(normalized) ? normalized! : DEFAULT_GEMINI_MODEL;
-}
-
-function geminiEndpoint(model: string, apiKey?: string): string {
-  const baseUrl = `${GEMINI_API_BASE_URL}/${encodeURIComponent(model)}:generateContent`;
-  return apiKey ? `${baseUrl}?key=${encodeURIComponent(apiKey)}` : baseUrl;
-}
-
 function resolveExplicitProvider(value: string): VoiceTranscriptionProvider {
   switch (value.trim().toLowerCase()) {
-    case "gemini":
-    case "google":
-    case "google-gemini":
-      return "gemini";
     case "deepgram":
     case "deep-gram":
       return "deepgram";
@@ -102,11 +79,6 @@ function resolveProvider(): ResolvedProvider {
   const deepgramApiKey =
     readEnvironment("DEEPGRAM_API_KEY") ||
     (explicitProvider === "deepgram" ? voiceApiKey || legacyApiKey : undefined);
-  const geminiApiKey =
-    voiceApiKey ||
-    readEnvironment("GEMINI_API_KEY") ||
-    readEnvironment("GOOGLE_API_KEY") ||
-    legacyApiKey;
 
   if (explicitProvider) {
     const provider = resolveExplicitProvider(explicitProvider);
@@ -126,26 +98,14 @@ function resolveProvider(): ResolvedProvider {
         model: voiceModel || "nova-2",
       };
     }
-    if (provider === "openai-compatible") {
-      const openAiApiKey = voiceApiKey || legacyApiKey;
-      if (!openAiApiKey) throw new VoiceTranscriptionConfigurationError();
-      return {
-        provider,
-        endpoint: endpoint || "https://api.openai.com/v1/audio/transcriptions",
-        apiKey: openAiApiKey,
-        model: voiceModel || legacyModel || "whisper-1",
-      };
-    }
 
-    if (!geminiApiKey) throw new VoiceTranscriptionConfigurationError();
-    const model = normalizeGeminiModel(
-      isGeminiModel(voiceModel) ? voiceModel : legacyModel,
-    );
+    const openAiApiKey = voiceApiKey || legacyApiKey;
+    if (!openAiApiKey) throw new VoiceTranscriptionConfigurationError();
     return {
       provider,
-      endpoint: endpoint || geminiEndpoint(model, geminiApiKey),
-      apiKey: geminiApiKey,
-      model,
+      endpoint: endpoint || "https://api.openai.com/v1/audio/transcriptions",
+      apiKey: openAiApiKey,
+      model: voiceModel || legacyModel || "whisper-1",
     };
   }
 
@@ -158,26 +118,12 @@ function resolveProvider(): ResolvedProvider {
     };
   }
 
-  // Um endpoint configurado preserva integralmente o provedor multipart já
-  // existente. A detecção do Gemini só ocorre quando não há endpoint genérico.
   if (endpoint) {
     return {
       provider: "openai-compatible",
       endpoint,
       apiKey: voiceApiKey,
       model: voiceModel || "whisper-1",
-    };
-  }
-
-  if (geminiApiKey) {
-    const model = normalizeGeminiModel(
-      isGeminiModel(voiceModel) ? voiceModel : legacyModel,
-    );
-    return {
-      provider: "gemini",
-      endpoint: geminiEndpoint(model, geminiApiKey),
-      apiKey: geminiApiKey,
-      model,
     };
   }
 
@@ -208,29 +154,6 @@ function extensionForMimeType(mimeType: string): string {
     "audio/x-wav": "wav",
   };
   return extensions[mimeType] ?? "webm";
-}
-
-function hasIsoBaseMediaFileSignature(audio: Buffer): boolean {
-  return audio.byteLength >= 8 && audio.toString("ascii", 4, 8) === "ftyp";
-}
-
-function normalizeGeminiMimeType(audio: Buffer, mimeType: string): string {
-  // Expo pode devolver um arquivo M4A/MP4 com o MIME genérico audio/mpeg.
-  // O box `ftyp` corrige somente esse caso ambíguo; 3GPP genuíno também usa
-  // ISO BMFF e precisa manter o MIME original.
-  if (mimeType.toLowerCase() === "audio/mpeg" && hasIsoBaseMediaFileSignature(audio)) {
-    return "audio/mp4";
-  }
-
-  switch (mimeType.toLowerCase()) {
-    case "audio/m4a":
-    case "audio/x-m4a":
-      return "audio/mp4";
-    case "audio/x-wav":
-      return "audio/wav";
-    default:
-      return mimeType.toLowerCase();
-  }
 }
 
 function readPositiveTimeout(name: string, fallback: number): number {
@@ -267,54 +190,6 @@ function readOpenAiCompatibleText(payload: unknown): string | null {
   return typeof text === "string" ? cleanTranscription(text) : null;
 }
 
-function readGeminiText(payload: unknown): string | null {
-  if (!payload || typeof payload !== "object") return null;
-  const candidates = (payload as Record<string, unknown>).candidates;
-  if (!Array.isArray(candidates) || candidates.length === 0) return null;
-
-  const firstCandidate = candidates[0];
-  if (!firstCandidate || typeof firstCandidate !== "object") return null;
-  const content = (firstCandidate as Record<string, unknown>).content;
-  if (!content || typeof content !== "object") return null;
-  const parts = (content as Record<string, unknown>).parts;
-  if (!Array.isArray(parts)) return null;
-
-  const text = parts
-    .map((part) =>
-      part && typeof part === "object" && typeof (part as Record<string, unknown>).text === "string"
-        ? ((part as Record<string, unknown>).text as string)
-        : "",
-    )
-    .filter(Boolean)
-    .join("\n");
-  return cleanTranscription(text);
-}
-
-function createGeminiRequest(audio: Buffer, mimeType: string): string {
-  return JSON.stringify({
-    contents: [
-      {
-        role: "user",
-        parts: [
-          {
-            text:
-              "Transcreva este áudio em português do Brasil. Retorne somente as palavras faladas, sem explicações, títulos, formatação, aspas ou comentários. Preserve nomes próprios e números como foram ditos.",
-          },
-          {
-            inlineData: {
-              mimeType,
-              data: audio.toString("base64"),
-            },
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      temperature: 0,
-    },
-  });
-}
-
 async function requestProvider(
   config: ResolvedProvider,
   init: RequestInit,
@@ -322,114 +197,67 @@ async function requestProvider(
   bytes: number,
   readText: (response: Response) => Promise<string | null>,
   deadline: number,
-  geminiAttemptTimeoutMs: number,
 ): Promise<string> {
   const startedAt = Date.now();
-  const maxAttempts = config.provider === "gemini" ? GEMINI_MAX_ATTEMPTS : 1;
+  const remainingTotalMs = deadline - Date.now();
+  if (remainingTotalMs <= 0) throw new VoiceTranscriptionProviderError();
 
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    const remainingTotalMs = deadline - Date.now();
-    if (remainingTotalMs <= 0) throw new VoiceTranscriptionProviderError();
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), remainingTotalMs);
 
-    const attemptTimeoutMs = Math.min(
-      config.provider === "gemini" ? geminiAttemptTimeoutMs : remainingTotalMs,
-      remainingTotalMs,
-    );
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), attemptTimeoutMs);
+  try {
+    const response = await fetch(config.endpoint, {
+      ...init,
+      signal: controller.signal,
+    });
+    logger.info("Transcrição de voz: resposta do provedor", {
+      provider: config.provider,
+      status: response.status,
+      mimeType,
+      bytes,
+      durationMs: Date.now() - startedAt,
+      attempt: 1,
+    });
 
-    try {
-      const response = await fetch(config.endpoint, {
-        ...init,
-        signal: controller.signal,
-      });
-      logger.info("Transcrição de voz: resposta do provedor", {
+    if (!response.ok) {
+      const errText = typeof response.text === "function" ? await response.text().catch(() => "") : "";
+      logger.warn("Transcrição de voz: provedor retornou erro HTTP", {
         provider: config.provider,
         status: response.status,
-        mimeType,
-        bytes,
-        durationMs: Date.now() - startedAt,
-        attempt,
+        errorBody: errText.slice(0, 500),
       });
-      const isTransientGeminiFailure =
-        config.provider === "gemini" && response.status === 503;
-      if (!isTransientGeminiFailure || attempt === maxAttempts) {
-        if (!response.ok) {
-          const errText = typeof response.text === "function" ? await response.text().catch(() => "") : "";
-          logger.warn("Transcrição de voz: provedor retornou erro HTTP", {
-            provider: config.provider,
-            status: response.status,
-            errorBody: errText.slice(0, 500),
-          });
-          if (response.status === 429) {
-            throw new VoiceTranscriptionRateLimitError();
-          }
-          throw new VoiceTranscriptionProviderError();
-        }
-
-        const text = await readText(response);
-        if (!text) throw new VoiceTranscriptionProviderError();
-        return text;
+      if (response.status === 429) {
+        throw new VoiceTranscriptionRateLimitError();
       }
-    } catch (error) {
-      if (error instanceof VoiceTranscriptionProviderError) throw error;
-
-      const isTimeout =
-        controller.signal.aborted || (error instanceof Error && error.name === "AbortError");
-      const cause =
-        error && typeof error === "object"
-          ? (error as { cause?: { code?: unknown }; code?: unknown }).cause
-          : undefined;
-      const connectionCode =
-        cause && typeof cause === "object" ? cause.code : (error as { code?: unknown })?.code;
-      const isTransientConnectionError =
-        isTimeout ||
-        error instanceof TypeError ||
-        (typeof connectionCode === "string" &&
-          [
-            "EAI_AGAIN",
-            "ECONNREFUSED",
-            "ECONNRESET",
-            "ENETUNREACH",
-            "ENOTFOUND",
-            "ETIMEDOUT",
-            "UND_ERR_CONNECT_TIMEOUT",
-            "UND_ERR_HEADERS_TIMEOUT",
-            "UND_ERR_SOCKET",
-          ].includes(connectionCode));
-
-      logger.warn("Transcrição de voz: provedor indisponível", {
-        provider: config.provider,
-        status: "network_error",
-        mimeType,
-        bytes,
-        durationMs: Date.now() - startedAt,
-        attempt,
-        reason: isTimeout ? "timeout" : "connection_error",
-      });
-
-      if (
-        config.provider !== "gemini" ||
-        !isTransientConnectionError ||
-        attempt === maxAttempts
-      ) {
-        throw error;
-      }
-    } finally {
-      clearTimeout(timeout);
+      throw new VoiceTranscriptionProviderError();
     }
 
-    // A espera também consome o orçamento total. Se ele acabar aqui, nenhuma
-    // nova chamada é iniciada com um signal já vencido.
-    const remainingBeforeRetryMs = deadline - Date.now();
-    if (remainingBeforeRetryMs <= 0) throw new VoiceTranscriptionProviderError();
-    await new Promise((resolve) =>
-      setTimeout(resolve, Math.min(GEMINI_RETRY_DELAY_MS, remainingBeforeRetryMs)),
-    );
-  }
+    const text = await readText(response);
+    if (!text) throw new VoiceTranscriptionProviderError();
+    return text;
+  } catch (error) {
+    if (
+      error instanceof VoiceTranscriptionProviderError ||
+      error instanceof VoiceTranscriptionRateLimitError
+    ) {
+      throw error;
+    }
 
-  // O laço sempre retorna ou lança; este erro mantém a função total para o TS.
-  throw new VoiceTranscriptionProviderError();
+    const isTimeout =
+      controller.signal.aborted || (error instanceof Error && error.name === "AbortError");
+    logger.warn("Transcrição de voz: provedor indisponível", {
+      provider: config.provider,
+      status: "network_error",
+      mimeType,
+      bytes,
+      durationMs: Date.now() - startedAt,
+      attempt: 1,
+      reason: isTimeout ? "timeout" : "connection_error",
+    });
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function callProvider(
@@ -438,31 +266,10 @@ async function callProvider(
   mimeType: string,
   language: string,
   deadline: number,
-  geminiAttemptTimeoutMs: number,
 ): Promise<string> {
   if (config.provider === "mock") {
     logger.info("Transcrição de voz: usando provedor mock para ambiente local");
     return "Quero agendar um serviço de faxina";
-  }
-
-  if (config.provider === "gemini") {
-    const geminiMimeType = normalizeGeminiMimeType(audio, mimeType);
-    return requestProvider(
-      config,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-goog-api-key": config.apiKey!,
-        },
-        body: createGeminiRequest(audio, geminiMimeType),
-      },
-      geminiMimeType,
-      audio.byteLength,
-      async (response) => readGeminiText(await response.json()),
-      deadline,
-      geminiAttemptTimeoutMs,
-    );
   }
 
   if (config.provider === "deepgram") {
@@ -484,7 +291,6 @@ async function callProvider(
       audio.byteLength,
       async (response) => readDeepgramText(await response.json()),
       deadline,
-      geminiAttemptTimeoutMs,
     );
   }
 
@@ -512,14 +318,13 @@ async function callProvider(
     audio.byteLength,
     async (response) => readOpenAiCompatibleText(await response.json()),
     deadline,
-    geminiAttemptTimeoutMs,
   );
 }
 
 /**
- * Converte áudio em texto. Mantém compatibilidade com endpoints multipart no
- * formato OpenAI e também usa a API REST generateContent do Gemini diretamente.
- * Credenciais permanecem exclusivamente no backend.
+ * Converte áudio em texto. Suporta o provedor Deepgram nativamente e qualquer
+ * endpoint multipart no formato OpenAI (ex.: Whisper). Credenciais permanecem
+ * exclusivamente no backend.
  */
 export async function transcribeVoiceAudio(
   audio: Buffer,
@@ -531,21 +336,10 @@ export async function transcribeVoiceAudio(
     "VOICE_TRANSCRIPTION_TIMEOUT_MS",
     DEFAULT_TOTAL_TIMEOUT_MS,
   );
-  const geminiAttemptTimeoutMs = readPositiveTimeout(
-    "VOICE_TRANSCRIPTION_ATTEMPT_TIMEOUT_MS",
-    DEFAULT_GEMINI_ATTEMPT_TIMEOUT_MS,
-  );
   const deadline = Date.now() + totalTimeoutMs;
 
   try {
-    return await callProvider(
-      config,
-      audio,
-      mimeType,
-      language,
-      deadline,
-      geminiAttemptTimeoutMs,
-    );
+    return await callProvider(config, audio, mimeType, language, deadline);
   } catch (error) {
     if (
       error instanceof VoiceTranscriptionConfigurationError ||
