@@ -1,3 +1,10 @@
+# A build CPU-only do PyTorch é resolvida via extra-index-url: como ela usa um
+# identificador de versão local (ex.: 2.3.1+cpu), o pip prefere essa variante
+# à build padrão do PyPI (que inclui bibliotecas CUDA e é bem maior). Os
+# demais pacotes continuam resolvendo normalmente pelo índice padrão do PyPI.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+
 fastapi>=0.115,<0.117
 uvicorn[standard]>=0.30,<0.36
 nltk>=3.9,<4.0
