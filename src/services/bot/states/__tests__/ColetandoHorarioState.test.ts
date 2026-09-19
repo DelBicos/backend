@@ -147,6 +147,35 @@ describe("ColetandoHorarioState", () => {
     expect(result.reply).not.toContain("24/ago");
   });
 
+  it('entende "10 da noite" como 22:00 e continua para o profissional disponível', async () => {
+    const date = futureDate();
+    (ServiceModel.findAll as jest.Mock).mockResolvedValue([
+      serviceFixture(10, 100, "Ana", 60),
+    ]);
+    (getAvailableSlots as jest.Mock).mockResolvedValue(["22:00"]);
+
+    const result = await new ColetandoHorarioState().handle(
+      "10 da noite",
+      { intent: "SAUDACAO", entities: {}, confidence: 0.69 },
+      {
+        context: {
+          pendingAction: "CREATE",
+          serviceName: "Desentupimento",
+          matchedServiceIds: [10],
+          availableDayServiceIds: [10],
+          date,
+          timeZone: "America/Sao_Paulo",
+        },
+      } as BotChatSessionModel,
+      1,
+    );
+
+    expect(result.nextState).toBe("SELECIONANDO_PROFISSIONAL");
+    expect(result.contextUpdate.time).toBe("22:00");
+    expect(result.reply).toContain("Entendi o horário informado como 22:00");
+    expect(result.reply).toContain("Ana");
+  });
+
   it("mantém 14:30 quando não há encaixe exato e prioriza alternativas reais da tarde", async () => {
     const date = futureDate();
     const actualSlots = [
