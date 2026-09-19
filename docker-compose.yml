@@ -49,7 +49,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    command: npm run dev
+    command:
+      - ./node_modules/.bin/ts-node-dev
+      - --respawn
+      - --transpile-only
+      - --poll
+      - ./server.ts
     container_name: server-delbicos
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-development}
