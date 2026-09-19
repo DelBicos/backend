@@ -100,6 +100,41 @@ describe("ColetandoDataState", () => {
     expect(getAvailableSlots).toHaveBeenCalledWith(102, date, 90, 12);
   });
 
+  it.each(["sábado que vem", "proximo sabado"])(
+    'continua o agendamento com "%s" quando o sábado imediato viola as 48 horas',
+    async (message) => {
+    jest.useFakeTimers();
+    jest.setSystemTime(new Date("2026-09-18T15:00:00.000Z"));
+
+    try {
+      (ServiceModel.findAll as jest.Mock).mockResolvedValue([
+        serviceFixture(10, 100, "Ana", 60),
+      ]);
+      (getAvailableSlots as jest.Mock).mockResolvedValue(["09:00"]);
+
+      const result = await new ColetandoDataState().handle(
+        message,
+        { intent: "CONSULTAR", entities: {}, confidence: 0.91 },
+        session([10]),
+        1,
+      );
+
+      expect(result.nextState).toBe("COLETANDO_HORARIO");
+      expect(result.contextUpdate).toMatchObject({
+        date: "2026-09-26",
+        availableDayServiceIds: [10],
+        availableDayProfessionals: [
+          { professionalId: 100, professionalName: "Ana" },
+        ],
+      });
+      expect(result.reply).toContain("Qual horário");
+      expect(getAvailableSlots).toHaveBeenCalledWith(100, "2026-09-26", 60, 10);
+    } finally {
+      jest.useRealTimers();
+    }
+    },
+  );
+
   it("permanece na etapa de data e sugere próximos dias quando ninguém atende", async () => {
     const date = futureDate();
     const services = [serviceFixture(10, 100, "Ana", 30)];
