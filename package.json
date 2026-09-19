@@ -20,6 +20,7 @@
     "seed:undo": "npx sequelize-cli db:seed:undo",
     "seed": "npx sequelize-cli db:seed:all",
     "seed:reset": "npm run seed:undo:all && npm run seed",
+    "audit:catalog": "node scripts/audit-service-catalog.js",
     "docker:build": "docker-compose build",
     "docker:up": "docker-compose up -d",
     "docker:dev": "docker-compose up -d && docker-compose logs --tail=100 -f delbicos-server",
