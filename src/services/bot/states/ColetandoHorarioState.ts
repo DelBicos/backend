@@ -374,7 +374,8 @@ export class ColetandoHorarioState implements BotStateNode {
       );
     }
     const inferredTimeNotice =
-      parsedTime && parsedTime !== time
+      parsedTime &&
+      (parsedTime !== time || Boolean(parseTimePeriodFromText(userMessage)))
         ? `Entendi o horário informado como ${time}.\n\n`
         : "";
 
