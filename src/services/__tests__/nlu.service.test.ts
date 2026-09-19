@@ -65,6 +65,55 @@ describe("analyzeMessage", () => {
   );
 
   it.each([
+    "sábado",
+    "sabadoo",
+    "sabaddo",
+    "sábado que vem",
+    "proximo sabado",
+    "próxima segunda",
+    "semana que vem na sexta",
+    "13 de agosto",
+  ])(
+    "trata a resposta de data como entrada estruturada sem consultar o classificador: %s",
+    async (message) => {
+      const fetchMock = jest.fn();
+      (global as any).fetch = fetchMock;
+
+      const result = await analyzeMessage(message);
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result.intent).toBe("FALLBACK");
+      expect(result.entities.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(result.confidence).toBe(1);
+    },
+  );
+
+  it.each([
+    ["10 da noite", "22:00", "EVENING"],
+    ["dez da noite", "22:00", "EVENING"],
+    ["às 10 da noite", "22:00", "EVENING"],
+    ["10 à noite", "22:00", "EVENING"],
+  ])(
+    "trata a resposta de horário como entrada estruturada: %s",
+    async (message, expectedTime, expectedPeriod) => {
+      const fetchMock = jest.fn();
+      (global as any).fetch = fetchMock;
+
+      const result = await analyzeMessage(message);
+
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result).toEqual({
+        intent: "FALLBACK",
+        entities: {
+          time: expectedTime,
+          time_period: expectedPeriod,
+        },
+        confidence: 1,
+      });
+    },
+  );
+
+  it.each([
     ["quero agendar", "AGENDAR"],
     ["pode cancelar meu agendamento", "CANCELAR"],
     ["desistir", "CANCELAR"],
