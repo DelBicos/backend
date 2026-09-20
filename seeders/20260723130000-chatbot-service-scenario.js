@@ -3,7 +3,6 @@
 const { customAlphabet } = require("nanoid");
 const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const generateShortId = customAlphabet(alphabet, 6);
-
 const SERVICE_TITLE = "Instalação de Tomada Inteligente";
 const SUBCATEGORY_TITLE = "Eletricista";
 const SERVICE_BANNER_PREFIX =
