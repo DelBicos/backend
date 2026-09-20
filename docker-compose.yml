@@ -93,6 +93,8 @@ services:
       - VOICE_COMMAND_IDEMPOTENCY_MAX_ENTRIES=${VOICE_COMMAND_IDEMPOTENCY_MAX_ENTRIES:-10000}
     volumes:
       - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./seeders:/app/seeders
       - ./server.ts:/app/server.ts
       - ./.env:/app/.env
     ports:

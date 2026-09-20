@@ -7,6 +7,7 @@ import {
   VoiceTranscriptionConfigurationError,
   VoiceTranscriptionProviderError,
   VoiceTranscriptionRateLimitError,
+  VoiceUnclearAudioError,
 } from "../services/voiceTranscription.service";
 import { processMessage } from "../services/botConversation.service";
 import { BotSessionContext } from "../models/BotChatSession";
@@ -113,6 +114,11 @@ function transcriptionErrorResponse(
   error: unknown,
   res: Response,
 ): Response | null {
+  if (error instanceof VoiceUnclearAudioError) {
+    return res.status(422).json({
+      error: "Não foi possível entender o áudio. Fale mais perto do microfone e tente novamente.",
+    });
+  }
   if (error instanceof VoiceTranscriptionConfigurationError) {
     return res.status(503).json({
       error: "Transcrição de voz ainda não está configurada neste ambiente",

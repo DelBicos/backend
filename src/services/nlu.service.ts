@@ -509,7 +509,8 @@ function extractServiceCandidate(message: string): string | undefined {
   }
 
   candidate = candidate
-    .replace(/^(?:de|para)\s+/i, "")
+    .replace(/^(?:de|para|pra|pro|em|no|na|um|uma|o|a)\s+/i, "")
+    .replace(/\s+(?:de|para|pra|pro|em|no|na|um|uma|o|a)$/i, "")
     .replace(/\s+(?:na(?:\s+minha)?|minha|em\s+minha)\s+agenda.*$/i, "")
     .replace(/\s+(?:de|para)$/i, "")
     .replace(/^(?:de|para)$/i, "")
@@ -517,6 +518,38 @@ function extractServiceCandidate(message: string): string | undefined {
 
   const genericTerms = new Set([
     "",
+    "a",
+    "o",
+    "as",
+    "os",
+    "um",
+    "uma",
+    "uns",
+    "umas",
+    "de",
+    "do",
+    "da",
+    "dos",
+    "das",
+    "em",
+    "no",
+    "na",
+    "nos",
+    "nas",
+    "para",
+    "pra",
+    "pro",
+    "pras",
+    "pros",
+    "dia",
+    "dias",
+    "semana",
+    "semanas",
+    "proxima",
+    "proximo",
+    "proximas",
+    "proximos",
+    "prox",
     "servico",
     "serviço",
     "um serviço",
@@ -541,10 +574,13 @@ function extractServiceCandidate(message: string): string | undefined {
   if (genericTerms.has(normalizeForRules(candidate))) return undefined;
   if (
     parsePortugueseDate(candidate) ||
+    parsePortugueseDate(message) ||
     parseTimePeriodFromText(candidate) ||
     parseTimeFromText(candidate)
   ) {
-    return undefined;
+    // Se a mensagem contém uma data legível e a palavra restante é um artigo ou palavra genérica
+    const words = candidate.split(/\s+/).filter(w => !genericTerms.has(normalizeForRules(w)));
+    if (words.length === 0) return undefined;
   }
   return candidate.slice(0, 200);
 }

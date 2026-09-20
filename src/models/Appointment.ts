@@ -3,7 +3,7 @@ import { sequelize } from "../config/database";
 import { customAlphabet } from 'nanoid';
 
 const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-const generateShortId = customAlphabet(alphabet, 6);
+export const generateShortId = customAlphabet(alphabet, 6);
 
 /*
 CREATE TABLE appointment (
@@ -30,7 +30,7 @@ CREATE TABLE appointment (
 
 export interface IAppointment {
   id?: number;
-  short_id: string;
+  short_id?: string;
   professional_id: number;
   client_id: number;
   service_id: number;
@@ -179,20 +179,22 @@ AppointmentModel.init(
     ],
     timestamps: true,
     hooks: {
-      beforeCreate: async (appointment: AppointmentModel) => {
-        let shortId: string;
-        let attempts = 0;
-        let unique = false;
-        while (!unique) {
-          shortId = generateShortId();
-          attempts++;
-          if (attempts > 100) {
-            throw new Error('Não foi possível gerar short_id único após 100 tentativas');
-          }
-          const existing = await AppointmentModel.findOne({ where: { short_id: shortId } });
-          if (!existing) {
-            appointment.short_id = shortId;
-            unique = true;
+      beforeValidate: async (appointment: AppointmentModel) => {
+        if (!appointment.short_id) {
+          let shortId: string;
+          let attempts = 0;
+          let unique = false;
+          while (!unique) {
+            shortId = generateShortId();
+            attempts++;
+            if (attempts > 100) {
+              throw new Error('Não foi possível gerar short_id único após 100 tentativas');
+            }
+            const existing = await AppointmentModel.findOne({ where: { short_id: shortId } });
+            if (!existing) {
+              appointment.short_id = shortId;
+              unique = true;
+            }
           }
         }
       }

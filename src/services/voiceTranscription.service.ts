@@ -25,6 +25,13 @@ export const ALLOWED_AUDIO_MIME_TYPES = new Set([
   "audio/x-wav",
 ]);
 
+export class VoiceUnclearAudioError extends Error {
+  public constructor() {
+    super("Não foi possível entender o áudio");
+    this.name = "VoiceUnclearAudioError";
+  }
+}
+
 export class VoiceTranscriptionConfigurationError extends Error {
   public constructor() {
     super("Serviço de transcrição não configurado");
@@ -233,10 +240,11 @@ async function requestProvider(
     }
 
     const text = await readText(response);
-    if (!text) throw new VoiceTranscriptionProviderError();
+    if (!text) throw new VoiceUnclearAudioError();
     return text;
   } catch (error) {
     if (
+      error instanceof VoiceUnclearAudioError ||
       error instanceof VoiceTranscriptionProviderError ||
       error instanceof VoiceTranscriptionRateLimitError
     ) {
@@ -343,6 +351,7 @@ export async function transcribeVoiceAudio(
   } catch (error) {
     if (
       error instanceof VoiceTranscriptionConfigurationError ||
+      error instanceof VoiceUnclearAudioError ||
       error instanceof VoiceTranscriptionProviderError ||
       error instanceof VoiceTranscriptionRateLimitError
     ) {
