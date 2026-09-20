@@ -1,6 +1,9 @@
 "use strict";
 
 const bcrypt = require("bcryptjs");
+const { customAlphabet } = require("nanoid");
+const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const generateShortId = customAlphabet(alphabet, 6);
 
 const DEMO_PASSWORD = "DelBicos@2026";
 
@@ -1300,6 +1303,7 @@ module.exports = {
             );
 
             return {
+              short_id: generateShortId(),
               professional_id: professionalId,
               client_id: Number(client.id),
               service_id: serviceId,

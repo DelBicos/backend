@@ -267,8 +267,14 @@ export async function processMessage(
           (currentCategory.includes(requestedService) ||
             requestedService.includes(currentCategory)));
 
+      const isGenericOrDate =
+        requestedService.length <= 2 ||
+        /^(?:uma?|o|a|para|dia|dias|semana|proxima|prox)$/.test(requestedService) ||
+        Boolean(parsePortugueseDate(trimmedMessage, { timeZone: ctx.timeZone }));
+
       const requestsDifferentService =
         requestedService.length > 0 &&
+        !isGenericOrDate &&
         (currentServiceTitle.length === 0 || !matchesCurrent);
 
       shouldRedirectToInicio =

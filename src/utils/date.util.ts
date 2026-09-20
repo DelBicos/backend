@@ -123,6 +123,8 @@ function normalizePortugueseText(text: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[ªº]/g, "")
     .replace(/[–—]/g, "-")
+    .replace(/\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)-?feira\b/g, "$1 feira")
+    .replace(/\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)feira\b/g, "$1 feira")
     .replace(/\s+/g, " ")
     .trim();
 }
