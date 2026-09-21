@@ -278,7 +278,7 @@ Saída:
 {
   "intent": "AGENDAR",
   "confidence": 0.91,
-  "model_version": "tfidf-word-char-linear-svm-3a39e63a5f3f"
+  "model_version": "tfidf-word-char-linear-svm-defefd4a58eb"
 }
 ```
 
@@ -304,19 +304,20 @@ endereços, telefones ou outros dados pessoais reais.
 
 ### 9.3.2. Tamanho e distribuição
 
-O conjunto atual possui 285 frases. A intenção `CONSULTAR` recebeu 15 exemplos
-adicionais para representar perguntas naturais que antes podiam cair em
-`FALLBACK`, como “como vejo os horários que marquei”:
+O conjunto atual possui 310 frases. Todas as intenções possuem pelo menos 50
+frases, e a intenção `CONSULTAR` mantém 15 exemplos adicionais para representar
+perguntas naturais que antes podiam cair em `FALLBACK`, como “como vejo os
+horários que marquei”:
 
 | Intenção | Quantidade | Percentual |
 | --- | ---: | ---: |
-| `SAUDACAO` | 45 | 15,79% |
-| `AGENDAR` | 45 | 15,79% |
-| `CONSULTAR` | 60 | 21,05% |
-| `ALTERAR` | 45 | 15,79% |
-| `CANCELAR` | 45 | 15,79% |
-| `FALLBACK` | 45 | 15,79% |
-| **Total** | **285** | **100%** |
+| `SAUDACAO` | 50 | 16,13% |
+| `AGENDAR` | 50 | 16,13% |
+| `CONSULTAR` | 60 | 19,35% |
+| `ALTERAR` | 50 | 16,13% |
+| `CANCELAR` | 50 | 16,13% |
+| `FALLBACK` | 50 | 16,13% |
+| **Total** | **310** | **100%** |
 
 A diferença é moderada e o `LinearSVC` utiliza `class_weight="balanced"` para
 compensar o número de exemplos por classe durante o treinamento. A expansão foi
@@ -356,21 +357,21 @@ stratify = labels
 
 Assim, a avaliação utilizou:
 
-- 228 frases para treinamento da avaliação;
-- 57 frases para teste;
-- 12 exemplos de teste para `CONSULTAR` e 9 para cada uma das demais intenções.
+- 248 frases para treinamento da avaliação;
+- 62 frases para teste;
+- 12 exemplos de teste para `CONSULTAR` e 10 para cada uma das demais intenções.
 
 Após calcular as métricas no conjunto separado, o pipeline utilizado pela
-aplicação é treinado novamente com as 285 frases. Dessa forma, nenhum exemplo
+aplicação é treinado novamente com as 310 frases. Dessa forma, nenhum exemplo
 versionado fica fora do modelo disponibilizado, mas as métricas continuam sendo
-calculadas apenas com as 57 frases que não participaram do treino de avaliação.
+calculadas apenas com as 62 frases que não participaram do treino de avaliação.
 
 ### 9.3.5. Estratégia de treinamento
 
 O treinamento executa:
 
 1. validação da estrutura do JSON;
-2. verificação de pelo menos duas classes e seis frases por classe;
+2. verificação de pelo menos duas classes e 50 frases por classe;
 3. divisão estratificada;
 4. criação dos dois vetorizadores TF-IDF;
 5. união dos vetores;
@@ -404,27 +405,27 @@ classe específica.
 Modelo avaliado:
 
 ```text
-tfidf-word-char-linear-svm-3a39e63a5f3f
+tfidf-word-char-linear-svm-defefd4a58eb
 ```
 
 Resultados gerais:
 
 | Métrica | Resultado |
 | --- | ---: |
-| Acurácia | 0,9825 — 98,25% |
-| F1 macro | 0,9835 — 98,35% |
-| Amostras de teste | 57 |
+| Acurácia | 0,9839 — 98,39% |
+| F1 macro | 0,9846 — 98,46% |
+| Amostras de teste | 62 |
 
 Resultados por intenção:
 
 | Intenção | Precisão | Recall | F1-score | Suporte |
 | --- | ---: | ---: | ---: | ---: |
-| `AGENDAR` | 1,0000 | 1,0000 | 1,0000 | 9 |
-| `ALTERAR` | 1,0000 | 0,8889 | 0,9412 | 9 |
-| `CANCELAR` | 1,0000 | 1,0000 | 1,0000 | 9 |
+| `AGENDAR` | 1,0000 | 1,0000 | 1,0000 | 10 |
+| `ALTERAR` | 1,0000 | 0,9000 | 0,9474 | 10 |
+| `CANCELAR` | 1,0000 | 1,0000 | 1,0000 | 10 |
 | `CONSULTAR` | 0,9231 | 1,0000 | 0,9600 | 12 |
-| `FALLBACK` | 1,0000 | 1,0000 | 1,0000 | 9 |
-| `SAUDACAO` | 1,0000 | 1,0000 | 1,0000 | 9 |
+| `FALLBACK` | 1,0000 | 1,0000 | 1,0000 | 10 |
+| `SAUDACAO` | 1,0000 | 1,0000 | 1,0000 | 10 |
 
 Os resultados mostram desempenho elevado no conjunto de teste atual. A única
 confusão registrada envolveu uma frase atribuída a `CONSULTAR`; por isso, novas
