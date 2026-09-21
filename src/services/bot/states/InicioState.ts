@@ -105,20 +105,70 @@ export class InicioState implements BotStateNode {
       }
 
       case "ALTERAR":
-        return {
-          reply:
-            "Para reagendar, preciso do ID do agendamento. Você pode encontrá-lo na seção \"Meus Agendamentos\" do app.\n\nDigite o número do ID do agendamento:",
-          nextState: "AGUARDANDO_ID_AGENDAMENTO",
-          contextUpdate: { intent: "ALTERAR", pendingAction: "RESCHEDULE" },
-        };
+      case "CANCELAR": {
+        const action = nlu.intent === "CANCELAR" ? "CANCEL" : "RESCHEDULE";
+        const actionText = nlu.intent === "CANCELAR" ? "cancelar" : "reagendar";
+        const intentName = nlu.intent;
 
-      case "CANCELAR":
+        const clientRecord = await ClientModel.findOne({ where: { user_id: userId } });
+        let activeAppointments: any[] = [];
+
+        if (clientRecord) {
+          activeAppointments = await AppointmentModel.findAll({
+            where: {
+              client_id: clientRecord.id,
+              status: { [Op.in]: ["pending", "confirmed"] },
+              start_time: { [Op.gte]: new Date() },
+            },
+            include: [{ model: ServiceModel, as: "Service" }],
+            order: [["start_time", "ASC"]],
+            limit: 5,
+          });
+        }
+
+        if (activeAppointments.length > 0) {
+          const optionLabels: string[] = [];
+          const appointmentList: Array<{ index: number; id: number; shortId?: string }> = [];
+
+          const lines = activeAppointments.map((a: any, i: number) => {
+            const idx = i + 1;
+            const d = new Date(a.start_time);
+            const dateStr = d.toLocaleDateString("pt-BR");
+            const timeStr = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+            const svcTitle = a.Service?.title ?? "Serviço";
+            const label = `${idx}. ${svcTitle} (${dateStr})`;
+
+            optionLabels.push(label);
+            appointmentList.push({ index: idx, id: a.id, shortId: a.short_id });
+
+            return `${idx}. ${svcTitle} — ${dateStr} às ${timeStr} (ID: ${a.short_id || a.id})`;
+          });
+
+          const replyMessage =
+            `Selecione qual agendamento você deseja ${actionText}:\n\n` +
+            `${lines.join("\n")}\n\n` +
+            `Clique em uma das opções abaixo ou digite o número correspondente:`;
+
+          return {
+            reply: replyMessage,
+            nextState: "AGUARDANDO_ID_AGENDAMENTO",
+            contextUpdate: {
+              intent: intentName,
+              pendingAction: action,
+              serviceOptions: optionLabels,
+              userAppointmentList: appointmentList,
+            },
+          };
+        }
+
+        const defaultWord = nlu.intent === "CANCELAR" ? "cancelar" : "reagendar";
         return {
           reply:
-            "Para cancelar, preciso do ID do agendamento. Você pode encontrá-lo na seção \"Meus Agendamentos\" do app.\n\nDigite o número do ID do agendamento:",
+            `Para ${defaultWord}, preciso do ID do agendamento. Você pode encontrá-lo na seção "Meus Agendamentos" do app.\n\nDigite o número do ID do agendamento:`,
           nextState: "AGUARDANDO_ID_AGENDAMENTO",
-          contextUpdate: { intent: "CANCELAR", pendingAction: "CANCEL" },
+          contextUpdate: { intent: intentName, pendingAction: action },
         };
+      }
 
       case "CONSULTAR": {
         const clientRecord = await ClientModel.findOne({ where: { user_id: userId } });
