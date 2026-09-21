@@ -433,6 +433,32 @@ export async function transcribeVoiceAudio(
     return await callProvider(config, audio, mimeType, language, deadline);
   } catch (error) {
     if (
+      (error instanceof VoiceTranscriptionProviderError || error instanceof VoiceTranscriptionRateLimitError) &&
+      config.provider !== "deepgram" &&
+      config.provider !== "mock"
+    ) {
+      const deepgramApiKey = readEnvironment("DEEPGRAM_API_KEY");
+      if (deepgramApiKey) {
+        logger.warn(`Transcrição de voz: erro no provedor principal (${config.provider}), acionando fallback para Deepgram...`, {
+          error: (error as Error).message,
+        });
+        const fallbackConfig: ResolvedProvider = {
+          provider: "deepgram",
+          endpoint: readEnvironment("VOICE_TRANSCRIPTION_URL") || "https://api.deepgram.com/v1/listen",
+          apiKey: deepgramApiKey,
+          model: readEnvironment("VOICE_TRANSCRIPTION_MODEL") || "nova-2",
+        };
+        try {
+          return await callProvider(fallbackConfig, audio, mimeType, language, deadline);
+        } catch (fallbackError) {
+          logger.warn("Transcrição de voz: fallback para Deepgram também falhou", {
+            error: (fallbackError as Error).message,
+          });
+        }
+      }
+    }
+
+    if (
       error instanceof VoiceTranscriptionConfigurationError ||
       error instanceof VoiceUnclearAudioError ||
       error instanceof VoiceTranscriptionProviderError ||
