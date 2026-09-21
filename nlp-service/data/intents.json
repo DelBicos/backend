@@ -13,7 +13,9 @@
         "boa tarde gostaria de ajuda", "olá tudo certo",
         "ola", "olaaa", "oi assistente", "oi bot", "e ai tudo bem",
         "bom dia bot", "boa tarde bot", "boa noite bot", "opa", "olá equipe delbicos",
-        "oi preciso de orientação", "olá gostaria de uma informação", "ei", "hey assistente", "olá posso tirar uma dúvida"
+        "oi preciso de orientação", "olá gostaria de uma informação", "ei", "hey assistente", "olá posso tirar uma dúvida",
+        "olá é um prazer falar com vocês", "oi pode me atender", "boa tarde estou por aqui",
+        "bom dia tudo bem com vocês", "e aí posso conversar com você"
       ]
     },
     {
@@ -25,14 +27,17 @@
         "quero fazer um agendamento", "me ajude a marcar uma faxina", "gostaria de um serviço de jardinagem",
         "quero chamar um pintor", "preciso marcar uma reforma", "quero contratar alguém para consertar a pia",
         "agende um serviço para mim", "preciso de uma diarista", "quero reservar um profissional",
-        "quero agendar uma limpeza", "me ajude a marcar uma faxina", "preciso reservar uma diarista",
+        "quero agendar uma limpeza", "quero encontrar uma faxineira", "preciso reservar uma diarista",
         "gostaria de marcar um encanador", "quero um profissional para limpeza", "preciso contratar um pintor",
         "marque uma manutenção para mim", "quero solicitar um serviço", "preciso de ajuda para agendar",
         "quero marcar uma visita técnica", "gostaria de reservar uma limpeza", "quero um horário para eletricista",
         "quero agendar", "eu quero agendar", "gostaria de agendar", "preciso agendar um atendimento",
         "pode agendar para mim", "quero marcar", "pode marcar para mim", "quero fazer uma reserva",
         "quero reservar um atendimento", "preciso de um horário", "quero contratar um profissional",
-        "desejo marcar um serviço", "quero criar um agendamento", "quero solicitar atendimento", "me ajuda a agendar"
+        "desejo marcar um serviço", "quero criar um agendamento", "quero solicitar atendimento", "me ajuda a agendar",
+        "gostaria de marcar uma limpeza residencial", "preciso reservar um horário para pintura",
+        "quero contratar uma pessoa para jardinagem", "tem como agendar um eletricista",
+        "pode reservar um atendimento para mim"
       ]
     },
     {
@@ -74,7 +79,10 @@
         "quero trocar horário", "quero trocar o horário", "trocar minha data", "trocar o dia",
         "mudar meu horário", "mudar a hora", "mudar o horário do serviço", "quero reagendar",
         "preciso reagendar", "pode remarcar para mim", "quero remarcar", "alterar horário marcado",
-        "quero mudar a data da reserva", "quero mudar meu agendamento", "troque o horário do meu atendimento"
+        "quero mudar a data da reserva", "quero mudar meu agendamento", "troque o horário do meu atendimento",
+        "quero mudar o horário que escolhi", "preciso remarcar a limpeza",
+        "posso trocar a data do atendimento", "gostaria de mudar meu compromisso",
+        "há como reagendar para amanhã"
       ]
     },
     {
@@ -86,14 +94,17 @@
         "quero cancelar o agendamento 20", "cancele a visita", "não vou precisar do profissional",
         "gostaria de cancelar a reserva", "quero remover meu horário", "como cancelo um agendamento",
         "desistir do serviço", "cancelar minha solicitação", "preciso anular minha reserva",
-        "desmarcar compromisso", "preciso desmarcar o serviço", "não quero mais o horário",
+        "desmarcar atendimento confirmado", "preciso suspender o serviço agendado", "não vou comparecer ao horário marcado",
         "quero cancelar a visita marcada", "desmarque meu horário", "por favor cancele a reserva",
         "gostaria de anular o agendamento", "não preciso mais desse serviço", "quero retirar minha solicitação",
         "como desmarco a faxina", "cancelar atendimento agendado", "preciso cancelar minha visita",
         "quero cancelar", "pode cancelar para mim", "preciso cancelar", "cancela meu agendamento",
         "cancele meu atendimento", "quero desmarcar", "preciso desmarcar", "desmarque minha reserva",
         "não quero mais esse agendamento", "não preciso mais do atendimento", "anular agendamento", "quero anular",
-        "quero desistir", "retirar meu agendamento", "cancelar meu pedido"
+        "quero desistir", "retirar meu agendamento", "cancelar meu pedido",
+        "quero desmarcar o atendimento", "preciso cancelar minha reserva",
+        "posso desistir do horário marcado", "cancele o serviço que agendei",
+        "não vou mais usar o agendamento"
       ]
     },
     {
@@ -111,7 +122,10 @@
         "me explique física", "quem ganhou o jogo", "qual celular é melhor", "quero uma recomendação de livro",
         "me conte sobre o espaço", "como está a bolsa de valores", "qual é a população do brasil",
         "me ajude com um trabalho escolar", "traduza uma frase", "escreva um poema", "me fale sobre política",
-        "quero saber uma notícia", "me ajude a cozinhar", "como consertar meu computador", "me diga uma charada"
+        "quero saber uma notícia", "me ajude a cozinhar", "como consertar meu computador", "me diga uma charada",
+        "qual é a melhor série para assistir", "me ajude a escolher um presente",
+        "como preparar café", "qual é a distância até o rio de janeiro",
+        "conte um fato interessante sobre animais"
       ]
     }
   ]
