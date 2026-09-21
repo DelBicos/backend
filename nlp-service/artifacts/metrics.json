@@ -1,8 +1,8 @@
 {
-  "model_version": "tfidf-word-char-linear-svm-3a39e63a5f3f",
-  "trained_at": "2026-09-18T03:35:04.551572+00:00",
-  "corpus_sha256": "3a39e63a5f3f",
-  "samples": 285,
+  "model_version": "tfidf-word-char-linear-svm-defefd4a58eb",
+  "trained_at": "2026-09-21T19:06:49.849111+00:00",
+  "corpus_sha256": "defefd4a58eb",
+  "samples": 310,
   "labels": [
     "AGENDAR",
     "ALTERAR",
@@ -11,26 +11,26 @@
     "FALLBACK",
     "SAUDACAO"
   ],
-  "accuracy": 0.9825,
-  "f1_macro": 0.9835,
+  "accuracy": 0.9839,
+  "f1_macro": 0.9846,
   "classification_report": {
     "AGENDAR": {
       "precision": 1.0,
       "recall": 1.0,
       "f1-score": 1.0,
-      "support": 9.0
+      "support": 10.0
     },
     "ALTERAR": {
       "precision": 1.0,
-      "recall": 0.8888888888888888,
-      "f1-score": 0.9411764705882353,
-      "support": 9.0
+      "recall": 0.9,
+      "f1-score": 0.9473684210526315,
+      "support": 10.0
     },
     "CANCELAR": {
       "precision": 1.0,
       "recall": 1.0,
       "f1-score": 1.0,
-      "support": 9.0
+      "support": 10.0
     },
     "CONSULTAR": {
       "precision": 0.9230769230769231,
@@ -42,26 +42,26 @@
       "precision": 1.0,
       "recall": 1.0,
       "f1-score": 1.0,
-      "support": 9.0
+      "support": 10.0
     },
     "SAUDACAO": {
       "precision": 1.0,
       "recall": 1.0,
       "f1-score": 1.0,
-      "support": 9.0
+      "support": 10.0
     },
-    "accuracy": 0.9824561403508771,
+    "accuracy": 0.9838709677419355,
     "macro avg": {
       "precision": 0.9871794871794872,
-      "recall": 0.9814814814814815,
-      "f1-score": 0.9835294117647059,
-      "support": 57.0
+      "recall": 0.9833333333333334,
+      "f1-score": 0.9845614035087719,
+      "support": 62.0
     },
     "weighted avg": {
-      "precision": 0.9838056680161944,
-      "recall": 0.9824561403508771,
-      "f1-score": 0.9822910216718266,
-      "support": 57.0
+      "precision": 0.9851116625310175,
+      "recall": 0.9838709677419355,
+      "f1-score": 0.9837691001697793,
+      "support": 62.0
     }
   }
 }
