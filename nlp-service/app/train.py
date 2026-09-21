@@ -19,6 +19,9 @@ from sklearn.svm import LinearSVC
 from app.preprocess import normalize_text, tokenize
 
 
+MIN_EXAMPLES_PER_INTENT = 50
+
+
 def load_examples(data_path: Path) -> tuple[list[str], list[str]]:
     payload = json.loads(data_path.read_text(encoding="utf-8"))
     intents = payload.get("intents", [])
@@ -37,8 +40,10 @@ def load_examples(data_path: Path) -> tuple[list[str], list[str]]:
 
     if len(set(labels)) < 2:
         raise ValueError("O corpus precisa conter ao menos duas intenções.")
-    if min(labels.count(label) for label in set(labels)) < 6:
-        raise ValueError("Cada intenção precisa de pelo menos seis exemplos.")
+    if min(labels.count(label) for label in set(labels)) < MIN_EXAMPLES_PER_INTENT:
+        raise ValueError(
+            f"Cada intenção precisa de pelo menos {MIN_EXAMPLES_PER_INTENT} exemplos."
+        )
     return texts, labels
 
 
