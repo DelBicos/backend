@@ -94,6 +94,31 @@ describe("transcribeVoiceAudio", () => {
     });
   });
 
+  it("usa o provider Azure Speech Service quando AZURE_SPEECH_KEY está definido", async () => {
+    process.env.AZURE_SPEECH_KEY = "azure-key";
+    process.env.AZURE_SPEECH_REGION = "brazilsouth";
+    (global as any).fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        RecognitionStatus: "Success",
+        DisplayText: "Quero agendar uma limpeza de estofado",
+      }),
+    });
+
+    await expect(transcribeVoiceAudio(Buffer.from("audio"), "audio/webm")).resolves.toBe(
+      "Quero agendar uma limpeza de estofado",
+    );
+
+    const [url, request] = (global as any).fetch.mock.calls[0];
+    expect(url).toContain("https://brazilsouth.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=pt-BR");
+    expect(request.headers).toEqual({
+      "Ocp-Apim-Subscription-Key": "azure-key",
+      "Content-Type": "audio/webm; codecs=opus",
+      Accept: "application/json",
+    });
+  });
+
   it("rejeita 'gemini' como provider explícito (removido do sistema)", async () => {
     process.env.VOICE_TRANSCRIPTION_PROVIDER = "gemini";
 
