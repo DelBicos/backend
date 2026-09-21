@@ -16,15 +16,7 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
   ): Promise<HandlerResult> {
     const ctx = (session.context ?? {}) as BotSessionContext;
 
-    const rawId = nlu.entities.appointment_id ?? parseInt(userMessage.trim(), 10);
-    if (isNaN(rawId) || rawId <= 0) {
-      return {
-        reply: "Por favor, informe um ID de agendamento válido (número inteiro):",
-        nextState: "AGUARDANDO_ID_AGENDAMENTO",
-        contextUpdate: {},
-      };
-    }
-
+    const trimmedMsg = userMessage.trim();
     const clientRecord = await ClientModel.findOne({ where: { user_id: userId } });
     if (!clientRecord) {
       return {
@@ -35,20 +27,61 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
       };
     }
 
-    const appointment = await AppointmentModel.findByPk(rawId, {
-      include: [
-        { model: ServiceModel, as: "Service" },
-        {
-          model: ProfessionalModel,
-          as: "Professional",
-          include: [{ model: UserModel, as: "User", attributes: ["name"] }],
-        },
-      ],
-    });
+    let appointmentIdToUse: number | undefined;
+
+    // 1. Tenta identificar se o usuário selecionou um índice da lista (ex: "1", "2")
+    const parsedNum = parseInt(trimmedMsg, 10);
+    const appointmentList = (ctx.userAppointmentList as Array<{ index: number; id: number; shortId?: string }>) ?? [];
+
+    if (!isNaN(parsedNum) && appointmentList.length > 0) {
+      const foundByIndex = appointmentList.find((item) => item.index === parsedNum);
+      if (foundByIndex) {
+        appointmentIdToUse = foundByIndex.id;
+      }
+    }
+
+    // 2. Se não foi pelo índice, tenta buscar pelo ID direto (nlu ou número direto)
+    if (!appointmentIdToUse) {
+      const rawId = nlu.entities.appointment_id ?? (isNaN(parsedNum) ? undefined : parsedNum);
+      if (typeof rawId === "number" && rawId > 0) {
+        appointmentIdToUse = rawId;
+      }
+    }
+
+    // 3. Tenta buscar o agendamento no banco pelo ID numérico ou pelo short_id
+    let appointment: AppointmentModel | null = null;
+    if (appointmentIdToUse) {
+      appointment = await AppointmentModel.findByPk(appointmentIdToUse, {
+        include: [
+          { model: ServiceModel, as: "Service" },
+          {
+            model: ProfessionalModel,
+            as: "Professional",
+            include: [{ model: UserModel, as: "User", attributes: ["name"] }],
+          },
+        ],
+      });
+    }
+
+    // Tenta por short_id se ainda não encontrou
+    if (!appointment && trimmedMsg.length >= 4) {
+      appointment = await AppointmentModel.findOne({
+        where: { short_id: trimmedMsg.toUpperCase() },
+        include: [
+          { model: ServiceModel, as: "Service" },
+          {
+            model: ProfessionalModel,
+            as: "Professional",
+            include: [{ model: UserModel, as: "User", attributes: ["name"] }],
+          },
+        ],
+      });
+    }
 
     if (!appointment || appointment.client_id !== clientRecord.id) {
+      const actionStr = ctx.pendingAction === "CANCEL" ? "cancelar" : "reagendar";
       return {
-        reply: `Agendamento ID ${rawId} não encontrado ou não pertence a você. Verifique o ID e tente novamente:`,
+        reply: `Agendamento não encontrado. Por favor, escolha uma das opções ou digite um número/ID válido para ${actionStr}:`,
         nextState: "AGUARDANDO_ID_AGENDAMENTO",
         contextUpdate: {},
       };
@@ -58,14 +91,14 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
       return {
         reply: "Este agendamento já foi concluído e não pode ser alterado.",
         nextState: "INICIO",
-        contextUpdate: {},
+        contextUpdate: { serviceOptions: undefined, userAppointmentList: undefined },
       };
     }
     if (appointment.status === "canceled") {
       return {
         reply: "Este agendamento já está cancelado.",
         nextState: "INICIO",
-        contextUpdate: {},
+        contextUpdate: { serviceOptions: undefined, userAppointmentList: undefined },
       };
     }
 
@@ -80,19 +113,19 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
       return {
         reply:
           `Você quer cancelar o seguinte agendamento?\n\n` +
-          `ID: ${appointment.id}\n` +
-          `Serviço: ${svcTitle}\n` +
-          `Profissional: ${profName}\n` +
-          `Data: ${dateStr} às ${timeStr}\n` +
-          `Status: ${appointment.status}\n\n` +
-          `Confirma o cancelamento? (*sim* / *não*)`,
+          `• ID: ${appointment.short_id || appointment.id}\n` +
+          `• Serviço: ${svcTitle}\n` +
+          `• Profissional: ${profName}\n` +
+          `• Data: ${dateStr} às ${timeStr}\n` +
+          `• Status: ${appointment.status}\n\n` +
+          `Confirma o cancelamento?`,
         nextState: "CONFIRMACAO",
         contextUpdate: {
           appointmentId: appointment.id,
           serviceId: appointment.service_id,
           professionalId: appointment.professional_id,
-          serviceOptions: ["Sim", "Não"],
-          serviceOptionsData: undefined,
+          serviceOptions: ["Sim, confirmar", "Não, voltar"],
+          userAppointmentList: undefined,
         },
       };
     }
@@ -101,10 +134,10 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
     return {
       reply:
         `Reagendando:\n\n` +
-        `ID: ${appointment.id}\n` +
-        `Serviço: ${svcTitle}\n` +
-        `Profissional: ${profName}\n` +
-        `Data atual: ${dateStr} às ${timeStr}\n\n` +
+        `• ID: ${appointment.short_id || appointment.id}\n` +
+        `• Serviço: ${svcTitle}\n` +
+        `• Profissional: ${profName}\n` +
+        `• Data atual: ${dateStr} às ${timeStr}\n\n` +
         `Qual nova data você prefere?`,
       nextState: "COLETANDO_DATA",
       contextUpdate: {
@@ -112,7 +145,7 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
         serviceId: appointment.service_id,
         professionalId: appointment.professional_id,
         serviceOptions: undefined,
-        serviceOptionsData: undefined,
+        userAppointmentList: undefined,
       },
     };
   }
