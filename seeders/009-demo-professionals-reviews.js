@@ -1,5 +1,9 @@
 "use strict";
 const bcrypt = require("bcryptjs");
+const { customAlphabet } = require('nanoid');
+
+const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+const generateShortId = customAlphabet(alphabet, 6);
 
 module.exports = {
   async up(queryInterface, Sequelize) {
@@ -242,6 +246,9 @@ module.exports = {
         { rating: 5, text: "Ótimo profissional." },
       ];
 
+      const usedShortIds = new Set();
+
+
       professionalsData.forEach((prof, index) => {
         const numAppointments = 3 + (index % 3);
         for (let i = 0; i < numAppointments; i++) {
@@ -252,7 +259,14 @@ module.exports = {
 
           const review = reviews[i % reviews.length];
 
+          let shortId;
+          do {
+            shortId = generateShortId();
+          } while (usedShortIds.has(shortId));
+          usedShortIds.add(shortId);
+
           appointments.push({
+            short_id: shortId,
             professional_id: prof.id,
             client_id: clients[i % clients.length].id,
             service_id: services[i % services.length].id,
@@ -268,6 +282,7 @@ module.exports = {
           });
         }
       });
+
       await queryInterface.bulkInsert("appointment", appointments);
     }
   },

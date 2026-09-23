@@ -49,7 +49,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    command: npm run dev
+    command:
+      - ./node_modules/.bin/ts-node-dev
+      - --respawn
+      - --transpile-only
+      - --poll
+      - ./server.ts
     container_name: server-delbicos
     environment:
       - ENVIRONMENT=${ENVIRONMENT:-development}
@@ -88,6 +93,8 @@ services:
       - VOICE_COMMAND_IDEMPOTENCY_MAX_ENTRIES=${VOICE_COMMAND_IDEMPOTENCY_MAX_ENTRIES:-10000}
     volumes:
       - ./src:/app/src
+      - ./migrations:/app/migrations
+      - ./seeders:/app/seeders
       - ./server.ts:/app/server.ts
       - ./.env:/app/.env
     ports:

@@ -4,7 +4,12 @@ import { BotSessionManager } from "./bot/BotSessionManager";
 import { BotMessageRouter } from "./bot/BotMessageRouter";
 import { BotState } from "../constants/botStates";
 import { logError } from "../utils/logger";
-import { resolveBotTimeZone } from "../utils/date.util";
+import {
+  parsePortugueseDate,
+  parseTimeFromText,
+  parseTimePeriodFromText,
+  resolveBotTimeZone,
+} from "../utils/date.util";
 import { buildGreetingReply } from "./bot/greetingReply";
 import { isAvailableTimesQuestion } from "./bot/contextualMessage";
 import { normalizeText } from "../utils/nlp.util";
@@ -179,9 +184,23 @@ export async function processMessage(
     },
   );
 
+  const normalizedMessage = normalizeText(trimmedMessage);
+  const isExplicitGreeting =
+    /^(?:oi+|ol+a*|bom dia|boa tarde|boa noite|opa|e ai|hey|ola assistente)\b/.test(
+      normalizedMessage,
+    );
+  const isContextualTimeAnswer =
+    (session.state === BotState.COLETANDO_HORARIO ||
+      session.state === BotState.VERIFICANDO_DISPONIBILIDADE) &&
+    (Boolean(parseTimeFromText(trimmedMessage)) ||
+      (!isExplicitGreeting &&
+        Boolean(parseTimePeriodFromText(trimmedMessage))));
+
   // Saudações são globais: elas nunca devem ser interpretadas como nome de
-  // serviço nem apagar um agendamento parcialmente preenchido.
-  if (nlu.intent === "SAUDACAO") {
+  // serviço nem apagar um agendamento parcialmente preenchido. Uma resposta
+  // de horário reconhecível, porém, pertence à etapa em andamento mesmo se o
+  // classificador confundir "noite" com "boa noite".
+  if (nlu.intent === "SAUDACAO" && !isContextualTimeAnswer) {
     const replyText = buildGreetingReply(session.state, ctx);
     await BotSessionManager.saveSession(session, session.state, ctx);
     await BotSessionManager.createMessage(session.id, "bot", replyText);
@@ -199,8 +218,17 @@ export async function processMessage(
     session.state === BotState.COLETANDO_HORARIO &&
     nlu.intent === "CONSULTAR" &&
     isAvailableTimesQuestion(trimmedMessage);
+  const isContextualDateAnswer =
+    session.state === BotState.COLETANDO_DATA &&
+    nlu.intent === "CONSULTAR" &&
+    !/\b(?:agenda|agendamento|agendamentos|reserva|reservas|compromisso|compromissos)\b/.test(
+      normalizedMessage,
+    ) &&
+    Boolean(parsePortugueseDate(trimmedMessage, { timeZone: ctx.timeZone }));
   const isExplicitIntent =
     !isContextualAvailabilityQuestion &&
+    !isContextualDateAnswer &&
+    !isContextualTimeAnswer &&
     ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR"].includes(nlu.intent);
   let shouldRedirectToInicio = false;
   if (isExplicitIntent) {
@@ -239,8 +267,14 @@ export async function processMessage(
           (currentCategory.includes(requestedService) ||
             requestedService.includes(currentCategory)));
 
+      const isGenericOrDate =
+        requestedService.length <= 2 ||
+        /^(?:uma?|o|a|para|dia|dias|semana|proxima|prox)$/.test(requestedService) ||
+        Boolean(parsePortugueseDate(trimmedMessage, { timeZone: ctx.timeZone }));
+
       const requestsDifferentService =
         requestedService.length > 0 &&
+        !isGenericOrDate &&
         (currentServiceTitle.length === 0 || !matchesCurrent);
 
       shouldRedirectToInicio =

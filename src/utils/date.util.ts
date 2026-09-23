@@ -122,9 +122,14 @@ function normalizePortugueseText(text: string): string {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[ªº]/g, "")
-    .replace(/[–—]/g, "-")
+    .replace(/\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)-?feira\b/g, "$1 feira")
+    .replace(/\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)feira\b/g, "$1 feira")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizeWeekdayKey(value: string): string {
+  return value.replace(/^sabad+o+$/, "sabado");
 }
 
 function replaceNumberWords(text: string): string {
@@ -342,11 +347,11 @@ export function selectSuggestedDateByWeekday(
 ): string | null {
   const normalized = normalizePortugueseText(text);
   const match = normalized.match(
-    /^(?:(?:na|no|a)\s+)?(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab)(?:\s*-?\s*feira)?$/,
+    /^(?:(?:na|no|a)\s+)?(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab)(?:\s*-?\s*feira)?$/,
   );
   if (!match) return null;
 
-  const requestedWeekday = WEEKDAYS[match[1]];
+  const requestedWeekday = WEEKDAYS[normalizeWeekdayKey(match[1])];
   for (const date of suggestedDates) {
     const parsed = parseIsoDate(date);
     if (
@@ -521,7 +526,7 @@ export function parseTimeFromText(text: string): string | null {
   }
 
   const hourWithPeriod = normalized.match(
-    /\b(\d{1,2})\s*(?:da|de|pela)\s+(?:manha|tarde|noite)\b/,
+    /\b(\d{1,2})\s*(?:da|de|pela|na|a)\s+(?:manha|tarde|noite)\b/,
   );
   if (hourWithPeriod && period) {
     const hour = applyPeriodToHour(Number(hourWithPeriod[1]), period);
@@ -642,24 +647,24 @@ export function parsePortugueseDate(
 
   const nextWeekWeekdayMatch =
     normalizedOriginal.match(
-      /\b(?:proxima|prox)\.?\s+(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\b/,
+      /\b(?:proxim[oa]|prox)\.?\s+(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\b/,
     ) ??
     normalizedOriginal.match(
-      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\s+proxima\b/,
+      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\s+proxim[oa]\b/,
     ) ??
     normalizedOriginal.match(
-      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\s+(?:da|de)\s+(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)\b/,
+      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\s+(?:da|de)\s+(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)\b/,
     ) ??
     normalizedOriginal.match(
-      /\b(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)(?:\s+(?:na|de))?\s+(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\b/,
+      /\b(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)(?:\s+(?:na|de))?\s+(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?\b/,
     );
   const weekdayMatch =
     nextWeekWeekdayMatch ??
     normalizedOriginal.match(
-      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabado|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?(?:\s+(?:que|q)\s+vem)?\b/,
+      /\b(domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab|[2-6](?=\s*-?\s*feira\b))(?:\s*-?\s*feira)?(?:\s+(?:que|q)\s+vem)?\b/,
     );
   if (weekdayMatch) {
-    const targetWeekday = WEEKDAYS[weekdayMatch[1]];
+    const targetWeekday = WEEKDAYS[normalizeWeekdayKey(weekdayMatch[1])];
     const currentWeekday = new Date(toCalendarTimestamp(today)).getUTCDay();
     let difference: number;
     if (nextWeekWeekdayMatch) {

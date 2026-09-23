@@ -17,6 +17,7 @@ import {
   parseTimePeriodFromText,
   selectSuggestedDateByWeekday,
 } from "../../../utils/date.util";
+import { normalizeText } from "../../../utils/nlp.util";
 import { getAvailableSlots } from "../../availability.service";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
@@ -29,6 +30,16 @@ function addDays(date: string, days: number): string {
   const parsed = new Date(`${date}T00:00:00.000Z`);
   parsed.setUTCDate(parsed.getUTCDate() + days);
   return parsed.toISOString().slice(0, 10);
+}
+
+function requestsFollowingWeekday(userMessage: string): boolean {
+  const normalized = normalizeText(userMessage);
+  const weekday =
+    "(?:domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab)(?:\\s+feira)?";
+
+  return new RegExp(
+    `\\b(?:(?:proxim[oa]|prox)\\s+${weekday}|${weekday}\\s+(?:(?:que|q)\\s+vem|proxim[oa]))\\b`,
+  ).test(normalized);
 }
 
 function matchingServiceIds(context: BotSessionContext): number[] {
@@ -214,13 +225,24 @@ export class ColetandoDataState implements BotStateNode {
     }
 
     if (!isValidBookingDate(date, { timeZone: ctx.timeZone })) {
-      return {
-        reply:
-          "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência. " +
-          "Qual outro dia você prefere?",
-        nextState: "COLETANDO_DATA",
-        contextUpdate: {},
-      };
+      const followingWeekDate = requestsFollowingWeekday(userMessage)
+        ? addDays(date, 7)
+        : null;
+
+      if (
+        followingWeekDate &&
+        isValidBookingDate(followingWeekDate, { timeZone: ctx.timeZone })
+      ) {
+        date = followingWeekDate;
+      } else {
+        return {
+          reply:
+            "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência. " +
+            "Qual outro dia você prefere?",
+          nextState: "COLETANDO_DATA",
+          contextUpdate: {},
+        };
+      }
     }
 
     const services = await loadMatchingServices(ctx);

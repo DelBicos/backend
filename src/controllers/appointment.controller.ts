@@ -323,11 +323,11 @@ export const getAllAppointments = async (req: Request, res: Response) => {
       order: [["start_time", "ASC"]],
     });
 
-    const formattedAppointments = appointments.map((apt: any) => {
-      const json = apt.toJSON();
-      json.payment_method = json.payment_intent_id
-        ? "Cartão de Crédito"
-        : "Cartão de Crédito";
+    const formattedAppointments = appointments.map((appointment: AppointmentModel) => {
+      const json = appointment.toJSON() as any;
+      json.id = json.short_id;
+      delete json.short_id;
+      json.payment_method = json.payment_intent_id ? "Cartão de Crédito" : "Cartão de Crédito";
       return json;
     });
 
@@ -342,7 +342,12 @@ export const confirmAppointment = async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const authReq = req as AuthenticatedRequest;
-    const appointment = await AppointmentModel.findByPk(id);
+    let appointment = await AppointmentModel.findOne({
+      where: { short_id: id }
+    });
+    if (!appointment && !isNaN(Number(id))) {
+      appointment = await AppointmentModel.findByPk(Number(id));
+    }
     if (!appointment) {
       return res.status(404).json({ error: "Agendamento não encontrado" });
     }
@@ -379,7 +384,11 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Status inválido. Use 'confirmed' ou 'canceled'." });
     }
 
-    const appointment = await AppointmentModel.findByPk(id, {
+    const appointment = await AppointmentModel.findOne({
+      where: {
+        short_id: req.params.id,
+        client_id: req.params.clientId
+      },
       include: [
         { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User" }] },
         { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User" }] },
@@ -478,7 +487,8 @@ export const reviewAppointment = async (req: Request, res: Response) => {
       });
     }
 
-    const appointment = await AppointmentModel.findByPk(id, {
+    const appointment = await AppointmentModel.findOne({
+      where: { short_id: req.params.id },
       include: [
         {
           model: ClientModel,

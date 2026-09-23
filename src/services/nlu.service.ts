@@ -105,6 +105,32 @@ function normalizeForRules(message: string): string {
     .trim();
 }
 
+const STANDALONE_WEEKDAY_PATTERN =
+  /^(?:(?:no|na|para|pra|pro|a)\s+)?(?:(?:proxim[oa]|prox)\s+)?(?:domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab)(?:\s+feira)?(?:\s+(?:(?:que|q)\s+vem|proxim[oa]|(?:da|de)\s+(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)))?$/;
+const STANDALONE_NEXT_WEEK_PATTERN =
+  /^(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)(?:\s+(?:na|de))?\s+(?:domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab)(?:\s+feira)?$/;
+const STANDALONE_RELATIVE_DATE_PATTERN =
+  /^(?:hoje|hj|amanha|amanh|amnh|(?:depois|dps)\s+(?:de|d)\s+(?:amanha|amanh|amnh))$/;
+const STANDALONE_DAY_PATTERN =
+  /^dia\s+(?:\d{1,2}|primeiro|um|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta)$/;
+const STANDALONE_WRITTEN_DATE_PATTERN =
+  /^(?:dia\s+)?(?:\d{1,2}|primeiro|um|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta)\s+(?:de|do|da)\s+(?:janeiro|jan|fevereiro|fev|marco|mar|abril|abr|maio|mai|junho|jun|julho|jul|agosto|ago|setembro|set|outubro|out|novembro|nov|dezembro|dez|\d{1,2})(?:\s+(?:de|do)\s+\d{2,4})?$/;
+const STANDALONE_TIME_PERIOD_PATTERN =
+  /^(?:(?:de|da|pela|na|a)\s+)?(?:manha|matutino|matutina|cedo|manhazinha|tarde|vespertino|vespertina|noite|noturno|noturna|anoitecer)$/;
+const STANDALONE_EXPLICIT_TIME_PATTERN =
+  /^(?:(?:as|por\s+volta\s+(?:de|das))\s+)?(?:\d{1,2}(?::\d{1,2})?|um|uma|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze)(?:\s*(?:h|horas?))?(?:\s+e\s+(?:meia|um\s+quarto|\d{1,2}))?\s+(?:da|de|pela|na|a)\s+(?:manha|tarde|noite)$/;
+
+function isStandaloneDateInput(message: string): boolean {
+  const normalized = normalizeForRules(message);
+  return (
+    STANDALONE_WEEKDAY_PATTERN.test(normalized) ||
+    STANDALONE_NEXT_WEEK_PATTERN.test(normalized) ||
+    STANDALONE_RELATIVE_DATE_PATTERN.test(normalized) ||
+    STANDALONE_DAY_PATTERN.test(normalized) ||
+    STANDALONE_WRITTEN_DATE_PATTERN.test(normalized)
+  );
+}
+
 const SCHEDULING_REQUEST_CUES = new Set([
   "quero",
   "queria",
@@ -417,7 +443,7 @@ function extractServiceCandidate(message: string): string | undefined {
   let candidate = raw
     .replace(/^(?:um|uma|o|a)\s+/i, "")
     .replace(
-      /\s+(?:(?:para|no|na|em)\s+)?(?:hoje|hj|amanh[ãa]|amnh|depois\s+de\s+amanh[ãa]|dps\s+de\s+amanh[ãa]|pr[oó]x(?:ima)?\s+)?(?:segunda|seg|ter[cç]a|ter|quarta|qua|quinta|qui|sexta|sex|s[aá]bado|sab|domingo|dom)(?:-?feira)?(?:\s+(?:que|q)\s+vem)?.*$/i,
+      /\s+(?:(?:para|no|na|em)\s+)?(?:hoje|hj|amanh[ãa]|amnh|depois\s+de\s+amanh[ãa]|dps\s+de\s+amanh[ãa]|pr[oó]x(?:ima)?\s+)?(?:segunda|seg|ter[cç]a|ter|quarta|qua|quinta|qui|sexta|sex|s[aá]bad+o+|sab|domingo|dom)(?:-?feira)?(?:\s+(?:que|q)\s+vem)?.*$/i,
       "",
     )
     .replace(
@@ -427,7 +453,10 @@ function extractServiceCandidate(message: string): string | undefined {
     .replace(/\s+(?:dia\s+\d{1,2}|hoje|hj|amanh[ãa]|amnh)(?:\s|$).*$/i, "")
     .replace(/(?:[àa]s?)\s+\d{1,2}(?::\d{2})?(?:\s*(?:h|horas))?.*$/i, "")
     .replace(/\s+(?:de|da|pela|na)\s+(?:manh[ãa]|tarde|noite).*$/i, "")
-    .replace(/\s+(?:por\s+favor|porfavor|pfv|por\s+gentileza|gentileza|obrigad[oa])$/i, "")
+    .replace(
+      /\s+(?:por\s+favor|porfavor|pfv|por\s+gentileza|gentileza|obrigad[oa])$/i,
+      "",
+    )
     .trim()
     .replace(/[,.!?]+$/, "");
 
@@ -480,7 +509,8 @@ function extractServiceCandidate(message: string): string | undefined {
   }
 
   candidate = candidate
-    .replace(/^(?:de|para)\s+/i, "")
+    .replace(/^(?:de|para|pra|pro|em|no|na|um|uma|o|a)\s+/i, "")
+    .replace(/\s+(?:de|para|pra|pro|em|no|na|um|uma|o|a)$/i, "")
     .replace(/\s+(?:na(?:\s+minha)?|minha|em\s+minha)\s+agenda.*$/i, "")
     .replace(/\s+(?:de|para)$/i, "")
     .replace(/^(?:de|para)$/i, "")
@@ -488,6 +518,38 @@ function extractServiceCandidate(message: string): string | undefined {
 
   const genericTerms = new Set([
     "",
+    "a",
+    "o",
+    "as",
+    "os",
+    "um",
+    "uma",
+    "uns",
+    "umas",
+    "de",
+    "do",
+    "da",
+    "dos",
+    "das",
+    "em",
+    "no",
+    "na",
+    "nos",
+    "nas",
+    "para",
+    "pra",
+    "pro",
+    "pras",
+    "pros",
+    "dia",
+    "dias",
+    "semana",
+    "semanas",
+    "proxima",
+    "proximo",
+    "proximas",
+    "proximos",
+    "prox",
     "servico",
     "serviço",
     "um serviço",
@@ -512,10 +574,13 @@ function extractServiceCandidate(message: string): string | undefined {
   if (genericTerms.has(normalizeForRules(candidate))) return undefined;
   if (
     parsePortugueseDate(candidate) ||
+    parsePortugueseDate(message) ||
     parseTimePeriodFromText(candidate) ||
     parseTimeFromText(candidate)
   ) {
-    return undefined;
+    // Se a mensagem contém uma data legível e a palavra restante é um artigo ou palavra genérica
+    const words = candidate.split(/\s+/).filter(w => !genericTerms.has(normalizeForRules(w)));
+    if (words.length === 0) return undefined;
   }
   return candidate.slice(0, 200);
 }
@@ -586,6 +651,25 @@ function classifyStructuredInput(
       { date: extractDate(normalized, timeZone) ?? normalized },
       1,
     );
+  }
+  if (isStandaloneDateInput(message)) {
+    const date = extractDate(message, timeZone);
+    if (date) return fallback({ date }, 1);
+  }
+  const parsedTime = extractTime(message);
+  if (parsedTime && STANDALONE_EXPLICIT_TIME_PATTERN.test(normalizedWords)) {
+    const timePeriod = parseTimePeriodFromText(message);
+    return fallback(
+      {
+        time: parsedTime,
+        ...(timePeriod ? { time_period: timePeriod } : {}),
+      },
+      1,
+    );
+  }
+  if (STANDALONE_TIME_PERIOD_PATTERN.test(normalizedWords)) {
+    const timePeriod = parseTimePeriodFromText(message);
+    if (timePeriod) return fallback({ time_period: timePeriod }, 1);
   }
   if (/^\d{1,2}:\d{2}$/.test(normalized)) {
     return fallback({ time: extractTime(normalized) ?? normalized }, 1);

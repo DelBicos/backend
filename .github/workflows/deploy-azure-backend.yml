@@ -1,20 +1,20 @@
 name: 04 - Deploy do backend no Azure App Service
 
-# Gatilho: dispara direto quando um PR e fechado/mergeado contra a stag-facul
-# (branch de integracao do projeto academico), independente do pipeline do
-# time principal (workflows 01/02/03, que so reagem a branch "stag").
-# O Azure App Service (Free F1) usa deploy nativo (Oryx), sem Docker.
+# Gatilho: roda em paralelo ao "02 - Buildar e publicar imagem Docker",
+# assim que a análise semântica pós-merge (workflow "01") terminar com sucesso.
+# Não depende do Docker Hub: o Azure App Service (Free F1) usa deploy nativo (Oryx),
+# sem contêiner customizado.
 on:
-  pull_request:
-    types: [closed]
-    branches:
-      - stag-facul
+  workflow_run:
+    workflows: ["01 - Análise Semântica Pós-Merge"]
+    types:
+      - completed
 
 jobs:
   deploy:
     name: Build e deploy no Azure App Service (delbicos-backend-edu)
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
+    if: github.event.workflow_run.conclusion == 'success'
 
     steps:
       - name: Checkout do repositório

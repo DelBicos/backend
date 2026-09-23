@@ -1,5 +1,8 @@
 "use strict";
 
+const { customAlphabet } = require("nanoid");
+const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const generateShortId = customAlphabet(alphabet, 6);
 const SERVICE_TITLE = "Instalação de Tomada Inteligente";
 const SUBCATEGORY_TITLE = "Eletricista";
 const SERVICE_BANNER_PREFIX =
@@ -442,6 +445,7 @@ async function ensureReviewAppointments(
         "appointment",
         [
           {
+            short_id: generateShortId(),
             professional_id: service.professional_id,
             client_id: fernando.client_id,
             service_id: service.serviceId,
@@ -544,6 +548,7 @@ async function ensurePendingAppointment(
     "appointment",
     [
       {
+        short_id: generateShortId(),
         professional_id: iagoService.professional_id,
         client_id: fernando.client_id,
         service_id: iagoService.serviceId,
