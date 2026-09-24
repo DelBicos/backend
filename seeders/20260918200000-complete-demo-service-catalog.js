@@ -1298,13 +1298,35 @@ module.exports = {
       const existingDemoClients = await selectRows(
         queryInterface,
         Sequelize,
-        `SELECT id, user_id, main_address_id FROM client WHERE user_id IN (:clientUserIds)`,
+        `SELECT id, user_id, main_address_id, cpf FROM client WHERE user_id IN (:clientUserIds)`,
         { clientUserIds },
         transaction,
       );
       const clientByUserId = new Map(
         existingDemoClients.map((row) => [Number(row.user_id), row]),
       );
+
+      for (const c of DEMO_CLIENTS) {
+        const userId = userByEmail.get(c.email);
+        const addressId = addressByEmail.get(c.email);
+        const existing = clientByUserId.get(userId);
+        if (existing) {
+          if (existing.cpf !== c.cpf) {
+            throw new Error(
+              `O cliente demo ${c.email} já possui cadastro com outro CPF.`,
+            );
+          }
+          if (Number(existing.main_address_id) !== addressId) {
+            await queryInterface.bulkUpdate(
+              "client",
+              { main_address_id: addressId, updated_at: now },
+              { id: Number(existing.id) },
+              { transaction },
+            );
+          }
+        }
+      }
+
       const clientsToInsert = DEMO_CLIENTS.filter(
         (c) => !clientByUserId.has(userByEmail.get(c.email)),
       );
@@ -1408,7 +1430,7 @@ module.exports = {
 
   async down(queryInterface, Sequelize) {
     await queryInterface.sequelize.transaction(async (transaction) => {
-      // 1. Apaga agendamentos das avaliações demo
+      // 1. Apaga agendamentos das avaliações demo (fake)
       await queryInterface.bulkDelete(
         "appointment",
         {
@@ -1430,7 +1452,7 @@ module.exports = {
       const userIds = demoUsers.map((u) => Number(u.id));
 
       if (userIds.length > 0) {
-        // 3. Localiza prestadores demo
+        // 3. Localiza prestadores e clientes demo
         const demoProfessionals = await selectRows(
           queryInterface,
           Sequelize,
@@ -1439,6 +1461,41 @@ module.exports = {
           transaction,
         );
         const professionalIds = demoProfessionals.map((p) => Number(p.id));
+
+        const demoClients = await selectRows(
+          queryInterface,
+          Sequelize,
+          `SELECT id FROM client WHERE user_id IN (:userIds)`,
+          { userIds },
+          transaction,
+        );
+        const clientIds = demoClients.map((c) => Number(c.id));
+
+        // 🛡️ GUARD DE SEGURANÇA (Achado Principal do Code Review):
+        // Checa se existem agendamentos REAIS vinculados aos prestadores/clientes demo.
+        // Se houver, aborta o rollback para não deletar agendamentos reais em cascata.
+        if (professionalIds.length > 0 || clientIds.length > 0) {
+          const realAppointments = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT id FROM appointment 
+             WHERE (professional_id IN (:professionalIds) OR client_id IN (:clientIds))
+               AND (payment_intent_id IS NULL OR payment_intent_id NOT IN (:demoPaymentIds))`,
+            {
+              professionalIds: professionalIds.length > 0 ? professionalIds : [0],
+              clientIds: clientIds.length > 0 ? clientIds : [0],
+              demoPaymentIds: DEMO_REVIEW_PAYMENT_IDS,
+            },
+            transaction,
+          );
+
+          if (realAppointments.length > 0) {
+            throw new Error(
+              `Rollback do catálogo demo abortado: existem ${realAppointments.length} agendamento(s) real(is) ` +
+                `vinculados aos prestadores/clientes demo. Remova esses agendamentos antes de desfazer o catálogo.`,
+            );
+          }
+        }
 
         if (professionalIds.length > 0) {
           // 4. Localiza serviços demo
