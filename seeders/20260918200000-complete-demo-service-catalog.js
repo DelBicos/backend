@@ -707,7 +707,44 @@ const CATALOG = {
   ],
 };
 
-const DEMO_EMAILS = PROVIDERS.map((provider) => provider.email);
+const DEMO_CLIENTS = [
+  {
+    name: "Juliana Santos (Demo)",
+    email: "catalogo.cliente.juliana@demo.delbicos.local",
+    phone: "5511988200001",
+    cpf: "92000000001",
+    address: [
+      "Rua Doutor Braguinha",
+      "350",
+      "Centro",
+      "Sorocaba",
+      "SP",
+      "18010010",
+      -23.5005,
+      -47.4580,
+    ],
+  },
+  {
+    name: "Marcelo Oliveira (Demo)",
+    email: "catalogo.cliente.marcelo@demo.delbicos.local",
+    phone: "5511988200002",
+    cpf: "92000000002",
+    address: [
+      "Avenida Afonso Vergueiro",
+      "1500",
+      "Centro",
+      "Sorocaba",
+      "SP",
+      "18040000",
+      -23.4980,
+      -47.4620,
+    ],
+  },
+];
+
+const DEMO_USERS = [...PROVIDERS, ...DEMO_CLIENTS];
+const DEMO_EMAILS = DEMO_USERS.map((u) => u.email);
+const DEMO_CLIENT_EMAILS = DEMO_CLIENTS.map((c) => c.email);
 const REQUIRED_CATEGORY_TITLES = Object.keys(CATALOG);
 const REVIEW_TEMPLATES = [
   {
@@ -860,29 +897,29 @@ module.exports = {
       const existingUserByEmail = new Map(
         existingUsers.map((row) => [row.email, row]),
       );
-      for (const provider of PROVIDERS) {
-        const existing = existingUserByEmail.get(provider.email);
+      for (const demoUser of DEMO_USERS) {
+        const existing = existingUserByEmail.get(demoUser.email);
         if (
           existing &&
-          (existing.name !== provider.name || existing.phone !== provider.phone)
+          (existing.name !== demoUser.name || existing.phone !== demoUser.phone)
         ) {
           throw new Error(
-            `O e-mail técnico ${provider.email} já pertence a outro usuário; o catálogo demo não pode reutilizá-lo.`,
+            `O e-mail técnico ${demoUser.email} já pertence a outro usuário; o catálogo demo não pode reutilizá-lo.`,
           );
         }
       }
 
-      const missingProviders = PROVIDERS.filter(
-        (provider) => !existingUserByEmail.has(provider.email),
+      const missingDemoUsers = DEMO_USERS.filter(
+        (demoUser) => !existingUserByEmail.has(demoUser.email),
       );
-      if (missingProviders.length > 0) {
+      if (missingDemoUsers.length > 0) {
         const password = await bcrypt.hash(DEMO_PASSWORD, 10);
         await queryInterface.bulkInsert(
           "users",
-          missingProviders.map((provider, index) => ({
-            name: provider.name,
-            email: provider.email,
-            phone: provider.phone,
+          missingDemoUsers.map((demoUser, index) => ({
+            name: demoUser.name,
+            email: demoUser.email,
+            phone: demoUser.phone,
             password,
             active: true,
             avatar_uri: `https://i.pravatar.cc/300?img=${index + 21}`,
@@ -922,9 +959,9 @@ module.exports = {
         transaction,
       );
       const addressByEmail = new Map();
-      for (const provider of PROVIDERS) {
-        const userId = userByEmail.get(provider.email);
-        const [street, number, , , , postalCode] = provider.address;
+      for (const demoUser of DEMO_USERS) {
+        const userId = userByEmail.get(demoUser.email);
+        const [street, number, , , , postalCode] = demoUser.address;
         const matches = addresses.filter(
           (row) =>
             Number(row.user_id) === userId &&
@@ -933,19 +970,19 @@ module.exports = {
             row.postal_code === postalCode,
         );
         if (matches.length > 1) {
-          throw new Error(`Endereço demo duplicado para ${provider.email}.`);
+          throw new Error(`Endereço demo duplicado para ${demoUser.email}.`);
         }
         if (matches.length === 1)
-          addressByEmail.set(provider.email, Number(matches[0].id));
+          addressByEmail.set(demoUser.email, Number(matches[0].id));
       }
 
-      const providersWithoutAddress = PROVIDERS.filter(
-        (provider) => !addressByEmail.has(provider.email),
+      const usersWithoutAddress = DEMO_USERS.filter(
+        (demoUser) => !addressByEmail.has(demoUser.email),
       );
-      if (providersWithoutAddress.length > 0) {
+      if (usersWithoutAddress.length > 0) {
         await queryInterface.bulkInsert(
           "address",
-          providersWithoutAddress.map((provider) => {
+          usersWithoutAddress.map((demoUser) => {
             const [
               street,
               number,
@@ -955,9 +992,9 @@ module.exports = {
               postalCode,
               lat,
               lng,
-            ] = provider.address;
+            ] = demoUser.address;
             return {
-              user_id: userByEmail.get(provider.email),
+              user_id: userByEmail.get(demoUser.email),
               lat,
               lng,
               street,
@@ -984,9 +1021,9 @@ module.exports = {
         { userIds },
         transaction,
       );
-      for (const provider of PROVIDERS) {
-        const userId = userByEmail.get(provider.email);
-        const [street, number, , , , postalCode] = provider.address;
+      for (const demoUser of DEMO_USERS) {
+        const userId = userByEmail.get(demoUser.email);
+        const [street, number, , , , postalCode] = demoUser.address;
         const matches = allAddresses.filter(
           (row) =>
             Number(row.user_id) === userId &&
@@ -996,10 +1033,10 @@ module.exports = {
         );
         if (matches.length !== 1) {
           throw new Error(
-            `Esperado um endereço demo para ${provider.email}; encontrados ${matches.length}.`,
+            `Esperado um endereço demo para ${demoUser.email}; encontrados ${matches.length}.`,
           );
         }
-        addressByEmail.set(provider.email, Number(matches[0].id));
+        addressByEmail.set(demoUser.email, Number(matches[0].id));
       }
 
       const existingProfessionals = await selectRows(
@@ -1257,17 +1294,46 @@ module.exports = {
         { transaction },
       );
 
+      const clientUserIds = DEMO_CLIENTS.map((c) => userByEmail.get(c.email));
+      const existingDemoClients = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT id, user_id, main_address_id FROM client WHERE user_id IN (:clientUserIds)`,
+        { clientUserIds },
+        transaction,
+      );
+      const clientByUserId = new Map(
+        existingDemoClients.map((row) => [Number(row.user_id), row]),
+      );
+      const clientsToInsert = DEMO_CLIENTS.filter(
+        (c) => !clientByUserId.has(userByEmail.get(c.email)),
+      );
+      if (clientsToInsert.length > 0) {
+        await queryInterface.bulkInsert(
+          "client",
+          clientsToInsert.map((c) => ({
+            user_id: userByEmail.get(c.email),
+            main_address_id: addressByEmail.get(c.email),
+            cpf: c.cpf,
+            created_at: now,
+            updated_at: now,
+          })),
+          { transaction },
+        );
+      }
+
       const reviewClients = await selectRows(
         queryInterface,
         Sequelize,
-        `SELECT id, main_address_id
-         FROM client
-         WHERE main_address_id IS NOT NULL
-         ORDER BY id
-         LIMIT 2`,
-        {},
+        `SELECT c.id, c.main_address_id
+         FROM client c
+         INNER JOIN users u ON u.id = c.user_id
+         WHERE u.email IN (:demoClientEmails) AND c.main_address_id IS NOT NULL
+         ORDER BY c.id`,
+        { demoClientEmails: DEMO_CLIENT_EMAILS },
         transaction,
       );
+
       let reviewRows = [];
       if (reviewClients.length > 0) {
         await queryInterface.bulkDelete(
@@ -1329,7 +1395,7 @@ module.exports = {
         });
       } else {
         console.warn(
-          "Nenhum cliente com endereço foi encontrado; avaliações demo não foram criadas.",
+          "Nenhum cliente demo com endereço foi encontrado; avaliações demo não foram criadas.",
         );
       }
 
@@ -1342,6 +1408,7 @@ module.exports = {
 
   async down(queryInterface, Sequelize) {
     await queryInterface.sequelize.transaction(async (transaction) => {
+      // 1. Apaga agendamentos das avaliações demo
       await queryInterface.bulkDelete(
         "appointment",
         {
@@ -1351,11 +1418,83 @@ module.exports = {
         },
         { transaction },
       );
-      await queryInterface.bulkDelete(
-        "users",
-        { email: { [Sequelize.Op.in]: DEMO_EMAILS } },
-        { transaction },
+
+      // 2. Localiza IDs dos usuários demo cadastrados por este seeder
+      const demoUsers = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT id FROM users WHERE email IN (:emails)`,
+        { emails: DEMO_EMAILS },
+        transaction,
       );
+      const userIds = demoUsers.map((u) => Number(u.id));
+
+      if (userIds.length > 0) {
+        // 3. Localiza prestadores demo
+        const demoProfessionals = await selectRows(
+          queryInterface,
+          Sequelize,
+          `SELECT id FROM professional WHERE user_id IN (:userIds)`,
+          { userIds },
+          transaction,
+        );
+        const professionalIds = demoProfessionals.map((p) => Number(p.id));
+
+        if (professionalIds.length > 0) {
+          // 4. Localiza serviços demo
+          const demoServices = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT id FROM service WHERE professional_id IN (:professionalIds)`,
+            { professionalIds },
+            transaction,
+          );
+          const serviceIds = demoServices.map((s) => Number(s.id));
+
+          if (serviceIds.length > 0) {
+            await queryInterface.bulkDelete(
+              "service_availability",
+              { service_id: { [Sequelize.Op.in]: serviceIds } },
+              { transaction },
+            );
+            await queryInterface.bulkDelete(
+              "service",
+              { id: { [Sequelize.Op.in]: serviceIds } },
+              { transaction },
+            );
+          }
+
+          await queryInterface.bulkDelete(
+            "professional_availability",
+            { professional_id: { [Sequelize.Op.in]: professionalIds } },
+            { transaction },
+          );
+          await queryInterface.bulkDelete(
+            "professional",
+            { id: { [Sequelize.Op.in]: professionalIds } },
+            { transaction },
+          );
+        }
+
+        // 5. Limpa clientes, endereços e usuários demo
+        await queryInterface.bulkDelete(
+          "client",
+          { user_id: { [Sequelize.Op.in]: userIds } },
+          { transaction },
+        );
+
+        await queryInterface.bulkDelete(
+          "address",
+          { user_id: { [Sequelize.Op.in]: userIds } },
+          { transaction },
+        );
+
+        await queryInterface.bulkDelete(
+          "users",
+          { id: { [Sequelize.Op.in]: userIds } },
+          { transaction },
+        );
+      }
     });
   },
 };
