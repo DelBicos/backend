@@ -33,6 +33,7 @@ import dashboardRoutes from "./src/routes/dashboard.routes";
 import favoriteRoutes from "./src/routes/favorite.routes";
 import avatarRouter from "./src/routes/avatar.routes";
 import { startAppointmentCron } from "./src/jobs/appointmentCron";
+import { startUpcomingServicesJob } from "./src/jobs/checkUpcomingServicesJob";
 import serviceRoutes from "./src/routes/service.routes";
 import availabilityRoutes from "./src/routes/availability.routes";
 import availabilityLockRoutes from "./src/routes/availabilityLock.routes";
@@ -51,31 +52,14 @@ logger.info("Variáveis de ambiente carregadas com sucesso");
 logger.info(`Ambiente: ${process.env.ENVIRONMENT}`);
 
 startAppointmentCron();
-logger.info("Cron jobs iniciados");
+startUpcomingServicesJob();
+logger.info("Cron jobs e verificador de antecedência iniciados");
 
 const app: Express = express();
 const swaggerSpec = swaggerJSDoc(swaggerOptions);
 
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ limit: "50mb", extended: true }));
-
-// // Helmet – protege contra ataques comuns com HTTP headers
-// app.use(helmetMiddleware);
-
-// // Rate limiting – protege contra brute-force e DDoS
-// app.use(globalRateLimiter);
-
-// // HPP – protege contra HTTP Parameter Pollution
-// app.use(hppMiddleware);
-
-// // Mongo Sanitize – protege contra NoSQL injection
-// app.use(mongoSanitizeMiddleware);
-
-// // XSS Sanitizer – escapa HTML e scripts maliciosos
-// app.use(xssSanitizer);
-
-// // SQL Injection Guard – detecta e bloqueia SQL injection
-// app.use(sqlInjectionGuard);
 
 setupCors(app);
 

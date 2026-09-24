@@ -15,6 +15,7 @@ import {
   syncChatRoomStatusForAppointment,
 } from "../utils/chatRoom";
 import { syncBotSessionsForAppointmentStatus } from "../services/botAppointmentStatus.service";
+import { emitAppointmentStatusUpdate } from "../realtime/chatSocket";
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -58,18 +59,18 @@ export const createAppointment = async (req: Request, res: Response) => {
       });
     }
 
-    // Regra de antecedência: no mínimo 48 horas (2 dias)
-    const startDate = new Date(start_time);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const minAdvanceDate = new Date(today);
-    minAdvanceDate.setDate(minAdvanceDate.getDate() + 2);
+    // Regra de antecedência: no mínimo 48 horas (2 dias) - DESATIVADO TEMPORARIAMENTE PARA TESTES DA BRANCH DESLOCAMENTO_1
+    // const startDate = new Date(start_time);
+    // const today = new Date();
+    // today.setHours(0, 0, 0, 0);
+    // const minAdvanceDate = new Date(today);
+    // minAdvanceDate.setDate(minAdvanceDate.getDate() + 2);
 
-    if (startDate < minAdvanceDate) {
-      return res.status(400).json({
-        error: "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
-      });
-    }
+    // if (startDate < minAdvanceDate) {
+    //   return res.status(400).json({
+    //     error: "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
+    //   });
+    // }
 
     const [professional, service] = await Promise.all([
       ProfessionalModel.findByPk(Number(professional_id), {
@@ -371,6 +372,85 @@ export const confirmAppointment = async (req: Request, res: Response) => {
   } catch (error: any) {
     logError("Erro ao confirmar agendamento", error, { appointmentId: id });
     res.status(500).json({ error: "Erro ao confirmar agendamento" });
+  }
+};
+
+export const markInTransitAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User" }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User" }] },
+        { model: ServiceModel, as: "Service" },
+        { model: AddressModel, as: "Address" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const professional = (appointment as any).Professional;
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional responsável pode informar que está a caminho.",
+      });
+    }
+
+    if (appointment.status !== "confirmed" && appointment.status !== "in_transit") {
+      return res.status(400).json({
+        error: `Não é possível marcar a caminho um agendamento com status '${appointment.status}'`,
+      });
+    }
+
+    appointment.status = "in_transit";
+    await appointment.save();
+
+    const apptData: any = appointment;
+    const clientUser = apptData.Client?.User;
+    const profUser = apptData.Professional?.User;
+    const service = apptData.Service;
+
+    if (clientUser) {
+      await NotificationModel.create({
+        user_id: clientUser.id,
+        title: "Profissional a caminho! 🚗",
+        message: `O profissional ${profUser?.name || ""} informou que está a caminho do seu local para o serviço '${service?.title || ""}'.`,
+        notification_type: "appointment",
+        related_entity_id: appointment.id,
+        is_read: false,
+      });
+
+      emitAppointmentStatusUpdate(clientUser.id, {
+        appointment_id: appointment.id,
+        status: "in_transit",
+        session_ids: [],
+        message: `Profissional ${profUser?.name || ""} está a caminho!`,
+        payment_status: appointment.payment_intent_id ? "paid" : "pending",
+        payment_pending: !appointment.payment_intent_id,
+        paid: !!appointment.payment_intent_id,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    logger.info("Appointment marcado como em deslocamento", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Status atualizado para em deslocamento com sucesso.",
+      appointment,
+    });
+  } catch (error: any) {
+    logError("Erro ao marcar agendamento a caminho", error, { paramId });
+    res.status(500).json({ error: "Erro ao atualizar status para em deslocamento" });
   }
 };
 

@@ -6,6 +6,7 @@ import {
   getAppointmentInvoice,
   updateAppointmentStatus,
   createAppointment,
+  markInTransitAppointment,
 } from "../controllers/appointment.controller";
 import authMiddleware from "../middlewares/auth.middleware";
 
@@ -506,5 +507,30 @@ router.post("/:id/review", authMiddleware, reviewAppointment);
  *         description: Erro interno do servidor
  */
 router.get("/:id/receipt", authMiddleware, getAppointmentInvoice);
+
+/**
+ * @swagger
+ * /appointments/{id}/in-transit:
+ *   post:
+ *     summary: Marca o status do agendamento como 'in_transit' (profissional a caminho)
+ *     tags: [Appointments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID ou short_id do agendamento
+ *     responses:
+ *       200:
+ *         description: Status do agendamento atualizado para em deslocamento
+ *       403:
+ *         description: Usuário não é o profissional responsável
+ *       404:
+ *         description: Agendamento não encontrado
+ */
+router.post("/:id/in-transit", authMiddleware, markInTransitAppointment);
 
 export default router;

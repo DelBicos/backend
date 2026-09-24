@@ -25,7 +25,7 @@ const userChannel = (userId: number) => `user:${userId}`;
 
 export interface AppointmentStatusSocketPayload {
   appointment_id: number;
-  status: "pending" | "confirmed" | "completed" | "canceled";
+  status: "pending" | "confirmed" | "in_transit" | "completed" | "canceled";
   session_ids: number[];
   message: string;
   payment_status: "not_available" | "pending" | "paid";

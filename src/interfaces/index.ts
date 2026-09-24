@@ -37,7 +37,7 @@ export interface Agendamento {
     endTime: string;
     description: string;
     value: string;
-    status: 'PENDENTE' | 'CONFIRMADO' | 'CANCELADO';
+    status: 'PENDENTE' | 'CONFIRMADO' | 'EM_DESLOCAMENTO' | 'CANCELADO' | 'CONCLUIDO';
     createdAt?: Date;
     updatedAt?: Date;
 }

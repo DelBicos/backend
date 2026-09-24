@@ -33,7 +33,12 @@ export interface BotSessionHistory {
     ended_at: Date | null;
     appointment_id: number | null;
     appointment_status:
-      "pending" | "confirmed" | "completed" | "canceled" | null;
+      | "pending"
+      | "confirmed"
+      | "in_transit"
+      | "completed"
+      | "canceled"
+      | null;
     appointment_paid: boolean;
     payment_pending: boolean;
     waiting_for_professional: boolean;

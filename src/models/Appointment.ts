@@ -41,7 +41,7 @@ export interface IAppointment {
   final_price?: number;
   rating?: number;
   review?: string;
-  status?: "pending" | "confirmed" | "completed" | "canceled";
+  status?: "pending" | "confirmed" | "in_transit" | "completed" | "canceled";
   payment_intent_id?: string | null;
   createdAt?: Date;
 }
@@ -64,7 +64,7 @@ export class AppointmentModel extends Model<
   public final_price?: number;
   public rating?: number;
   public review?: string;
-  public status!: "pending" | "confirmed" | "completed" | "canceled";
+  public status!: "pending" | "confirmed" | "in_transit" | "completed" | "canceled";
   public created_at!: Date;
   public payment_intent_id?: string | null;
   public readonly createdAt!: Date;
@@ -142,7 +142,7 @@ AppointmentModel.init(
       allowNull: false,
     },
     status: {
-      type: DataTypes.ENUM("pending", "confirmed", "completed", "canceled"),
+      type: DataTypes.ENUM("pending", "confirmed", "in_transit", "completed", "canceled"),
       defaultValue: "pending",
     },
     payment_intent_id: {
