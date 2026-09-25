@@ -909,6 +909,55 @@ module.exports = {
         }
       }
 
+      // 🛡️ B07 VERIFICAÇÃO DE COLISÃO DE TELEFONE E CPF
+      const phoneCollisions = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT id, name, email, phone FROM users WHERE phone IN (:phones) AND email NOT IN (:emails)`,
+        {
+          phones: DEMO_USERS.map((u) => u.phone),
+          emails: DEMO_EMAILS,
+        },
+        transaction,
+      );
+      if (phoneCollisions.length > 0) {
+        throw new Error(
+          `Colisão de telefone detectada: o(s) telefone(s) ${phoneCollisions.map((u) => u.phone).join(", ")} já pertence(m) a outro(s) usuário(s).`,
+        );
+      }
+
+      const allDemoCpfs = DEMO_USERS.map((u) => u.cpf).filter(Boolean);
+
+      const profCpfCollisions = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT p.id, p.cpf, u.email FROM professional p
+         INNER JOIN users u ON u.id = p.user_id
+         WHERE p.cpf IN (:cpfs) AND u.email NOT IN (:emails)`,
+        { cpfs: allDemoCpfs, emails: DEMO_EMAILS },
+        transaction,
+      );
+      if (profCpfCollisions.length > 0) {
+        throw new Error(
+          `Colisão de CPF profissional detectada: o(s) CPF(s) ${profCpfCollisions.map((p) => p.cpf).join(", ")} já está(ão) em uso por outro profissional.`,
+        );
+      }
+
+      const clientCpfCollisions = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT c.id, c.cpf, u.email FROM client c
+         INNER JOIN users u ON u.id = c.user_id
+         WHERE c.cpf IN (:cpfs) AND u.email NOT IN (:emails)`,
+        { cpfs: allDemoCpfs, emails: DEMO_EMAILS },
+        transaction,
+      );
+      if (clientCpfCollisions.length > 0) {
+        throw new Error(
+          `Colisão de CPF de cliente detectada: o(s) CPF(s) ${clientCpfCollisions.map((c) => c.cpf).join(", ")} já está(ão) em uso por outro cliente.`,
+        );
+      }
+
       const missingDemoUsers = DEMO_USERS.filter(
         (demoUser) => !existingUserByEmail.has(demoUser.email),
       );
@@ -1430,18 +1479,7 @@ module.exports = {
 
   async down(queryInterface, Sequelize) {
     await queryInterface.sequelize.transaction(async (transaction) => {
-      // 1. Apaga agendamentos das avaliações demo (fake)
-      await queryInterface.bulkDelete(
-        "appointment",
-        {
-          payment_intent_id: {
-            [Sequelize.Op.in]: DEMO_REVIEW_PAYMENT_IDS,
-          },
-        },
-        { transaction },
-      );
-
-      // 2. Localiza IDs dos usuários demo cadastrados por este seeder
+      // 1. Localiza IDs dos usuários demo cadastrados por este seeder
       const demoUsers = await selectRows(
         queryInterface,
         Sequelize,
@@ -1452,7 +1490,7 @@ module.exports = {
       const userIds = demoUsers.map((u) => Number(u.id));
 
       if (userIds.length > 0) {
-        // 3. Localiza prestadores e clientes demo
+        // 2. Localiza prestadores e clientes demo
         const demoProfessionals = await selectRows(
           queryInterface,
           Sequelize,
@@ -1471,9 +1509,12 @@ module.exports = {
         );
         const clientIds = demoClients.map((c) => Number(c.id));
 
-        // 🛡️ GUARD DE SEGURANÇA (Achado Principal do Code Review):
-        // Checa se existem agendamentos REAIS vinculados aos prestadores/clientes demo.
-        // Se houver, aborta o rollback para não deletar agendamentos reais em cascata.
+        const profIdsOrZero =
+          professionalIds.length > 0 ? professionalIds : [0];
+        const clientIdsOrZero = clientIds.length > 0 ? clientIds : [0];
+
+        // 🛡️ GUARD DE SEGURANÇA B08:
+        // 1. Checa se existem agendamentos REAIS vinculados aos prestadores/clientes demo.
         if (professionalIds.length > 0 || clientIds.length > 0) {
           const realAppointments = await selectRows(
             queryInterface,
@@ -1482,8 +1523,8 @@ module.exports = {
              WHERE (professional_id IN (:professionalIds) OR client_id IN (:clientIds))
                AND (payment_intent_id IS NULL OR payment_intent_id NOT IN (:demoPaymentIds))`,
             {
-              professionalIds: professionalIds.length > 0 ? professionalIds : [0],
-              clientIds: clientIds.length > 0 ? clientIds : [0],
+              professionalIds: profIdsOrZero,
+              clientIds: clientIdsOrZero,
               demoPaymentIds: DEMO_REVIEW_PAYMENT_IDS,
             },
             transaction,
@@ -1498,7 +1539,90 @@ module.exports = {
         }
 
         if (professionalIds.length > 0) {
-          // 4. Localiza serviços demo
+          // 2. Checa se existem serviços adicionais/customizados criados pelo profissional demo fora do catálogo estático
+          const allCatalogTitles = Object.values(CATALOG).flatMap((services) =>
+            services.map((s) => s[1]),
+          );
+          const externalServices = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT id, title FROM service 
+             WHERE professional_id IN (:professionalIds) 
+               AND title NOT IN (:catalogTitles)`,
+            {
+              professionalIds: profIdsOrZero,
+              catalogTitles: allCatalogTitles,
+            },
+            transaction,
+          );
+
+          if (externalServices.length > 0) {
+            throw new Error(
+              `Rollback do catálogo demo abortado: existem ${externalServices.length} serviço(s) adicional(is) ` +
+                `criado(s) por prestadores demo fora do catálogo estático.`,
+            );
+          }
+
+          // 3. Checa se existem favoritos de terceiros para os profissionais demo
+          const existingFavorites = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT id FROM favorites WHERE professional_id IN (:professionalIds)`,
+            { professionalIds: profIdsOrZero },
+            transaction,
+          ).catch(() => []);
+
+          if (existingFavorites.length > 0) {
+            throw new Error(
+              `Rollback do catálogo demo abortado: existem ${existingFavorites.length} favorito(s) ` +
+                `cadastrado(s) para os prestadores demo.`,
+            );
+          }
+
+          // 4. Checa galeria ou comodidades adicionadas aos prestadores demo
+          const existingGallery = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT id FROM professional_gallery WHERE professional_id IN (:professionalIds)`,
+            { professionalIds: profIdsOrZero },
+            transaction,
+          ).catch(() => []);
+
+          if (existingGallery.length > 0) {
+            throw new Error(
+              `Rollback do catálogo demo abortado: existem ${existingGallery.length} imagem(ns) na galeria ` +
+                `dos prestadores demo.`,
+            );
+          }
+
+          const existingAmenities = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT id FROM professional_amenities WHERE professional_id IN (:professionalIds)`,
+            { professionalIds: profIdsOrZero },
+            transaction,
+          ).catch(() => []);
+
+          if (existingAmenities.length > 0) {
+            throw new Error(
+              `Rollback do catálogo demo abortado: existem ${existingAmenities.length} comodidade(s) ` +
+                `vinculada(s) aos prestadores demo.`,
+            );
+          }
+        }
+
+        // Se passar em TODOS os guards: limpa os dados demo
+        await queryInterface.bulkDelete(
+          "appointment",
+          {
+            payment_intent_id: {
+              [Sequelize.Op.in]: DEMO_REVIEW_PAYMENT_IDS,
+            },
+          },
+          { transaction },
+        );
+
+        if (professionalIds.length > 0) {
           const demoServices = await selectRows(
             queryInterface,
             Sequelize,
@@ -1533,7 +1657,6 @@ module.exports = {
           );
         }
 
-        // 5. Limpa clientes, endereços e usuários demo
         await queryInterface.bulkDelete(
           "client",
           { user_id: { [Sequelize.Op.in]: userIds } },
