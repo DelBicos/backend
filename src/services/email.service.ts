@@ -1,5 +1,5 @@
 import sgMail from "../config/sendgrid";
-import { sendViaLambda } from "../utils/emailFallback";
+import { sendViaAzureFunction } from "../utils/azureEmailFunction";
 
 interface EmailParams {
   to: string;
@@ -36,15 +36,19 @@ export const EmailService = {
         const err = error as { response?: { body?: any } };
         console.error(err.response?.body);
       }
-      // Tentar fallback via Lambda
+      // Tentar fallback via Azure Function
       try {
-        const fallbackResult = await sendViaLambda({ to, subject, html });
+        const fallbackResult = await sendViaAzureFunction({
+          to,
+          subject,
+          html,
+        });
         if (fallbackResult) {
-          console.info("E-mail enviado via Lambda fallback");
+          console.info("E-mail enviado via Azure Function fallback");
           return true;
         }
       } catch (err) {
-        console.error("Erro no fallback via Lambda:", err);
+        console.error("Erro no fallback via Azure Function:", err);
       }
       return false;
     }
