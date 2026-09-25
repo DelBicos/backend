@@ -27,6 +27,9 @@ yarn-debug._
 # Env files (will be passed via docker-compose)
 
 .env.local
+.env
+azure_email_function/
+infra/azure-email-function/
 .env\*.local
 
 # Typescript
