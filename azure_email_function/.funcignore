@@ -1,0 +1,12 @@
+.git*
+.venv/
+__pycache__/
+**/__pycache__/
+.pytest_cache/
+.coverage
+htmlcov/
+local.settings.json
+local.settings.json.example
+README.md
+requirements-dev.txt
+tests/

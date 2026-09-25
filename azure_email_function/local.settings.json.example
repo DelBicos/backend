@@ -1,0 +1,17 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "SMTP_HOST": "smtp.example.com",
+    "SMTP_PORT": "587",
+    "SMTP_USER": "usuario@example.com",
+    "SMTP_PASS": "substitua-localmente",
+    "FROM_EMAIL": "no-reply@example.com",
+    "DEFAULT_SUBJECT": "Mensagem DelBicos",
+    "SMTP_USE_TLS": "true",
+    "SMTP_USE_SSL": "false",
+    "SMTP_TIMEOUT_SECONDS": "15",
+    "MAX_EMAIL_BODY_BYTES": "262144"
+  }
+}
