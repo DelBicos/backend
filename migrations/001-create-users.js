@@ -49,9 +49,13 @@ module.exports = {
         defaultValue: Sequelize.literal("CURRENT_TIMESTAMP"),
       },
     });
-    await queryInterface.addIndex("users", ["active"], {
-      name: "idx_users_active",
-    });
+    try {
+      await queryInterface.addIndex("users", ["active"], {
+        name: "idx_users_active",
+      });
+    } catch (error) {
+      console.warn("Índice idx_users_active já existe, ignorando...");
+    }
   },
   async down(queryInterface, Sequelize) {
     await queryInterface.dropTable("users");

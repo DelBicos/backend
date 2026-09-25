@@ -1,0 +1,118 @@
+{
+  "intents": [
+    {
+      "name": "SAUDACAO",
+      "examples": [
+        "oi", "olá", "bom dia", "boa tarde", "boa noite", "olá tudo bem",
+        "oi como vai", "e aí", "olá assistente", "hey", "oi delbicos",
+        "bom dia assistente", "boa tarde tudo bem", "boa noite preciso de ajuda",
+        "olá preciso falar com você", "oii", "opa tudo bem", "tudo bem por aí",
+        "bom dia gostaria de informações", "boa tarde assistente", "boa noite pode me orientar",
+        "oi gostaria de ajuda", "olá estou precisando de suporte", "como você está",
+        "saudações", "ei assistente", "olá delbicos tudo bem", "bom dia equipe",
+        "boa tarde gostaria de ajuda", "olá tudo certo",
+        "ola", "olaaa", "oi assistente", "oi bot", "e ai tudo bem",
+        "bom dia bot", "boa tarde bot", "boa noite bot", "opa", "olá equipe delbicos",
+        "oi preciso de orientação", "olá gostaria de uma informação", "ei", "hey assistente", "olá posso tirar uma dúvida"
+      ]
+    },
+    {
+      "name": "AGENDAR",
+      "examples": [
+        "quero agendar um serviço", "preciso marcar um horário", "gostaria de contratar um profissional",
+        "quero uma limpeza para minha casa", "preciso de um encanador", "marcar serviço de pintura",
+        "quero agendar corte de cabelo", "posso reservar um horário", "preciso contratar eletricista",
+        "quero fazer um agendamento", "me ajude a marcar uma faxina", "gostaria de um serviço de jardinagem",
+        "quero chamar um pintor", "preciso marcar uma reforma", "quero contratar alguém para consertar a pia",
+        "agende um serviço para mim", "preciso de uma diarista", "quero reservar um profissional",
+        "quero agendar uma limpeza", "me ajude a marcar uma faxina", "preciso reservar uma diarista",
+        "gostaria de marcar um encanador", "quero um profissional para limpeza", "preciso contratar um pintor",
+        "marque uma manutenção para mim", "quero solicitar um serviço", "preciso de ajuda para agendar",
+        "quero marcar uma visita técnica", "gostaria de reservar uma limpeza", "quero um horário para eletricista",
+        "quero agendar", "eu quero agendar", "gostaria de agendar", "preciso agendar um atendimento",
+        "pode agendar para mim", "quero marcar", "pode marcar para mim", "quero fazer uma reserva",
+        "quero reservar um atendimento", "preciso de um horário", "quero contratar um profissional",
+        "desejo marcar um serviço", "quero criar um agendamento", "quero solicitar atendimento", "me ajuda a agendar"
+      ]
+    },
+    {
+      "name": "CONSULTAR",
+      "examples": [
+        "quero ver meus agendamentos", "quais são meus próximos serviços", "consultar meus horários marcados",
+        "tenho algum agendamento", "mostre meus agendamentos", "ver agenda", "quero consultar um serviço marcado",
+        "liste meus compromissos", "onde vejo meus serviços", "quero saber meus horários", "meus agendamentos",
+        "verificar disponibilidade", "tem horário disponível", "quais horários estão livres", "posso ver a agenda",
+        "consultar agenda", "mostrar reservas", "quero conferir meu agendamento",
+        "ver meus horários", "quero consultar minhas reservas", "mostrar meu calendário de serviços",
+        "quais serviços estão marcados", "me diga meus próximos agendamentos", "quero saber se tenho reserva",
+        "exibir agenda de atendimentos", "consultar disponibilidade de horário", "tem vaga na agenda",
+        "ver detalhes do agendamento", "quais são as reservas ativas", "preciso consultar meu compromisso",
+        "quero consultar meus agendamentos", "mostra minha agenda", "mostre minha agenda", "ver meus compromissos",
+        "quero acompanhar meu pedido", "acompanhar agendamento", "quero ver minhas reservas", "minhas reservas",
+        "meus horários marcados", "quais agendamentos eu tenho", "quero saber o status do meu agendamento",
+        "consulte meus serviços", "listar meus agendamentos", "quero conferir minha agenda", "tem algum serviço marcado para mim",
+        "como vejo os horários que marquei", "como vejo meus horários", "quais horários marquei",
+        "onde posso ver meus agendamentos", "onde encontro minhas reservas", "o que tenho marcado",
+        "o que eu agendei", "quais atendimentos estão agendados", "tenho algum serviço marcado",
+        "consigo ver meus compromissos", "quero olhar meus agendamentos", "ver o que está marcado para mim",
+        "consultar o que marquei", "há algum atendimento agendado", "quero saber os serviços que agendei"
+      ]
+    },
+    {
+      "name": "ALTERAR",
+      "examples": [
+        "quero remarcar meu agendamento", "preciso alterar o horário", "quero mudar a data do serviço",
+        "posso reagendar", "quero trocar meu horário", "mudar data da reserva", "preciso remarcar o serviço",
+        "alterar meu agendamento", "quero mudar o dia marcado", "gostaria de reagendar para outro dia",
+        "trocar horário da faxina", "me ajude a mudar a reserva", "preciso mudar meu compromisso",
+        "quero alterar o agendamento 15", "como remarco um serviço", "quero mudar minha visita",
+        "pode alterar minha data", "reagendar horário com profissional",
+        "preciso mudar a hora marcada", "quero reagendar minha reserva", "alterar data do atendimento",
+        "trocar o dia do serviço", "pode remarcar meu horário", "mudar horário da visita",
+        "preciso alterar minha reserva", "quero transferir o agendamento", "reagendar um atendimento",
+        "gostaria de trocar a data", "quero outro horário", "como mudar meu agendamento",
+        "quero trocar horário", "quero trocar o horário", "trocar minha data", "trocar o dia",
+        "mudar meu horário", "mudar a hora", "mudar o horário do serviço", "quero reagendar",
+        "preciso reagendar", "pode remarcar para mim", "quero remarcar", "alterar horário marcado",
+        "quero mudar a data da reserva", "quero mudar meu agendamento", "troque o horário do meu atendimento"
+      ]
+    },
+    {
+      "name": "CANCELAR",
+      "examples": [
+        "quero cancelar meu agendamento", "preciso desmarcar o serviço", "cancele minha reserva",
+        "não quero mais o horário", "quero desistir do agendamento", "cancelar serviço marcado",
+        "pode cancelar meu horário", "preciso cancelar a faxina", "desmarcar compromisso",
+        "quero cancelar o agendamento 20", "cancele a visita", "não vou precisar do profissional",
+        "gostaria de cancelar a reserva", "quero remover meu horário", "como cancelo um agendamento",
+        "desistir do serviço", "cancelar minha solicitação", "preciso anular minha reserva",
+        "desmarcar compromisso", "preciso desmarcar o serviço", "não quero mais o horário",
+        "quero cancelar a visita marcada", "desmarque meu horário", "por favor cancele a reserva",
+        "gostaria de anular o agendamento", "não preciso mais desse serviço", "quero retirar minha solicitação",
+        "como desmarco a faxina", "cancelar atendimento agendado", "preciso cancelar minha visita",
+        "quero cancelar", "pode cancelar para mim", "preciso cancelar", "cancela meu agendamento",
+        "cancele meu atendimento", "quero desmarcar", "preciso desmarcar", "desmarque minha reserva",
+        "não quero mais esse agendamento", "não preciso mais do atendimento", "anular agendamento", "quero anular",
+        "quero desistir", "retirar meu agendamento", "cancelar meu pedido"
+      ]
+    },
+    {
+      "name": "FALLBACK",
+      "examples": [
+        "qual a previsão do tempo", "conte uma piada", "qual é seu nome", "quanto é dois mais dois",
+        "não entendi o aplicativo", "me envie uma receita", "qual filme você recomenda", "quero falar de futebol",
+        "você gosta de música", "me diga uma curiosidade", "onde fica são paulo", "qual é a capital do brasil",
+        "preciso de ajuda com meu computador", "me conte uma história", "como está o trânsito", "mande uma foto",
+        "o que significa essa palavra", "qual é a cotação do dólar",
+        "me mostre notícias", "qual restaurante você indica", "como fazer um bolo",
+        "qual seu signo", "me fale sobre tecnologia", "quanto custa um carro",
+        "qual idioma se fala no japão", "me ajude com matemática", "como aprender inglês",
+        "o que aconteceu hoje", "me diga uma frase", "qual é a hora agora",
+        "me explique física", "quem ganhou o jogo", "qual celular é melhor", "quero uma recomendação de livro",
+        "me conte sobre o espaço", "como está a bolsa de valores", "qual é a população do brasil",
+        "me ajude com um trabalho escolar", "traduza uma frase", "escreva um poema", "me fale sobre política",
+        "quero saber uma notícia", "me ajude a cozinhar", "como consertar meu computador", "me diga uma charada"
+      ]
+    }
+  ]
+}

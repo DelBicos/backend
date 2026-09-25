@@ -61,17 +61,25 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex(
-      "chat_room",
-      ["professional_id", "last_message_at"],
-      { name: "idx_chat_room_professional" }
-    );
+    try {
+      await queryInterface.addIndex(
+        "chat_room",
+        ["professional_id", "last_message_at"],
+        { name: "idx_chat_room_professional" }
+      );
+    } catch (err) {
+      console.log("Índice idx_chat_room_professional já existe, ignorando...");
+    }
 
-    await queryInterface.addIndex(
-      "chat_room",
-      ["client_id", "last_message_at"],
-      { name: "idx_chat_room_client" }
-    );
+    try {
+      await queryInterface.addIndex(
+        "chat_room",
+        ["client_id", "last_message_at"],
+        { name: "idx_chat_room_client" }
+      );
+    } catch (err) {
+      console.log("Índice idx_chat_room_client já existe, ignorando...");
+    }
   },
 
   async down(queryInterface, Sequelize) {

@@ -1,7 +1,6 @@
 ##### Node #####
 node_modules
 pnpm-lock.yaml
-package-lock.json
 yarn.lock
 coverage
 
@@ -10,6 +9,7 @@ coverage
 
 ## Project Files ##
 .env
+scratch/
 
 ## Image Directories ##
 avatarBucket

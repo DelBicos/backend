@@ -1,10 +1,13 @@
 import { Request, Response } from "express";
-import { PaymentService } from "../services/payment.service";
+import {
+  PaymentService,
+  PaymentValidationError,
+} from "../services/payment.service";
 import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 
 export const createPaymentIntentController = async (
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> => {
   const {
     amount,
@@ -13,6 +16,7 @@ export const createPaymentIntentController = async (
     selectedTime,
     serviceId,
     addressId,
+    appointmentId,
   } = req.body;
 
   if (amount == null || typeof amount !== "number" || amount <= 0) {
@@ -44,11 +48,12 @@ export const createPaymentIntentController = async (
     serviceId: serviceId.toString(),
     selectedTime: selectedTime,
     addressId: addressId.toString(),
+    ...(appointmentId ? { appointmentId: appointmentId.toString() } : {}),
   };
 
   try {
     const clientSecret = await PaymentService.createPaymentIntent({
-      amount: amountInCents,        // ✅ CORREÇÃO AQUI
+      amount: amountInCents, // ✅ CORREÇÃO AQUI
       currency: currency.toLowerCase(),
       metadata: metadata,
     });
@@ -56,7 +61,7 @@ export const createPaymentIntentController = async (
   } catch (error: any) {
     console.error(
       "[PaymentController] Erro ao criar Payment Intent:",
-      error.message
+      error.message,
     );
     res.status(500).json({
       error: "Falha ao processar o pagamento. Por favor, tente novamente.",
@@ -66,10 +71,10 @@ export const createPaymentIntentController = async (
 
 export const confirmPaymentController = async (
   req: Request,
-  res: Response
+  res: Response,
 ): Promise<void> => {
   const authReq = req as AuthenticatedRequest;
-  const { paymentIntentId, userId } = req.body;
+  const { paymentIntentId } = req.body;
 
   if (!paymentIntentId) {
     res
@@ -77,19 +82,18 @@ export const confirmPaymentController = async (
       .json({ error: "O ID do pagamento (paymentIntentId) é obrigatório." });
     return;
   }
-  if (!userId) {
-    res.status(401).json({
-      error: "ID do usuário (userId) é obrigatório no corpo da requisição.",
-    });
+
+  // Nunca confiar em um userId enviado pelo cliente: sempre usar a identidade do token autenticado.
+  const authenticatedUserId = authReq.user?.id;
+  if (!authenticatedUserId) {
+    res.status(401).json({ error: "Usuário não autenticado." });
     return;
   }
-
-  const authenticatedUserId = Number(userId);
 
   try {
     const newAppointment = await PaymentService.confirmAndCreateAppointment(
       paymentIntentId,
-      authenticatedUserId
+      authenticatedUserId,
     );
     res.status(201).json({
       message: "Agendamento criado com sucesso!",
@@ -98,8 +102,12 @@ export const confirmPaymentController = async (
   } catch (error: any) {
     console.error(
       `[PaymentController] Erro ao confirmar pagamento ${paymentIntentId}:`,
-      error.message
+      error.message,
     );
+    if (error instanceof PaymentValidationError) {
+      res.status(error.status).json({ error: error.message, code: error.code });
+      return;
+    }
     res
       .status(500)
       .json({ error: error.message || "Falha ao confirmar o agendamento." });

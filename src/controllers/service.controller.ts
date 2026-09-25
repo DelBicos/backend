@@ -9,6 +9,12 @@ import { ProfessionalModel } from "../models/Professional";
 import { SubCategoryModel } from "../models/Subcategory";
 import { UserModel } from "../models/User";
 import { AddressModel } from "../models/Address";
+import { CategoryModel } from "../models/Category";
+import {
+  rankSemanticCandidates,
+  SEMANTIC_SEARCH_RESULT_LIMIT,
+  SemanticSearchUnavailableError,
+} from "../services/semanticSearch.service";
 
 // ─── rate-limit em memória (criação de serviço por profissional) ─────────────────
 const CREATE_RATE_WINDOW_MS = 10_000; // 10 segundos
@@ -209,6 +215,191 @@ export const listAllServices = async (req: Request, res: Response) => {
     return res.json({ total: count, page, limit, data });
   } catch (error: any) {
     console.error("Erro listAllServices:", error);
+    return res.status(500).json({ error: "Erro interno do servidor" });
+  }
+};
+
+/**
+ * GET /api/services/search/semantic
+ * Query params: q, category_id, subcategory_id, day, page, limit
+ *
+ * A consulta ao banco continua sendo a fonte de verdade. Apenas o ranking é
+ * delegado ao nlp-service, que recebe documentos já filtrados e devolve IDs.
+ */
+export const searchServicesSemantically = async (req: Request, res: Response) => {
+  const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (query.length < 2 || query.length > 500) {
+    return res.status(400).json({ error: "q deve ter entre 2 e 500 caracteres" });
+  }
+
+  const requestedPage = Number(req.query.page);
+  const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const requestedLimit = Number(req.query.limit);
+  const limit = Number.isSafeInteger(requestedLimit) && requestedLimit > 0
+    ? Math.min(50, requestedLimit)
+    : 20;
+  const categoryId = Number(req.query.category_id);
+  const subcategoryId = Number(req.query.subcategory_id);
+  const day = Number(req.query.day);
+
+  try {
+    const where: any = { active: true };
+    if (Number.isInteger(subcategoryId) && subcategoryId > 0) {
+      where.subcategory_id = subcategoryId;
+    }
+
+    const subcategoryInclude: any = {
+      model: SubCategoryModel,
+      as: "Subcategory",
+      attributes: ["id", "title", "category_id"],
+      include: [
+        {
+          model: CategoryModel,
+          as: "Category",
+          attributes: ["id", "title"],
+        },
+      ],
+    };
+    if (Number.isInteger(categoryId) && categoryId > 0) {
+      subcategoryInclude.where = { category_id: categoryId };
+      subcategoryInclude.required = true;
+    }
+
+    const availabilityInclude: any = {
+      model: ServiceAvailabilityModel,
+      as: "Availabilities",
+      attributes: [],
+      required: false,
+    };
+    if (req.query.day !== undefined) {
+      if (!Number.isInteger(day) || day < 0 || day > 6) {
+        return res.status(400).json({ error: "day deve ser um número entre 0 e 6" });
+      }
+      availabilityInclude.where = { day_of_week: day };
+      availabilityInclude.required = true;
+    }
+
+    const candidates = await ServiceModel.findAll({
+      where,
+      attributes: ["id", "title", "description"],
+      include: [subcategoryInclude, availabilityInclude],
+      order: [["id", "ASC"]],
+    });
+
+    if (candidates.length === 0) {
+      return res.json({
+        total: 0,
+        candidate_total: 0,
+        page,
+        limit,
+        has_more: false,
+        results_limited: false,
+        data: [],
+      });
+    }
+
+    // A paginação é estável dentro da janela de melhores resultados definida
+    // para a busca semântica; não variar esse limite por página evita que o
+    // campo `total` mude enquanto o cliente navega pelos resultados.
+    const rankingLimit = SEMANTIC_SEARCH_RESULT_LIMIT;
+    let hits;
+    try {
+      hits = await rankSemanticCandidates(
+        query,
+        candidates.map((service: any) => ({
+          id: service.id,
+          text: [
+            service.title,
+            service.description,
+            service.Subcategory?.title,
+            service.Subcategory?.Category?.title,
+          ]
+            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            .join(". "),
+        })),
+        { limit: rankingLimit },
+      );
+    } catch (error) {
+      if (error instanceof SemanticSearchUnavailableError) {
+        return res.status(503).json({
+          error: "Busca semântica temporariamente indisponível. Tente novamente.",
+        });
+      }
+      throw error;
+    }
+
+    const total = hits.length;
+    const pageHits = hits.slice((page - 1) * limit, page * limit);
+    if (pageHits.length === 0) {
+      return res.json({
+        total,
+        candidate_total: candidates.length,
+        page,
+        limit,
+        has_more: false,
+        results_limited: hits.length === rankingLimit && rankingLimit < candidates.length,
+        data: [],
+      });
+    }
+
+    const services = await ServiceModel.findAll({
+      where: { id: { [Op.in]: pageHits.map((hit) => hit.id) }, active: true },
+      include: [
+        {
+          model: ServiceAvailabilityModel,
+          as: "Availabilities",
+          attributes: ["id", "day_of_week", "start_time", "end_time"],
+        },
+        {
+          model: SubCategoryModel,
+          as: "Subcategory",
+          attributes: ["id", "title", "category_id"],
+          include: [{ model: CategoryModel, as: "Category", attributes: ["id", "title"] }],
+        },
+        {
+          model: ProfessionalModel,
+          as: "Professional",
+          attributes: ["id", "user_id", "description"],
+          include: [
+            {
+              model: UserModel,
+              as: "User",
+              attributes: ["id", "name", "avatar_uri"],
+            },
+            {
+              model: AddressModel,
+              as: "MainAddress",
+              attributes: ["city", "state"],
+            },
+          ],
+        },
+      ],
+    });
+    const serviceById = new Map(services.map((service: any) => [service.id, service]));
+    const scoreById = new Map(hits.map((hit) => [hit.id, hit.score]));
+    const data = pageHits.flatMap((hit) => {
+      const service: any = serviceById.get(hit.id);
+      if (!service) return [];
+      return [
+        {
+          ...service.toJSON(),
+          relevance_score: scoreById.get(hit.id),
+          Availabilities: normalizeAvailabilities(service.Availabilities ?? []),
+        },
+      ];
+    });
+
+    return res.json({
+      total,
+      candidate_total: candidates.length,
+      page,
+      limit,
+      has_more: page * limit < total,
+      results_limited: hits.length === rankingLimit && rankingLimit < candidates.length,
+      data,
+    });
+  } catch (error) {
+    console.error("Erro searchServicesSemantically:", error);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 };
