@@ -47,4 +47,9 @@ describe("createApp", () => {
       .set("Authorization", `Bearer ${forged}`);
     expect(res.status).toBe(403);
   });
+
+  it("exige autenticacao para listar agendamentos de um usuario", async () => {
+    const res = await request(app).get("/api/appointments/user/1");
+    expect(res.status).toBe(401);
+  });
 });

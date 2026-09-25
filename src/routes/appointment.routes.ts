@@ -304,7 +304,6 @@ const router = Router();
  *               - professional_id
  *               - address_id
  *               - start_time
- *               - end_time
  *             properties:
  *               service_id:
  *                 type: integer
@@ -319,10 +318,6 @@ const router = Router();
  *                 type: string
  *                 format: date-time
  *                 example: "2026-06-10T14:00:00.000Z"
- *               end_time:
- *                 type: string
- *                 format: date-time
- *                 example: "2026-06-10T15:00:00.000Z"
  *     responses:
  *       201:
  *         description: Agendamento criado com sucesso (status pending)
@@ -337,13 +332,43 @@ const router = Router();
  *       403:
  *         description: Usuário não possui perfil de cliente
  *       404:
- *         description: Profissional ou serviço não encontrado
+ *         description: Profissional, serviço ou endereço não encontrado
+ *       409:
+ *         description: Profissional já possui agendamento no horário
  *       500:
  *         description: Erro interno do servidor
  */
 router.post("/", authMiddleware, createAppointment);
 
-router.get("/user/:id", getAllAppointments);
+/**
+ * @swagger
+ * /api/appointments/user/{id}:
+ *   get:
+ *     summary: Lista os agendamentos do usuário autenticado
+ *     description: O parâmetro id deve ser o id do próprio usuário do token; caso contrário retorna 403.
+ *     tags: [Appointments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: role
+ *         schema:
+ *           type: string
+ *           enum: [client, professional]
+ *     responses:
+ *       200:
+ *         description: Lista de agendamentos (o campo id é o short_id)
+ *       401:
+ *         description: Token ausente
+ *       403:
+ *         description: Tentativa de consultar agendamentos de outro usuário
+ */
+router.get("/user/:id", authMiddleware, getAllAppointments);
 
 /**
  * @swagger

@@ -1,6 +1,7 @@
 import { ClientModel } from "../../../models/Client";
 import { ProfessionalModel } from "../../../models/Professional";
 import { ServiceModel } from "../../../models/Service";
+import { AddressModel } from "../../../models/Address";
 import { AppointmentModel } from "../../../models/Appointment";
 import { UserModel } from "../../../models/User";
 import { NotificationModel } from "../../../models/Notification";
@@ -28,6 +29,8 @@ export async function createBotAppointment(
   ]);
   if (!professional) throw new Error("Profissional não encontrado");
   if (!service || !service.active) throw new Error("Serviço inativo ou não encontrado");
+  if (service.professional_id !== professional.id)
+    throw new Error("Serviço não pertence ao profissional selecionado");
 
   const normalizedTime = time.trim().slice(0, 5);
   let startTime: Date;
@@ -49,7 +52,13 @@ export async function createBotAppointment(
     );
   }
 
-  const addressId = clientRecord.main_address_id ?? 1; // fallback
+  // Endereco provisorio: o principal do cliente ou, na falta, o primeiro
+  // cadastrado. O endereco definitivo e escolhido na tela de pagamento.
+  const addressId =
+    clientRecord.main_address_id ??
+    (await AddressModel.findOne({ where: { user_id: userId }, attributes: ["id"] }))?.id;
+  if (!addressId)
+    throw new Error("Cadastre um endereço no seu perfil antes de agendar.");
   const appointment = await AppointmentModel.create({
     professional_id: professionalId,
     client_id: clientRecord.id,
