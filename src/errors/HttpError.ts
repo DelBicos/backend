@@ -5,6 +5,9 @@
  * JSON no formato { error: string } usado em toda a API.
  */
 export class HttpError extends Error {
+  /** Codigo estavel para o app tratar o erro (ex.: "SESSION_EXPIRED"). */
+  public code?: string;
+
   constructor(
     public readonly status: number,
     message: string,
@@ -12,6 +15,11 @@ export class HttpError extends Error {
   ) {
     super(message);
     this.name = "HttpError";
+  }
+
+  withCode(code: string): this {
+    this.code = code;
+    return this;
   }
 
   static badRequest(message: string, details?: unknown) {

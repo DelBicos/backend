@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import bcrypt from "bcryptjs";
+import { findUserByEmail, verifyPassword } from "../services/auth/credentials";
 import { signToken } from "../utils/jwt.util";
 import { UserModel } from "../models/User";
 import { AdminModel } from "../models/Admin";
@@ -13,11 +13,12 @@ export const adminLogin = async (req: Request, res: Response) => {
   if (!email || !password)
     return res.status(400).json({ error: "Email e senha obrigatórios" });
   try {
-    const user = await UserModel.findOne({ where: { email } });
-    if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
-
-    const isValid = await bcrypt.compare(password, user.password);
-    if (!isValid) return res.status(401).json({ error: "Senha inválida" });
+    // Mesma resposta para e-mail inexistente e senha errada (evita enumerar contas).
+    const normalized = String(email).trim().toLowerCase();
+    const user = await findUserByEmail(normalized);
+    const isValid = await verifyPassword(password, user?.password);
+    if (!user || !isValid)
+      return res.status(401).json({ error: "E-mail ou senha inválidos" });
 
     const isAdmin = await AdminModel.findOne({ where: { user_id: user.id } });
     if (!isAdmin)
