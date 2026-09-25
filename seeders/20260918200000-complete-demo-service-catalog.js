@@ -1539,28 +1539,45 @@ module.exports = {
         }
 
         if (professionalIds.length > 0) {
-          // 2. Checa se existem serviços adicionais/customizados criados pelo profissional demo fora do catálogo estático
-          const allCatalogTitles = Object.values(CATALOG).flatMap((services) =>
-            services.map((s) => s[1]),
-          );
-          const externalServices = await selectRows(
+          // 2. Trava de quantidade e integridade exata dos 58 serviços do catálogo
+          const expectedCatalogPairs = new Set();
+          for (const [category, services] of Object.entries(CATALOG)) {
+            const categoryProviders = PROVIDERS.filter(
+              (p) => p.category === category,
+            );
+            services.forEach(([subcategory, title], index) => {
+              const provider = categoryProviders[index % 2];
+              expectedCatalogPairs.add(`${provider.email}|${title}`);
+            });
+          }
+
+          const currentDemoServices = await selectRows(
             queryInterface,
             Sequelize,
-            `SELECT id, title FROM service 
-             WHERE professional_id IN (:professionalIds) 
-               AND title NOT IN (:catalogTitles)`,
-            {
-              professionalIds: profIdsOrZero,
-              catalogTitles: allCatalogTitles,
-            },
+            `SELECT s.id, s.title, u.email 
+             FROM service s
+             INNER JOIN professional p ON p.id = s.professional_id
+             INNER JOIN users u ON u.id = p.user_id
+             WHERE u.email IN (:emails)`,
+            { emails: DEMO_EMAILS },
             transaction,
           );
 
-          if (externalServices.length > 0) {
+          if (currentDemoServices.length !== 58) {
             throw new Error(
-              `Rollback do catálogo demo abortado: existem ${externalServices.length} serviço(s) adicional(is) ` +
-                `criado(s) por prestadores demo fora do catálogo estático.`,
+              `Rollback do catálogo demo abortado: esperados exatamente 58 serviços estáticos, ` +
+                `mas foram encontrados ${currentDemoServices.length} serviço(s). Remova os serviços adicionais antes de desfazer o catálogo.`,
             );
+          }
+
+          for (const serviceRow of currentDemoServices) {
+            const pairKey = `${serviceRow.email}|${serviceRow.title}`;
+            if (!expectedCatalogPairs.has(pairKey)) {
+              throw new Error(
+                `Rollback do catálogo demo abortado: o serviço "${serviceRow.title}" para ${serviceRow.email} ` +
+                  `não pertence ao catálogo estático original.`,
+              );
+            }
           }
 
           // 3. Checa se existem favoritos de terceiros para os profissionais demo
@@ -1609,6 +1626,9 @@ module.exports = {
                 `vinculada(s) aos prestadores demo.`,
             );
           }
+
+          // Se passou em todas as travas, guarda os IDs dos 58 serviços para deleção exata
+          var serviceIdsToDelete = currentDemoServices.map((s) => Number(s.id));
         }
 
         // Se passar em TODOS os guards: limpa os dados demo
@@ -1622,28 +1642,17 @@ module.exports = {
           { transaction },
         );
 
-        if (professionalIds.length > 0) {
-          const demoServices = await selectRows(
-            queryInterface,
-            Sequelize,
-            `SELECT id FROM service WHERE professional_id IN (:professionalIds)`,
-            { professionalIds },
-            transaction,
+        if (professionalIds.length > 0 && serviceIdsToDelete && serviceIdsToDelete.length > 0) {
+          await queryInterface.bulkDelete(
+            "service_availability",
+            { service_id: { [Sequelize.Op.in]: serviceIdsToDelete } },
+            { transaction },
           );
-          const serviceIds = demoServices.map((s) => Number(s.id));
-
-          if (serviceIds.length > 0) {
-            await queryInterface.bulkDelete(
-              "service_availability",
-              { service_id: { [Sequelize.Op.in]: serviceIds } },
-              { transaction },
-            );
-            await queryInterface.bulkDelete(
-              "service",
-              { id: { [Sequelize.Op.in]: serviceIds } },
-              { transaction },
-            );
-          }
+          await queryInterface.bulkDelete(
+            "service",
+            { id: { [Sequelize.Op.in]: serviceIdsToDelete } },
+            { transaction },
+          );
 
           await queryInterface.bulkDelete(
             "professional_availability",
