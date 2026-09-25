@@ -2,6 +2,7 @@ import {
   parsePortugueseDate,
   parseTimeFromText,
   parseTimePeriodFromText,
+  PORTUGUESE_DAY_WORDS,
   TimePeriod,
 } from "../utils/date.util";
 import logger from "../utils/logger";
@@ -30,7 +31,12 @@ const VALID_INTENTS = new Set([
 ]);
 
 export type NluIntent =
-  "AGENDAR" | "ALTERAR" | "CANCELAR" | "CONSULTAR" | "SAUDACAO" | "FALLBACK";
+  | "AGENDAR"
+  | "ALTERAR"
+  | "CANCELAR"
+  | "CONSULTAR"
+  | "SAUDACAO"
+  | "FALLBACK";
 
 export interface NluEntities {
   service?: string;
@@ -111,10 +117,17 @@ const STANDALONE_NEXT_WEEK_PATTERN =
   /^(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)(?:\s+(?:na|de))?\s+(?:domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab)(?:\s+feira)?$/;
 const STANDALONE_RELATIVE_DATE_PATTERN =
   /^(?:hoje|hj|amanha|amanh|amnh|(?:depois|dps)\s+(?:de|d)\s+(?:amanha|amanh|amnh))$/;
-const STANDALONE_DAY_PATTERN =
-  /^dia\s+(?:\d{1,2}|primeiro|um|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta)$/;
-const STANDALONE_WRITTEN_DATE_PATTERN =
-  /^(?:dia\s+)?(?:\d{1,2}|primeiro|um|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta)\s+(?:de|do|da)\s+(?:janeiro|jan|fevereiro|fev|marco|mar|abril|abr|maio|mai|junho|jun|julho|jul|agosto|ago|setembro|set|outubro|out|novembro|nov|dezembro|dez|\d{1,2})(?:\s+(?:de|do)\s+\d{2,4})?$/;
+// Reaproveita a mesma lista de números por extenso do parser de datas (inclui
+// compostos como "vinte e oito"), evitando duas listas divergentes.
+const DAY_WORD_ALTERNATION = PORTUGUESE_DAY_WORDS.map((word) =>
+  word.replace(/ /g, "\\s+"),
+).join("|");
+const STANDALONE_DAY_PATTERN = new RegExp(
+  `^dia\\s+(?:\\d{1,2}|${DAY_WORD_ALTERNATION})$`,
+);
+const STANDALONE_WRITTEN_DATE_PATTERN = new RegExp(
+  `^(?:dia\\s+)?(?:\\d{1,2}|${DAY_WORD_ALTERNATION})\\s+(?:de|do|da)\\s+(?:janeiro|jan|fevereiro|fev|marco|mar|abril|abr|maio|mai|junho|jun|julho|jul|agosto|ago|setembro|set|outubro|out|novembro|nov|dezembro|dez|\\d{1,2})(?:\\s+(?:de|do)\\s+\\d{2,4})?$`,
+);
 const STANDALONE_TIME_PERIOD_PATTERN =
   /^(?:(?:de|da|pela|na|a)\s+)?(?:manha|matutino|matutina|cedo|manhazinha|tarde|vespertino|vespertina|noite|noturno|noturna|anoitecer)$/;
 const STANDALONE_EXPLICIT_TIME_PATTERN =
@@ -579,7 +592,9 @@ function extractServiceCandidate(message: string): string | undefined {
     parseTimeFromText(candidate)
   ) {
     // Se a mensagem contém uma data legível e a palavra restante é um artigo ou palavra genérica
-    const words = candidate.split(/\s+/).filter(w => !genericTerms.has(normalizeForRules(w)));
+    const words = candidate
+      .split(/\s+/)
+      .filter((w) => !genericTerms.has(normalizeForRules(w)));
     if (words.length === 0) return undefined;
   }
   return candidate.slice(0, 200);
