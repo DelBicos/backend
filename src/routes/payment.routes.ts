@@ -21,22 +21,15 @@ const paymentRouter = Router();
  *   schemas:
  *     PaymentIntentRequest:
  *       type: object
+ *       description: >
+ *         O valor cobrado e calculado no servidor a partir do preco do servico;
+ *         amount/currency enviados pelo app sao ignorados.
  *       required:
- *         - amount
- *         - currency
  *         - professionalId
  *         - selectedTime
  *         - serviceId
  *         - addressId
  *       properties:
- *         amount:
- *           type: number
- *           description: Valor na unidade principal (ex 50.00)
- *           minimum: 0.01
- *         currency:
- *           type: string
- *           description: Codigo ISO 4217 com 3 letras
- *           example: brl
  *         professionalId:
  *           type: integer
  *         selectedTime:
@@ -46,6 +39,9 @@ const paymentRouter = Router();
  *           type: integer
  *         addressId:
  *           type: integer
+ *         appointmentId:
+ *           type: integer
+ *           description: Agendamento pendente ja existente (fluxo do chatbot) a ser pago
  *     PaymentIntentResponse:
  *       type: object
  *       properties:
@@ -53,14 +49,12 @@ const paymentRouter = Router();
  *           type: string
  *     ConfirmPaymentRequest:
  *       type: object
+ *       description: O usuario e obtido do token JWT; o PaymentIntent precisa ter sido criado por ele.
  *       required:
  *         - paymentIntentId
- *         - userId
  *       properties:
  *         paymentIntentId:
  *           type: string
- *         userId:
- *           type: integer
  *     ConfirmPaymentResponse:
  *       type: object
  *       properties:
@@ -129,7 +123,7 @@ paymentRouter.post(
  *       400:
  *         description: paymentIntentId ausente
  *       401:
- *         description: userId ausente ou nao autenticado
+ *         description: Token ausente
  *       500:
  *         description: Falha ao confirmar pagamento
  */
