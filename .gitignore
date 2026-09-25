@@ -1,7 +1,6 @@
 ##### Node #####
 node_modules
 pnpm-lock.yaml
-package-lock.json
 yarn.lock
 coverage
 
@@ -10,6 +9,13 @@ coverage
 
 ## Project Files ##
 .env
+azure_email_function/local.settings.json
+azure_email_function/.venv/
+azure_email_function/**/__pycache__/
+azure_email_function/.python_packages/
+azure_email_function/.pytest_cache/
+azure_email_function/.coverage
+azure_email_function/htmlcov/
 scratch/
 
 ## Image Directories ##
