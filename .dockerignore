@@ -9,6 +9,13 @@ yarn-error.\*
 npm-debug._
 yarn-debug._
 
+# Python (evita falha de contexto por diretórios com ACL quebrada no Windows)
+
+.pytest_cache/
+**/.pytest_cache/
+**/__pycache__/
+*.pyc
+
 # macOS
 
 .DS_Store
