@@ -4,6 +4,7 @@
  */
 import { Op, UniqueConstraintError, literal } from "sequelize";
 import { ProfessionalModel } from "../../models/Professional";
+import { ProfessionalGalleryModel } from "../../models/ProfessionalGallery";
 import { UserModel } from "../../models/User";
 import { AddressModel } from "../../models/Address";
 import { ServiceModel } from "../../models/Service";
@@ -33,18 +34,29 @@ const PUBLIC_PROFESSIONAL_ATTRIBUTES = [
   "updatedAt",
 ];
 
-/** Local de atendimento exibido no perfil publico (sem ids internos). */
-const PUBLIC_ADDRESS_ATTRIBUTES = [
-  "street",
-  "number",
-  "complement",
-  "neighborhood",
-  "city",
-  "state",
-  "postal_code",
-  "lat",
-  "lng",
-];
+/**
+ * Endereco no perfil publico: so bairro/cidade/estado. Rua, numero, CEP e
+ * coordenadas exatas costumam ser a casa do profissional e nao sao expostos.
+ */
+const PUBLIC_ADDRESS_ATTRIBUTES = ["neighborhood", "city", "state", "lat", "lng"];
+
+/** Casas decimais das coordenadas publicas (~1 km): suficiente para o aviso de raio. */
+const PUBLIC_COORDINATE_DECIMALS = 2;
+
+/** "Eduardo Kamo Silva" -> "Eduardo S." (nome de quem avalia no perfil publico). */
+export function publicReviewerName(name: unknown): string {
+  const parts = String(name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "Cliente";
+  if (parts.length === 1) return parts[0];
+  return `${parts[0]} ${parts[parts.length - 1].charAt(0).toUpperCase()}.`;
+}
+
+export function roundCoordinate(value: unknown): number | null {
+  const n = Number(value);
+  if (value === null || value === undefined || Number.isNaN(n)) return null;
+  const factor = 10 ** PUBLIC_COORDINATE_DECIMALS;
+  return Math.round(n * factor) / factor;
+}
 
 const COMPLETED_WITH_RATING = { status: "completed", rating: { [Op.not]: null } };
 
@@ -199,6 +211,13 @@ export async function getPublicProfile(rawId: unknown) {
       { model: AddressModel, as: "MainAddress", attributes: PUBLIC_ADDRESS_ATTRIBUTES },
       { model: ServiceModel, as: "Services", where: { active: true }, required: false },
       {
+        model: ProfessionalGalleryModel,
+        as: "Gallery",
+        attributes: ["id", "url", "description"],
+        where: { active: true },
+        required: false,
+      },
+      {
         model: AppointmentModel,
         as: "Appointments",
         attributes: ["id", "rating", "review", "createdAt", "updatedAt"],
@@ -223,7 +242,26 @@ export async function getPublicProfile(rawId: unknown) {
     (data.Appointments ?? []).map((a: any) => a.rating),
     2,
   );
-  return { ...data.toJSON(), rating: ratings_count ? rating : null, ratings_count };
+  const json = data.toJSON();
+  if (json.MainAddress) {
+    json.MainAddress = {
+      ...json.MainAddress,
+      lat: roundCoordinate(json.MainAddress.lat),
+      lng: roundCoordinate(json.MainAddress.lng),
+    };
+  }
+  json.Appointments = (json.Appointments ?? []).map((a: any) =>
+    a.Client?.User
+      ? {
+          ...a,
+          Client: {
+            ...a.Client,
+            User: { ...a.Client.User, name: publicReviewerName(a.Client.User.name) },
+          },
+        }
+      : a,
+  );
+  return { ...json, rating: ratings_count ? rating : null, ratings_count };
 }
 
 /**

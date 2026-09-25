@@ -8,6 +8,7 @@ jest.mock("../../../models/Address");
 jest.mock("../../../models/Service");
 jest.mock("../../../models/Appointment");
 jest.mock("../../../models/Client");
+jest.mock("../../../models/ProfessionalGallery");
 jest.mock("../../availability.service", () => ({ getAvailableSlots: jest.fn() }));
 
 import { ProfessionalModel } from "../../../models/Professional";
@@ -55,6 +56,50 @@ describe("getPublicProfile", () => {
 
     expect(profile.rating).toBe(4.5);
     expect(profile.ratings_count).toBe(2);
+  });
+
+  it("nao expoe o endereco exato do profissional", async () => {
+    mocked(ProfessionalModel.findByPk).mockResolvedValue(
+      professionalRow({
+        Appointments: [],
+        MainAddress: { neighborhood: "Centro", city: "Sorocaba", state: "SP", lat: -23.501234, lng: -47.458765 },
+      }),
+    );
+
+    const profile: any = await service.getPublicProfile("20");
+
+    const options = mocked(ProfessionalModel.findByPk).mock.calls[0][1];
+    const address = options.include.find((i: any) => i.as === "MainAddress");
+    for (const field of ["street", "number", "complement", "postal_code"]) {
+      expect(address.attributes).not.toContain(field);
+    }
+    expect(profile.MainAddress).toEqual({
+      neighborhood: "Centro",
+      city: "Sorocaba",
+      state: "SP",
+      lat: -23.5,
+      lng: -47.46,
+    });
+  });
+
+  it("abrevia o sobrenome de quem avaliou", async () => {
+    mocked(ProfessionalModel.findByPk).mockResolvedValue(
+      professionalRow({
+        Appointments: [{ rating: 5, Client: { id: 1, User: { name: "Maria da Silva" } } }],
+      }),
+    );
+    const profile: any = await service.getPublicProfile("20");
+    expect(profile.Appointments[0].Client.User.name).toBe("Maria S.");
+    expect(service.publicReviewerName("Ana")).toBe("Ana");
+    expect(service.publicReviewerName("")).toBe("Cliente");
+  });
+
+  it("inclui apenas fotos ativas da galeria", async () => {
+    mocked(ProfessionalModel.findByPk).mockResolvedValue(professionalRow({ Appointments: [] }));
+    await service.getPublicProfile("20");
+    const options = mocked(ProfessionalModel.findByPk).mock.calls[0][1];
+    const gallery = options.include.find((i: any) => i.as === "Gallery");
+    expect(gallery.where).toEqual({ active: true });
   });
 
   it("rating e null sem avaliacoes", async () => {
