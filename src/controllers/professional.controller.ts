@@ -13,18 +13,20 @@ import { getAvailableSlots } from "../services/availability.service";
 
 export const getProfessionals = async (req: Request, res: Response) => {
   try {
-    const { termo, page = 0, limit = 12, lat, lng } = req.query;
+    const { termo, lat, lng } = req.query;
+    // Paginacao com teto: evita consultas gigantes na rota publica.
+    const page = Math.max(0, Math.floor(Number(req.query.page) || 0));
+    const limit = Math.min(50, Math.max(1, Math.floor(Number(req.query.limit) || 12)));
     const latNum = lat ? parseFloat(String(lat)) : undefined;
     const lngNum = lng ? parseFloat(String(lng)) : undefined;
     const hasLatLng = Number.isFinite(latNum) && Number.isFinite(lngNum);
 
     const where: any = {};
     if (termo) {
-      where[Op.or] = [
-        { "$User.name$": { [Op.like]: `%${termo}%` } },
-        { "$User.email$": { [Op.like]: `%${termo}%` } },
-        { cpf: { [Op.like]: `%${termo}%` } },
-      ];
+      // Busca publica apenas pelo nome: e-mail e CPF sao dados pessoais.
+      const likeOp =
+        ProfessionalModel.sequelize?.getDialect() === "postgres" ? Op.iLike : Op.like;
+      where["$User.name$"] = { [likeOp]: `%${String(termo)}%` };
     }
 
     const distanceLiteral = hasLatLng
@@ -38,8 +40,6 @@ export const getProfessionals = async (req: Request, res: Response) => {
         )
       `)
       : null;
-
-    console.log(distanceLiteral);
 
     const order: any[] = [];
     if (hasLatLng && distanceLiteral) {
@@ -61,7 +61,7 @@ export const getProfessionals = async (req: Request, res: Response) => {
         {
           model: UserModel,
           as: "User",
-          attributes: ["id", "name", "email", "avatar_uri", "banner_uri"],
+          attributes: ["id", "name", "avatar_uri", "banner_uri"],
           required: true,
         },
         {
@@ -105,7 +105,6 @@ export const getProfessionals = async (req: Request, res: Response) => {
       return {
         id: prof.id,
         name: prof.User?.name || "Profissional",
-        email: prof.User?.email,
         avatar_uri: prof.User?.avatar_uri,
         banner_uri: prof.User?.banner_uri,
 

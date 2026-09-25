@@ -1,4 +1,5 @@
 import { Router } from "express";
+import adminAuth from "../middlewares/admin.middleware";
 import { testEmailFallback } from "../controllers/email.controller";
 
 const emailRouter = Router();
@@ -46,6 +47,7 @@ const emailRouter = Router();
  *       500:
  *         description: Erro interno
  */
-emailRouter.post("/test-email-fallback", testEmailFallback);
+// Apenas administradores (e somente em development): evita relay aberto de e-mail.
+emailRouter.post("/test-email-fallback", adminAuth, testEmailFallback);
 
 export default emailRouter;

@@ -107,19 +107,20 @@ export const logInUser = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
-export const getUserById = async (req: Request, res: Response) => {
+/** Perfil publico de um usuario; e-mail e telefone apenas para o proprio. */
+export const getUserById = async (req: AuthenticatedRequest, res: Response) => {
   try {
     const user = await UserModel.findByPk(req.params.id);
     if (!user) {
       return res.status(404).json({ error: "Usuário não encontrado" });
     }
+    const isSelf = req.user?.id === user.id;
     res.json({
       id: user.id,
       name: user.name,
-      email: user.email,
-      phone: user.phone,
       avatar_uri: user.avatar_uri,
       banner_uri: user.banner_uri,
+      ...(isSelf ? { email: user.email, phone: user.phone } : {}),
     });
   } catch (error) {
     res.status(500).json({ error: "Erro ao buscar usuário" });

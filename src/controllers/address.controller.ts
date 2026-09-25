@@ -1,11 +1,19 @@
-import { Request, Response } from "express";
+import { Response } from "express";
 import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 import { AddressModel } from "../models/Address";
 import { ClientModel } from "../models/Client";
 
-export const getAllAddressByUserId = async (req: Request, res: Response) => {
+/** Rota legada: exige JWT e so retorna os enderecos do proprio usuario. */
+export const getAllAddressByUserId = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
   try {
-    const { userId } = req.params;
+    const userId = req.user?.id;
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    if (Number(req.params.userId) !== userId) {
+      return res.status(403).json({ error: "Ação não permitida" });
+    }
 
     const addresses = await AddressModel.findAll({
       where: {
@@ -67,7 +75,8 @@ export const createAddressForAuthenticatedUser = async (
   }
 
   try {
-    const payload = { ...req.body, user_id: userId };
+    const { id, user_id, isPrimary, ...fields } = (req.body ?? {}) as any;
+    const payload = { ...fields, user_id: userId };
     const address = await AddressModel.create(payload as any);
     res.status(201).json(address);
   } catch (error: any) {

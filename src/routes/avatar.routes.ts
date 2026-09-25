@@ -1,4 +1,5 @@
 import { Router } from "express";
+import adminAuth from "../middlewares/admin.middleware";
 import { AvatarController } from "../controllers/avatar.controller"; 
 import authMiddleware from "../middlewares/auth.middleware";
 
@@ -9,7 +10,7 @@ const router = Router();
  */
 
 // Listar arquivos no bucket (útil para debug)
-router.get("/files", authMiddleware, AvatarController.listFiles);
+router.get("/files", adminAuth, AvatarController.listFiles);
 
 // Obter URL de visualização de qualquer arquivo no S3
 router.get("/files/:key", authMiddleware, AvatarController.getFileUrl);

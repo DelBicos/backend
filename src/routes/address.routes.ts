@@ -156,9 +156,8 @@ const router = express.Router();
  *         user_id: 1
  */
 
-// Public: get addres by given user id
-// TODO: swagger docs
-router.get("/user/:userId", getAllAddressByUserId);
+// Legado: prefira GET /session. Exige JWT e :userId igual ao do token.
+router.get("/user/:userId", authMiddleware, getAllAddressByUserId);
 
 // Authenticated endpoints for the logged-in user
 /**

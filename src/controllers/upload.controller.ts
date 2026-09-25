@@ -1,6 +1,8 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 import { getStorageAdapter } from "../services/storage/StorageFactory";
+import { buildObjectKey } from "../services/storage/uploadPolicy";
+import { HttpError } from "../errors/HttpError";
 
 /**
  * POST /api/uploads
@@ -28,14 +30,13 @@ export const getUploadUrl = async (
     const fileName = (body.fileName || body.filename || "").trim();
     const fileType = (body.fileType || body.contentType || "").trim();
 
+    if (!req.user)
+      return res.status(401).json({ error: "Usuário não autenticado" });
     if (!fileName)
       return res.status(400).json({ error: "fileName é obrigatório" });
-    if (!fileType)
-      return res.status(400).json({ error: "fileType é obrigatório" });
 
-    // Previne path traversal: usar apenas o basename
-    const safeName = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
-    const key = `uploads/${Date.now()}_${safeName}`;
+    // Chave gerada no servidor; valida que o arquivo e uma imagem.
+    const key = buildObjectKey("uploads", req.user.id, fileType);
 
     const { uploadUrl, fileUrl: adapterFileUrl } =
       await getStorageAdapter().generateUploadUrl(key, fileType);
@@ -51,6 +52,8 @@ export const getUploadUrl = async (
       fileUrl, // alias esperado pelo frontend
     });
   } catch (error: any) {
+    if (error instanceof HttpError)
+      return res.status(error.status).json({ error: error.message });
     console.error("Erro getUploadUrl:", error);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }

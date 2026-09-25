@@ -1,88 +1,52 @@
 import { Request, Response } from "express";
 import { UserModel } from "../models/User";
+import { AuthenticatedRequest } from "../interfaces/authentication.interface";
+import { HttpError } from "../errors/HttpError";
+import { asyncHandler } from "../utils/asyncHandler";
 import { getStorageAdapter } from "../services/storage/StorageFactory";
+import { assertHttpsUrl, buildObjectKey } from "../services/storage/uploadPolicy";
+
+function requireUserId(req: AuthenticatedRequest): number {
+  const id = req.user?.id;
+  if (!id) throw HttpError.unauthorized();
+  return id;
+}
 
 export const AvatarController = {
-  listFiles: async (req: Request, res: Response) => {
-    try {
-      const files = await getStorageAdapter().listFiles();
-      res.json(files);
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  },
+  /** Lista todos os arquivos do bucket: restrito a administradores na rota. */
+  listFiles: asyncHandler(async (_req: Request, res: Response) => {
+    res.json(await getStorageAdapter().listFiles());
+  }),
 
-  getFileUrl: async (req: Request, res: Response) => {
-    try {
-      const { key } = req.params;
-      const url = await getStorageAdapter().getFileUrl(key);
-      res.json({ url });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  },
+  getFileUrl: asyncHandler(async (req: Request, res: Response) => {
+    res.json({ url: await getStorageAdapter().getFileUrl(req.params.key) });
+  }),
 
-  getPresignedUrl: async (req: Request, res: Response) => {
-    try {
-      const { fileName, fileType } = req.body;
-      const { uploadUrl, fileUrl } =
-        await getStorageAdapter().generateUploadUrl(fileName, fileType);
-      res.json({ uploadUrl, fileUrl });
-    } catch (error: any) {
-      res.status(500).json({ error: error.message });
-    }
-  },
+  /** URL de upload do avatar; a chave e gerada no servidor (avatars/<userId>/<uuid>). */
+  getPresignedUrl: asyncHandler<AuthenticatedRequest>(async (req, res: Response) => {
+    const key = buildObjectKey("avatars", requireUserId(req), req.body?.fileType);
+    const { uploadUrl, fileUrl } = await getStorageAdapter().generateUploadUrl(
+      key,
+      String(req.body.fileType).toLowerCase(),
+    );
+    res.json({ uploadUrl, fileUrl });
+  }),
 
-  getUserAvatar: async (req: Request, res: Response) => {
-    try {
-      const { id } = req.params;
-      const user = await UserModel.findByPk(id, {
-        attributes: ["id", "avatar_uri"],
-      });
-      if (!user)
-        return res.status(404).json({ error: "Usuário não encontrado" });
-      res.json({ avatar_uri: user.avatar_uri });
-    } catch (error: any) {
-      res.status(500).json({ error: "Erro ao buscar avatar" });
-    }
-  },
+  getUserAvatar: asyncHandler(async (req: Request, res: Response) => {
+    const user = await UserModel.findByPk(req.params.id, {
+      attributes: ["id", "avatar_uri"],
+    });
+    if (!user) throw HttpError.notFound("Usuário não encontrado");
+    res.json({ avatar_uri: user.avatar_uri });
+  }),
 
-  updateAvatarDatabase: async (req: Request, res: Response) => {
-    try {
-      const userId = (req as any).userId;
-      const userObject = (req as any).user;
-      const { avatar_uri } = req.body;
+  /** Salva a URL do avatar do proprio usuario autenticado. */
+  updateAvatarDatabase: asyncHandler<AuthenticatedRequest>(async (req, res: Response) => {
+    const avatarUri = assertHttpsUrl(req.body?.avatar_uri, "avatar_uri");
+    const user = await UserModel.findByPk(requireUserId(req));
+    if (!user) throw HttpError.notFound("Usuário não encontrado no banco.");
 
-      console.log("--- DEBUG UPDATE PATH ---");
-      console.log("req.userId:", userId);
-      console.log("req.user:", userObject);
-      console.log("Body:", req.body);
-
-      const finalId = userId || userObject?.id || userObject?._id;
-
-      if (!finalId) {
-        return res.status(401).json({
-          error: "401 - Não foi possível extrair o ID do usuário do token.",
-        });
-      }
-
-      const user = await UserModel.findByPk(finalId);
-
-      if (!user) {
-        return res
-          .status(404)
-          .json({ error: "Usuário não encontrado no banco." });
-      }
-
-      await user.update({ avatar_uri });
-
-      return res.json({
-        mensagem: "Perfil atualizado no banco!",
-        avatar_uri,
-      });
-    } catch (error: any) {
-      console.error("ERRO NO UPDATE:", error);
-      return res.status(500).json({ error: error.message });
-    }
-  },
+    await user.update({ avatar_uri: avatarUri });
+    res.json({ mensagem: "Perfil atualizado no banco!", avatar_uri: avatarUri });
+  }),
 };

@@ -82,12 +82,9 @@ export const getEarningsOverTime = async (req: Request, res: Response) => {
     const fromDate = parseOrDefault(from, defaultFrom)!;
     const toDate = parseOrDefault(to, now)!;
 
-    const queryProfessionalId = (req.query as any).professionalId;
-    const idToUse = queryProfessionalId
-      ? Number(queryProfessionalId)
-      : professionalId;
-    if (!idToUse || isNaN(idToUse))
-      return res.status(400).json({ error: "professionalId inválido" });
+    // Sempre o profissional do token: aceitar ?professionalId= permitia
+    // consultar os ganhos de qualquer outro profissional.
+    const idToUse = professionalId;
 
     const fromReplacement = fromDate
       .toISOString()
@@ -121,13 +118,6 @@ export const getEarningsOverTime = async (req: Request, res: Response) => {
       ORDER BY MIN(a.completed_at)
     `;
 
-    // Debug: log SQL and replacements to diagnose errors
-    console.debug("[DEBUG SQL] finalSql:\n", finalSql);
-    console.debug("[DEBUG SQL] replacements:", {
-      id: idToUse,
-      from: fromReplacement,
-      to: toReplacement,
-    });
 
     const results: any[] = await sequelize.query(finalSql, {
       replacements: {
