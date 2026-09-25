@@ -135,7 +135,7 @@ jobs:
             echo "package.json foi atualizado. Commitando na main..."
             git config --global user.name 'github-actions'
             git config --global user.email 'github-actions@github.com'
-            git add package.json
+            git add package.json package-lock.json
             git commit -m "chore(release): version ${{ env.new_version }}" --no-verify
             git push origin main
           else

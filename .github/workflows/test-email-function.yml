@@ -1,0 +1,43 @@
+name: Testar migração de e-mail Azure
+
+on:
+  pull_request:
+    paths:
+      - 'azure_email_function/**'
+      - 'infra/azure-email-function/**'
+      - 'src/utils/azureEmailFunction.ts'
+      - 'src/utils/__tests__/azureEmailFunction.test.ts'
+      - 'src/services/email.service.ts'
+      - 'src/services/__tests__/email.service.test.ts'
+      - 'package*.json'
+      - '.github/workflows/*email*.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.x'
+          cache: npm
+      - name: Validar backend e fallback
+        run: |
+          npm ci
+          npm run build
+          npm run test:unit -- --runInBand azureEmailFunction.test.ts email.service.test.ts
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Testar Function sem SMTP real
+        working-directory: azure_email_function
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pytest -q
+      - name: Testar provisionamento offline
+        shell: pwsh
+        run: ./infra/azure-email-function/tests/provision-and-deploy.Tests.ps1

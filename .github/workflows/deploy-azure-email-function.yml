@@ -1,0 +1,76 @@
+name: 05 - Provisionar e publicar Azure Function de e-mail
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'azure_email_function/**'
+      - 'infra/azure-email-function/**'
+      - '.github/workflows/deploy-azure-email-function.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-email-function-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Habilitar só depois de configurar OIDC/SMTP e validar o primeiro deploy.
+    if: github.event_name == 'workflow_dispatch' || vars.AZURE_EMAIL_AUTO_DEPLOY == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Testar a Function
+        working-directory: azure_email_function
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m pytest -q
+      - name: Login no Azure via OIDC
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Provisionar, publicar e validar antes de configurar o backend
+        shell: pwsh
+        env:
+          AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          AZURE_EMAIL_RESOURCE_GROUP: ${{ vars.AZURE_EMAIL_RESOURCE_GROUP }}
+          AZURE_EMAIL_FUNCTION_APP_NAME: ${{ vars.AZURE_EMAIL_FUNCTION_APP_NAME }}
+          AZURE_EMAIL_STORAGE_ACCOUNT_NAME: ${{ vars.AZURE_EMAIL_STORAGE_ACCOUNT_NAME }}
+          AZURE_EMAIL_LOCATION: ${{ vars.AZURE_EMAIL_LOCATION }}
+          AZURE_BACKEND_RESOURCE_GROUP: ${{ vars.AZURE_BACKEND_RESOURCE_GROUP }}
+          AZURE_BACKEND_APP_NAME: ${{ vars.AZURE_BACKEND_APP_NAME }}
+          SMTP_HOST: ${{ secrets.EMAIL_SMTP_HOST }}
+          SMTP_USER: ${{ secrets.EMAIL_SMTP_USER }}
+          SMTP_PASS: ${{ secrets.EMAIL_SMTP_PASS }}
+          FROM_EMAIL: ${{ secrets.EMAIL_FROM_ADDRESS }}
+          SMTP_PORT: ${{ vars.EMAIL_SMTP_PORT || '587' }}
+        run: |
+          $required = @(
+            'AZURE_SUBSCRIPTION_ID', 'AZURE_EMAIL_RESOURCE_GROUP', 'AZURE_EMAIL_FUNCTION_APP_NAME',
+            'AZURE_EMAIL_STORAGE_ACCOUNT_NAME', 'AZURE_EMAIL_LOCATION',
+            'AZURE_BACKEND_RESOURCE_GROUP', 'AZURE_BACKEND_APP_NAME'
+          )
+          foreach ($name in $required) {
+            if (-not [Environment]::GetEnvironmentVariable($name)) { throw "Configuração ausente: $name" }
+          }
+          $parameters = @{
+            SubscriptionId = $env:AZURE_SUBSCRIPTION_ID
+            ResourceGroupName = $env:AZURE_EMAIL_RESOURCE_GROUP
+            FunctionAppName = $env:AZURE_EMAIL_FUNCTION_APP_NAME
+            StorageAccountName = $env:AZURE_EMAIL_STORAGE_ACCOUNT_NAME
+            Location = $env:AZURE_EMAIL_LOCATION
+            BackendResourceGroupName = $env:AZURE_BACKEND_RESOURCE_GROUP
+            BackendAppName = $env:AZURE_BACKEND_APP_NAME
+          }
+          ./infra/azure-email-function/provision-and-deploy.ps1 @parameters
