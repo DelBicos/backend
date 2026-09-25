@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   getAllAppointments,
+  completeAppointment,
   confirmAppointment,
   reviewAppointment,
   getAppointmentInvoice,
@@ -405,6 +406,32 @@ router.get("/user/:id", authMiddleware, getAllAppointments);
  *         description: Erro interno do servidor
  */
 router.post("/:id/confirm", authMiddleware, confirmAppointment);
+
+/**
+ * @swagger
+ * /api/appointments/{id}/complete:
+ *   post:
+ *     summary: Profissional marca um atendimento confirmado como concluído
+ *     tags: [Appointments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Atendimento concluído
+ *       400:
+ *         description: Status diferente de confirmado ou atendimento ainda não começou
+ *       403:
+ *         description: Apenas o profissional responsável pode concluir
+ *       404:
+ *         description: Agendamento não encontrado
+ */
+router.post("/:id/complete", authMiddleware, completeAppointment);
 
 /**
  * @swagger

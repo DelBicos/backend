@@ -103,3 +103,15 @@ export function assertStatus(
     );
   }
 }
+
+/** Um atendimento so pode ser concluido depois que comecou. */
+export function assertCanComplete(start: Date, now: Date = new Date()): void {
+  if (Number.isNaN(new Date(start).getTime())) {
+    throw HttpError.badRequest("Data/hora de início inválida");
+  }
+  if (new Date(start) > now) {
+    throw HttpError.badRequest(
+      "Só é possível concluir o atendimento depois do horário de início.",
+    );
+  }
+}

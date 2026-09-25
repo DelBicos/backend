@@ -23,6 +23,7 @@ jest.mock("../appointment.notifications", () => ({
   formatAppointmentTime: jest.fn(() => "10:00"),
   notifyAppointmentCreated: jest.fn(),
   notifyAppointmentAccepted: jest.fn(),
+  notifyAppointmentCompleted: jest.fn(),
   notifyAppointmentRejected: jest.fn(),
   notifyReviewReceived: jest.fn(),
 }));
@@ -195,6 +196,53 @@ describe("confirmAppointment", () => {
   it("retorna 404 para agendamento inexistente", async () => {
     mocked(AppointmentModel.findOne).mockResolvedValue(null);
     await expectHttpError(service.confirmAppointment(1, "NOPE00"), 404);
+  });
+});
+
+describe("completeAppointment", () => {
+  const past = new Date(Date.now() - 2 * 3600_000);
+
+  it("conclui, registra a data e notifica o cliente", async () => {
+    const appt = makeAppointment({
+      status: "confirmed",
+      start_time: past,
+      Client: { user_id: 5 },
+      Service: { title: "Pintura" },
+    });
+    mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
+    const now = new Date();
+
+    await service.completeAppointment(1, "ABC123", now);
+
+    expect(appt.status).toBe("completed");
+    expect(appt.completed_at).toBe(now);
+    expect(appt.save).toHaveBeenCalled();
+    expect(notifications.notifyAppointmentCompleted).toHaveBeenCalledWith(5, "Pintura", 10);
+  });
+
+  it("somente o profissional responsavel pode concluir", async () => {
+    mocked(AppointmentModel.findOne).mockResolvedValue(
+      makeAppointment({ status: "confirmed", start_time: past }),
+    );
+    mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 99 });
+    await expectHttpError(service.completeAppointment(1, "ABC123"), 403);
+  });
+
+  it("nao conclui pedidos que ainda nao foram confirmados", async () => {
+    mocked(AppointmentModel.findOne).mockResolvedValue(
+      makeAppointment({ status: "pending", start_time: past }),
+    );
+    mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
+    await expectHttpError(service.completeAppointment(1, "ABC123"), 400);
+  });
+
+  it("nao conclui antes do horario de inicio", async () => {
+    mocked(AppointmentModel.findOne).mockResolvedValue(
+      makeAppointment({ status: "confirmed" }),
+    );
+    mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
+    await expectHttpError(service.completeAppointment(1, "ABC123"), 400);
   });
 });
 

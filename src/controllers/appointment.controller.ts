@@ -44,6 +44,16 @@ export const confirmAppointment = asyncHandler<AuthenticatedRequest>(
   },
 );
 
+export const completeAppointment = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    const appointment = await AppointmentService.completeAppointment(
+      requireUserId(req),
+      req.params.id,
+    );
+    res.json(appointment);
+  },
+);
+
 export const updateAppointmentStatus = asyncHandler<AuthenticatedRequest>(
   async (req, res: Response) => {
     const appointment = await AppointmentService.respondToAppointment(

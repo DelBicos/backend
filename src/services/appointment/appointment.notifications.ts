@@ -111,6 +111,19 @@ export async function notifyAppointmentRejected(
   );
 }
 
+export async function notifyAppointmentCompleted(
+  clientUserId: number | undefined,
+  serviceTitle: string | undefined,
+  appointmentId: number,
+) {
+  await notify(
+    clientUserId,
+    "Atendimento concluído",
+    `O serviço '${serviceTitle}' foi concluído. Conte como foi avaliando o profissional em Meus Agendamentos.`,
+    appointmentId,
+  );
+}
+
 export async function notifyReviewReceived(
   professionalUserId: number | undefined,
   appointmentId: number,

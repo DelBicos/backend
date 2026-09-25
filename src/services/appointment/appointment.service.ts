@@ -19,6 +19,7 @@ import {
 import { syncBotSessionsForAppointmentStatus } from "../botAppointmentStatus.service";
 import { PaymentService } from "../payment.service";
 import {
+  assertCanComplete,
   assertMinimumAdvance,
   assertProfessionalResponse,
   assertStatus,
@@ -30,6 +31,7 @@ import {
   formatAppointmentDate,
   formatAppointmentTime,
   notifyAppointmentAccepted,
+  notifyAppointmentCompleted,
   notifyAppointmentCreated,
   notifyAppointmentRejected,
   notifyReviewReceived,
@@ -349,6 +351,39 @@ export async function respondToAppointment(userId: number, publicId: string, sta
   await syncBotSessionsForAppointmentStatus(appointment);
   logger.info(`Appointment status updated to ${response}`, { appointmentId: appointment.id });
   return appointment;
+}
+
+/**
+ * Profissional marca um atendimento confirmado como concluido (apos o inicio).
+ * E o que alimenta ganhos, historico e libera a avaliacao do cliente.
+ */
+export async function completeAppointment(
+  userId: number,
+  publicId: string,
+  now: Date = new Date(),
+) {
+  const appointment = await requireAppointment(publicId, [
+    { model: ClientModel, as: "Client", attributes: ["id", "user_id"] },
+    { model: ServiceModel, as: "Service", attributes: ["id", "title"] },
+  ]);
+  await requireResponsibleProfessional(appointment, userId, "concluir");
+  assertStatus(appointment.status, "confirmed", "concluir");
+  assertCanComplete(appointment.start_time, now);
+
+  appointment.status = "completed";
+  appointment.completed_at = now;
+  await appointment.save();
+  await syncChatRoomStatusForAppointment(appointment.id, "completed");
+  await syncBotSessionsForAppointmentStatus(appointment);
+
+  await notifyAppointmentCompleted(
+    (appointment as any).Client?.user_id,
+    (appointment as any).Service?.title,
+    appointment.id,
+  );
+
+  logger.info("Appointment concluido", { appointmentId: appointment.id });
+  return toPublicAppointment(appointment);
 }
 
 /** Cliente avalia um agendamento concluido (cria ou atualiza a avaliacao). */
