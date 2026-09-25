@@ -45,6 +45,19 @@ export function validateCreateService(
   )
     return res.status(400).json({ error: "subcategory_id é obrigatório" });
 
+  const { availabilities } = req.body as any;
+  if (availabilities !== undefined) {
+    if (!Array.isArray(availabilities))
+      return res
+        .status(400)
+        .json({ error: "availabilities deve ser um array" });
+    const errors = validateAvailabilities(availabilities);
+    if (errors.length > 0)
+      return res
+        .status(400)
+        .json({ error: "availabilities inválidas", details: errors });
+  }
+
   return next();
 }
 
