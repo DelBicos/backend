@@ -67,7 +67,8 @@ export const createAppointment = async (req: Request, res: Response) => {
 
     if (startDate < minAdvanceDate) {
       return res.status(400).json({
-        error: "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
+        error:
+          "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
       });
     }
 
@@ -258,7 +259,9 @@ export const getAllAppointments = async (req: Request, res: Response) => {
     }
 
     const client = await ClientModel.findOne({ where: { user_id: userId } });
-    const professional = await ProfessionalModel.findOne({ where: { user_id: userId } });
+    const professional = await ProfessionalModel.findOne({
+      where: { user_id: userId },
+    });
 
     let whereClause: any = {};
 
@@ -271,10 +274,10 @@ export const getAllAppointments = async (req: Request, res: Response) => {
     } else {
       if (client && professional) {
         whereClause = {
-          [require('sequelize').Op.or]: [
+          [require("sequelize").Op.or]: [
             { client_id: client.id },
-            { professional_id: professional.id }
-          ]
+            { professional_id: professional.id },
+          ],
         };
       } else if (client) {
         whereClause.client_id = client.id;
@@ -323,13 +326,19 @@ export const getAllAppointments = async (req: Request, res: Response) => {
       order: [["start_time", "ASC"]],
     });
 
-    const formattedAppointments = appointments.map((appointment: AppointmentModel) => {
-      const json = appointment.toJSON() as any;
-      json.id = json.short_id;
-      delete json.short_id;
-      json.payment_method = json.payment_intent_id ? "Cartão de Crédito" : "Cartão de Crédito";
-      return json;
-    });
+    const formattedAppointments = appointments.map(
+      (appointment: AppointmentModel) => {
+        const json = appointment.toJSON() as any;
+        // Preserva o id numérico (usado no fluxo de pagamento) antes de expor o short_id como "id" de exibição.
+        json.numeric_id = json.id;
+        json.id = json.short_id;
+        delete json.short_id;
+        json.payment_method = json.payment_intent_id
+          ? "Cartão de Crédito"
+          : "Cartão de Crédito";
+        return json;
+      },
+    );
 
     res.json(formattedAppointments);
   } catch (error: any) {
@@ -343,7 +352,7 @@ export const confirmAppointment = async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthenticatedRequest;
     let appointment = await AppointmentModel.findOne({
-      where: { short_id: id }
+      where: { short_id: id },
     });
     if (!appointment && !isNaN(Number(id))) {
       appointment = await AppointmentModel.findByPk(Number(id));
@@ -356,10 +365,13 @@ export const confirmAppointment = async (req: Request, res: Response) => {
         error: `Não é possível aceitar um agendamento com status '${appointment.status}'`,
       });
     }
-    const professional = await ProfessionalModel.findByPk(appointment.professional_id);
+    const professional = await ProfessionalModel.findByPk(
+      appointment.professional_id,
+    );
     if (!authReq.user || professional?.user_id !== authReq.user.id) {
       return res.status(403).json({
-        error: "Apenas o profissional respons\u00e1vel pode aceitar este agendamento",
+        error:
+          "Apenas o profissional respons\u00e1vel pode aceitar este agendamento",
       });
     }
 
@@ -381,17 +393,26 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
 
   try {
     if (status !== "confirmed" && status !== "canceled") {
-      return res.status(400).json({ error: "Status inválido. Use 'confirmed' ou 'canceled'." });
+      return res
+        .status(400)
+        .json({ error: "Status inválido. Use 'confirmed' ou 'canceled'." });
     }
 
     const appointment = await AppointmentModel.findOne({
       where: {
         short_id: req.params.id,
-        client_id: req.params.clientId
       },
       include: [
-        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User" }] },
-        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User" }] },
+        {
+          model: ClientModel,
+          as: "Client",
+          include: [{ model: UserModel, as: "User" }],
+        },
+        {
+          model: ProfessionalModel,
+          as: "Professional",
+          include: [{ model: UserModel, as: "User" }],
+        },
         { model: ServiceModel, as: "Service" },
       ],
     });
@@ -403,7 +424,8 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
     const appointmentProfessional = (appointment as any).Professional;
     if (!authReq.user || appointmentProfessional?.user_id !== authReq.user.id) {
       return res.status(403).json({
-        error: "Apenas o profissional respons\u00e1vel pode alterar este agendamento",
+        error:
+          "Apenas o profissional respons\u00e1vel pode alterar este agendamento",
       });
     }
 
@@ -436,7 +458,9 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       } else if (status === "canceled") {
         let refundMsg = "";
         if (appointment.payment_intent_id) {
-          const refunded = await PaymentService.refundPaymentIntent(appointment.payment_intent_id);
+          const refunded = await PaymentService.refundPaymentIntent(
+            appointment.payment_intent_id,
+          );
           refundMsg = refunded
             ? " O valor do pagamento foi estornado com sucesso."
             : " O estorno do pagamento está sendo processado.";
@@ -454,14 +478,17 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
 
     await syncBotSessionsForAppointmentStatus(appointment);
 
-    logger.info(`Appointment status updated to ${status}`, { appointmentId: id });
+    logger.info(`Appointment status updated to ${status}`, {
+      appointmentId: id,
+    });
     res.json(appointment);
   } catch (error: any) {
-    logError("Erro ao atualizar status do agendamento", error, { appointmentId: id });
+    logError("Erro ao atualizar status do agendamento", error, {
+      appointmentId: id,
+    });
     res.status(500).json({ error: "Erro ao atualizar status do agendamento" });
   }
 };
-
 
 export const reviewAppointment = async (req: Request, res: Response) => {
   const { id } = req.params;
