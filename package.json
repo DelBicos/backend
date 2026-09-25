@@ -38,9 +38,9 @@
     "docker:migrate": "docker-compose exec delbicos-server npm run migrate",
     "docker:seed": "docker-compose exec delbicos-server npm run seed",
     "test": "jest",
-    "test:unit": "jest --selectProjects unit --no-coverage",
-    "test:integration": "jest --selectProjects integration --no-coverage",
-    "test:all": "jest --no-coverage"
+    "test:unit": "jest",
+    "test:all": "jest",
+    "test:coverage": "jest --coverage"
   },
   "dependencies": {
     "@aws-sdk/client-cloudwatch-logs": "^3.0.0",

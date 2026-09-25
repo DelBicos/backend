@@ -1,11 +1,6 @@
 import Stripe from "stripe";
 
-jest.mock("../../config/database", () => {
-  const { Sequelize } = require("sequelize");
-  return {
-    sequelize: new Sequelize({ dialect: "postgres", logging: false }),
-  };
-});
+jest.mock("../../config/database");
 
 // --- Mocking Explícito com jest.doMock ---
 const mockPaymentIntentsCreate = jest.fn();

@@ -1,28 +1,38 @@
-import { Request, Response, NextFunction } from "express";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import hpp from "hpp";
 import mongoSanitize from "express-mongo-sanitize";
-import logger from "../utils/logger";
 
 // ---------------------------------------------------------------------------
 // 1. Helmet – define HTTP headers seguros (XSS-Protection, Content-Security-Policy, etc.)
 // ---------------------------------------------------------------------------
-export const helmetMiddleware = helmet();
+export const helmetMiddleware = helmet({
+  // Avatares/arquivos em /avatarBucket sao consumidos pelo app web em outra origem.
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+});
 
 // ---------------------------------------------------------------------------
 // 2. Rate Limiting – protege contra brute-force e DDoS
 // ---------------------------------------------------------------------------
-const isDev =
-  (process.env.ENVIRONMENT || process.env.NODE_ENV || "development") ===
-  "development";
+const environment =
+  process.env.ENVIRONMENT || process.env.NODE_ENV || "development";
+const isDev = environment === "development";
+const isTest = environment === "test";
+
+const envNumber = (name: string, fallback: number) => {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+};
 
 export const globalRateLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: isDev ? 5000 : 200, // em dev aumentado para não bloquear emulador/polling
+  // O app faz polling (status de agendamento/chatbot), entao o limite global
+  // precisa ser folgado; rotas sensiveis tem limitadores proprios.
+  max: isDev ? 5000 : envNumber("GLOBAL_RATE_LIMIT_MAX", 1000),
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
+    if (isTest) return true;
     // pula rate limit para IPs de desenvolvimento local
     const ip = req.ip || "";
     return (
@@ -37,9 +47,26 @@ export const globalRateLimiter = rateLimit({
   },
 });
 
+const AUTH_WINDOW_MS = 15 * 60 * 1000; // 15 minutos
+
+/** Rotas de cadastro/verificacao/reenvio: conta todas as requisicoes (evita spam de e-mail). */
 export const authRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 20, // limite mais restrito para rotas de autenticação
+  windowMs: AUTH_WINDOW_MS,
+  max: envNumber("AUTH_RATE_LIMIT_MAX", 20),
+  skip: () => isTest,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    msg: "Muitas tentativas. Tente novamente após 15 minutos.",
+  },
+});
+
+/** Login: conta apenas tentativas que falharam (protege contra forca bruta). */
+export const loginRateLimiter = rateLimit({
+  windowMs: AUTH_WINDOW_MS,
+  max: envNumber("LOGIN_RATE_LIMIT_MAX", 10),
+  skipSuccessfulRequests: true,
+  skip: () => isTest,
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -58,92 +85,10 @@ export const hppMiddleware = hpp();
 export const mongoSanitizeMiddleware = mongoSanitize();
 
 // ---------------------------------------------------------------------------
-// 5. XSS Sanitization – remove tags HTML e scripts maliciosos do input
+// Observacao: sanitizacao de XSS e deteccao de SQL injection por regex NAO sao
+// aplicadas globalmente. Escapar HTML na entrada corrompia senhas, URLs e
+// mensagens do chatbot, e o regex de SQL bloqueava textos legitimos. A defesa
+// correta ja esta no lugar: Sequelize usa queries parametrizadas e o app
+// (React Native) nao interpreta HTML. Conteudo inserido em templates HTML
+// (ex.: e-mails) deve ser escapado no momento da renderizacao.
 // ---------------------------------------------------------------------------
-function sanitizeValue(value: unknown): unknown {
-  if (typeof value === "string") {
-    return value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#x27;")
-      .replace(/\//g, "&#x2F;");
-  }
-  if (Array.isArray(value)) {
-    return value.map(sanitizeValue);
-  }
-  if (value !== null && typeof value === "object") {
-    return sanitizeObject(value as Record<string, unknown>);
-  }
-  return value;
-}
-
-function sanitizeObject(obj: Record<string, unknown>): Record<string, unknown> {
-  const sanitized: Record<string, unknown> = {};
-  for (const key of Object.keys(obj)) {
-    sanitized[key] = sanitizeValue(obj[key]);
-  }
-  return sanitized;
-}
-
-export const xssSanitizer = (
-  req: Request,
-  _res: Response,
-  next: NextFunction,
-) => {
-  if (req.body && typeof req.body === "object") {
-    req.body = sanitizeObject(req.body);
-  }
-  if (req.query && typeof req.query === "object") {
-    req.query = sanitizeObject(req.query) as typeof req.query;
-  }
-  if (req.params && typeof req.params === "object") {
-    req.params = sanitizeObject(req.params) as typeof req.params;
-  }
-  next();
-};
-
-// ---------------------------------------------------------------------------
-// 6. SQL Injection detection – camada extra de defesa (Sequelize já parametriza)
-// ---------------------------------------------------------------------------
-const SQL_INJECTION_PATTERNS = [
-  /(\b(SELECT|INSERT|UPDATE|DELETE|DROP|UNION|ALTER|CREATE|EXEC|EXECUTE)\b.*\b(FROM|INTO|TABLE|SET|WHERE|ALL)\b)/i,
-  /(';\s*(DROP|ALTER|DELETE|UPDATE|INSERT)\b)/i,
-  /(--\s*$|;\s*--)/m,
-  /(\b(OR|AND)\b\s+[\d'"]+=[\d'"]+)/i,
-];
-
-function containsSqlInjection(value: unknown): boolean {
-  if (typeof value === "string") {
-    return SQL_INJECTION_PATTERNS.some((pattern) => pattern.test(value));
-  }
-  if (Array.isArray(value)) {
-    return value.some(containsSqlInjection);
-  }
-  if (value !== null && typeof value === "object") {
-    return Object.values(value as Record<string, unknown>).some(
-      containsSqlInjection,
-    );
-  }
-  return false;
-}
-
-export const sqlInjectionGuard = (
-  req: Request,
-  res: Response,
-  next: NextFunction,
-) => {
-  const targets = [req.body, req.query, req.params];
-  for (const target of targets) {
-    if (target && containsSqlInjection(target)) {
-      logger.warn(
-        `SQL Injection attempt detected from IP ${req.ip} on ${req.method} ${req.originalUrl}`,
-      );
-      return res.status(400).json({
-        msg: "Requisição bloqueada: entrada inválida detectada.",
-      });
-    }
-  }
-  next();
-};

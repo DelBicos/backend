@@ -127,7 +127,7 @@ export const sequelize = generateSequelizeConnection();
 /**
  * Autentica e Sincroniza o banco
  */
-async function connectDatabase(): Promise<void> {
+export async function connectDatabase(): Promise<void> {
   try {
     await sequelize.authenticate();
 
@@ -225,6 +225,5 @@ export function isChatMongoReady(): boolean {
   return chatMongoConnection.readyState === 1;
 }
 
-// Inicialização
-connectMongo();
-connectDatabase();
+// As conexoes sao abertas explicitamente pelo bootstrap (server.ts),
+// e nao como efeito colateral do import deste modulo.

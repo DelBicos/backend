@@ -1,6 +1,6 @@
 import { Request, Response } from "express";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken";
+import { signToken } from "../utils/jwt.util";
 import { UserModel } from "../models/User";
 import { AdminModel } from "../models/Admin";
 import { sequelize } from "../config/database";
@@ -35,12 +35,7 @@ export const adminLogin = async (req: Request, res: Response) => {
       admin: true,
     } as any;
 
-    const secret = process.env.SECRET_KEY || "secret";
-    const expiresIn = process.env.EXPIRES_IN || "1h";
-    const options: jwt.SignOptions = {
-      expiresIn: expiresIn as jwt.SignOptions["expiresIn"],
-    };
-    const token = jwt.sign(payload, secret, options);
+    const token = signToken(payload);
 
     return res
       .status(200)

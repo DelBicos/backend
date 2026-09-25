@@ -1,6 +1,6 @@
 import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
-import jwt from "jsonwebtoken";
+import { verifyToken } from "../utils/jwt.util";
 import { ITokenPayload } from "../interfaces/authentication.interface";
 import {
   assertParticipant,
@@ -65,10 +65,7 @@ export function initChatSocket(httpServer: HttpServer): Server {
         return next(new Error("Token JWT ausente"));
       }
 
-      const decoded = jwt.verify(
-        token,
-        process.env.SECRET_KEY || "secret"
-      ) as ITokenPayload;
+      const decoded = verifyToken<ITokenPayload>(token);
 
       socket.userId = decoded.user.id;
       return next();

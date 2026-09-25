@@ -7,5 +7,5 @@
     "removeComments": false
   },
   "include": ["server.ts", "src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts", "src/**/__tests__/**"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.spec.ts", "src/**/__tests__/**", "src/**/__mocks__/**"]
 }
