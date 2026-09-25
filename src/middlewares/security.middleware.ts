@@ -24,26 +24,25 @@ const envNumber = (name: string, fallback: number) => {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 };
 
+/** Conexoes longas (SSE) nao devem consumir a cota: o navegador reconecta sozinho. */
+const LONG_LIVED_PATHS = ["/api/services/events"];
+
+/**
+ * Protecao contra abuso/DoS por IP. Janela curta (1 min) e limite folgado:
+ * uma pagina do app dispara dezenas de requisicoes e, na apresentacao, varios
+ * visitantes podem compartilhar o mesmo IP (rede da faculdade). Rotas
+ * sensiveis (login, cadastro, chatbot, voz) tem limitadores proprios.
+ * Desligado em desenvolvimento e testes.
+ */
 export const globalRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  // O app faz polling (status de agendamento/chatbot), entao o limite global
-  // precisa ser folgado; rotas sensiveis tem limitadores proprios.
-  max: isDev ? 5000 : envNumber("GLOBAL_RATE_LIMIT_MAX", 1000),
+  windowMs: 60 * 1000,
+  max: envNumber("GLOBAL_RATE_LIMIT_MAX", 600),
   standardHeaders: true,
   legacyHeaders: false,
-  skip: (req) => {
-    if (isTest) return true;
-    // pula rate limit para IPs de desenvolvimento local
-    const ip = req.ip || "";
-    return (
-      isDev &&
-      (ip.includes("127.0.0.1") ||
-        ip.includes("::1") ||
-        ip.includes("10.0.2.2"))
-    );
-  },
+  skip: (req) =>
+    isDev || isTest || LONG_LIVED_PATHS.some((path) => req.path.startsWith(path)),
   message: {
-    msg: "Muitas requisições deste IP. Tente novamente após 15 minutos.",
+    msg: "Muitas requisições deste IP. Aguarde um minuto e tente novamente.",
   },
 });
 
