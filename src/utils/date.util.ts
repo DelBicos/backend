@@ -1,5 +1,9 @@
 export const DEFAULT_BOT_TIME_ZONE = "America/Sao_Paulo";
 
+export function appointmentCalendarDate(value: Date): string {
+  return formatIsoCalendarDate(getCalendarDateInTimeZone(value, DEFAULT_BOT_TIME_ZONE));
+}
+
 export type TimePeriod = "MORNING" | "AFTERNOON" | "EVENING";
 
 export interface DateParseOptions {
