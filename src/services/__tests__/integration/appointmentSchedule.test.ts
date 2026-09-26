@@ -100,8 +100,9 @@ jest.mock("../../../utils/chatRoom", () => ({
 }));
 jest.mock("../../../utils/logger", () => ({
   __esModule: true,
-  default: { info: jest.fn(), warn: jest.fn() },
+  default: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
+jest.mock("../../appointmentRefundProvider.service", () => ({ ensureAppointmentRefund: jest.fn() }));
 
 import { sequelize } from "../../../config/database";
 import { AppointmentModel } from "../../../models/Appointment";
@@ -124,6 +125,9 @@ import {
 } from "../../appointmentSchedule.service";
 import { getAvailableSlots } from "../../availability.service";
 import { BotSessionContext } from "../../../models/BotChatSession";
+import { AppointmentRefundModel } from "../../../models/AppointmentRefund";
+import { processAppointmentRefunds } from "../../appointmentRefund.service";
+import { ensureAppointmentRefund } from "../../appointmentRefundProvider.service";
 
 const date = "2099-01-05";
 const context: BotSessionContext = {
@@ -160,6 +164,10 @@ function rescheduleContext(id: number, time = "10:00"): BotSessionContext {
 
 beforeAll(async () => {
   await sequelize.sync({ force: true });
+  // Exercita também a migration real, em vez de depender apenas de sync().
+  const migration = require("../../../../migrations/20260926120000-create-appointment-refund");
+  await migration.down(sequelize.getQueryInterface());
+  await migration.up(sequelize.getQueryInterface(), require("sequelize"));
 });
 afterAll(async () => {
   await sequelize.close();
@@ -167,7 +175,8 @@ afterAll(async () => {
 beforeEach(async () => {
   jest.restoreAllMocks();
   jest.clearAllMocks();
-  await sequelize.truncate();
+  await sequelize.truncate({ cascade: true });
+  (ensureAppointmentRefund as jest.Mock).mockReset().mockResolvedValue(true);
   await ProfessionalModel.create({ id: 1, user_id: 20 } as any);
   await ClientModel.create({ id: 3, user_id: 10, main_address_id: 4 } as any);
   await ServiceModel.create({
@@ -470,4 +479,103 @@ it("expira somente uma reserva que continua pendente e sem atualização por 12 
   ).toBe(true);
   await appt.reload();
   expect(appt.status).toBe("canceled");
+  expect(await AppointmentRefundModel.count()).toBe(1);
+});
+
+async function expiredPaidReservation() {
+  const appt = await original();
+  await rescheduleBotAppointment(10, rescheduleContext(appt.id));
+  await sequelize.query("UPDATE appointment SET updated_at = :old WHERE id = :id", {
+    replacements: { old: new Date(Date.now() - 24 * 3600000), id: appt.id },
+  });
+  return appt;
+}
+
+it("cancela a remarcação expirada e registra exatamente um estorno, mesmo com dois jobs", async () => {
+  const appt = await expiredPaidReservation();
+  const deadline = new Date(Date.now() - 12 * 3600000);
+  const outcomes = await Promise.all([
+    expirePendingAppointment(appt, deadline), expirePendingAppointment(appt, deadline),
+  ]);
+  expect(outcomes.sort()).toEqual([false, true]);
+  const refunds = await AppointmentRefundModel.findAll();
+  expect(refunds).toHaveLength(1);
+  expect(refunds[0]).toMatchObject({ appointment_id: appt.id, payment_intent_id: "pi_paid", status: "pending" });
+  await appt.reload();
+  expect(appt.status).toBe("canceled");
+  expect(appt.payment_intent_id).toBe("pi_paid");
+});
+
+it("desfaz cancelamento e outbox juntos se a transação falhar após registrar o estorno", async () => {
+  const appt = await expiredPaidReservation();
+  const real = AppointmentRefundModel.findOrCreate.bind(AppointmentRefundModel);
+  jest.spyOn(AppointmentRefundModel, "findOrCreate").mockImplementationOnce(async (options: any) => {
+    await real(options);
+    throw new Error("falha antes do commit");
+  });
+  await expect(expirePendingAppointment(appt, new Date())).rejects.toThrow("falha antes do commit");
+  await appt.reload();
+  expect(appt.status).toBe("pending");
+  expect(appt.payment_intent_id).toBe("pi_paid");
+  expect(await AppointmentRefundModel.count()).toBe(0);
+  expect(ensureAppointmentRefund).not.toHaveBeenCalled();
+});
+
+it("retoma estorno persistido após falha do provedor sem precisar de nova expiração", async () => {
+  const appt = await expiredPaidReservation();
+  await expirePendingAppointment(appt, new Date());
+  (ensureAppointmentRefund as jest.Mock).mockRejectedValueOnce(new Error("Stripe indisponível"));
+  await processAppointmentRefunds();
+  const job = (await AppointmentRefundModel.findOne())!;
+  expect(job).toMatchObject({ status: "pending", attempts: 1, last_error: "Stripe indisponível" });
+  await job.update({ next_attempt_at: new Date(0) });
+  await processAppointmentRefunds();
+  await job.reload();
+  expect(job).toMatchObject({ status: "completed", attempts: 2, last_error: null });
+});
+
+it("serializa dois workers e não reenvia um item concluído", async () => {
+  const appt = await expiredPaidReservation();
+  await expirePendingAppointment(appt, new Date());
+  await Promise.all([processAppointmentRefunds(), processAppointmentRefunds()]);
+  await processAppointmentRefunds();
+  expect(ensureAppointmentRefund).toHaveBeenCalledTimes(1);
+  expect((await AppointmentRefundModel.findOne())?.status).toBe("completed");
+});
+
+it("conserva o item para reconciliação quando o provedor respondeu mas o save falhou", async () => {
+  const appt = await expiredPaidReservation();
+  await expirePendingAppointment(appt, new Date());
+  jest.spyOn(AppointmentRefundModel.prototype, "save").mockRejectedValueOnce(new Error("commit indisponível"));
+  await processAppointmentRefunds();
+  expect((await AppointmentRefundModel.findOne())?.status).toBe("pending");
+  await processAppointmentRefunds();
+  expect((await AppointmentRefundModel.findOne())?.status).toBe("completed");
+  expect(ensureAppointmentRefund).toHaveBeenNthCalledWith(1, "pi_paid");
+  expect(ensureAppointmentRefund).toHaveBeenNthCalledWith(2, "pi_paid");
+});
+
+it("mantém na fila o estorno ainda pendente no provedor", async () => {
+  const appt = await expiredPaidReservation();
+  await expirePendingAppointment(appt, new Date());
+  (ensureAppointmentRefund as jest.Mock).mockResolvedValueOnce(false);
+  await processAppointmentRefunds();
+  expect((await AppointmentRefundModel.findOne())?.status).toBe("pending");
+  await processAppointmentRefunds();
+  expect(ensureAppointmentRefund).toHaveBeenCalledTimes(1);
+});
+
+it("rejeição do profissional também registra estorno na transação", async () => {
+  const appt = await expiredPaidReservation();
+  await appt.reload();
+  await changePendingAppointmentStatus(appt, "canceled");
+  expect(await AppointmentRefundModel.count()).toBe(1);
+  expect(appt.status).toBe("canceled");
+});
+
+it("expiração sem pagamento não gera estorno", async () => {
+  const appt = await expiredPaidReservation();
+  await appt.update({ payment_intent_id: null });
+  await expirePendingAppointment(appt, new Date(Date.now() + 1000));
+  expect(await AppointmentRefundModel.count()).toBe(0);
 });

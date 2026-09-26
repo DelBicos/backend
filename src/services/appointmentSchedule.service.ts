@@ -5,6 +5,7 @@ import { AppointmentModel, IAppointment } from "../models/Appointment";
 import { ProfessionalAvailabilityLockModel } from "../models/ProfessionalAvailabilityLock";
 import { ServiceModel } from "../models/Service";
 import { appointmentOverlapWhere } from "./availability.service";
+import { enqueueAppointmentRefund } from "./appointmentRefund.service";
 
 export class ScheduleConflictError extends Error {
   readonly status = 409;
@@ -137,6 +138,7 @@ export async function changePendingAppointmentStatus(
       }
       current.status = status;
       await current.save({ transaction });
+      if (status === "canceled") await enqueueAppointmentRefund(current, transaction);
     },
   );
   appointment.status = status;
@@ -162,6 +164,7 @@ export async function expirePendingAppointment(
         return false;
       current.status = "canceled";
       await current.save({ transaction });
+      await enqueueAppointmentRefund(current, transaction);
       return true;
     },
   );

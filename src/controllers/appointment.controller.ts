@@ -4,7 +4,6 @@ import { UserModel } from "../models/User";
 import { ClientModel } from "../models/Client";
 import { ProfessionalModel } from "../models/Professional";
 import { ServiceModel } from "../models/Service";
-import { PaymentService } from "../services/payment.service";
 import { NotificationModel } from "../models/Notification";
 import { AddressModel } from "../models/Address";
 import { SubCategoryModel } from "../models/Subcategory";
@@ -462,12 +461,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       } else if (status === "canceled") {
         let refundMsg = "";
         if (appointment.payment_intent_id) {
-          const refunded = await PaymentService.refundPaymentIntent(
-            appointment.payment_intent_id,
-          );
-          refundMsg = refunded
-            ? " O valor do pagamento foi estornado com sucesso."
-            : " O estorno do pagamento está sendo processado.";
+          refundMsg = " O estorno do pagamento será processado automaticamente.";
         }
         await NotificationModel.create({
           user_id: clientUser.id,

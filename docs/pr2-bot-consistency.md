@@ -11,6 +11,8 @@ Compatível com `codex/pr2-bot-consistency-frontend`; nenhum arquivo do frontend
 - A remarcação não permite trocar serviço/profissional. Uma mudança com outro preço precisa de fluxo financeiro próprio.
 - Sugestões de data e horário excluem somente a reserva original e usam a duração contratada.
 - A expiração de pendências passa a usar `updatedAt`: remarcação e atualização de pagamento renovam o prazo de 12 horas, preservando `createdAt`. O job revalida a situação dentro da transação antes de cancelar.
+- B04 (ciclo posterior à remarcação): expiração e rejeição do profissional gravam o cancelamento e a solicitação de estorno integral na mesma transação. Se a gravação da fila falhar, o cancelamento também é desfeito. O pagamento continua vinculado à reserva para auditoria.
+- Enquanto aguarda o novo aceite, o chatbot lê `appointmentPaid` do pagamento persistido, evitando oferecer novamente o pagamento de uma reserva já paga.
 
 ## Concorrência
 
@@ -18,7 +20,15 @@ O bloqueio da linha do profissional é adquirido antes de ler e alterar reservas
 
 O protocolo é compartilhado pela criação do bot, criação convencional, criação pelo pagamento, remarcação, cancelamento do bot, aceite/rejeição do profissional, expiração e alterações das disponibilidades/bloqueios existentes. O hook que gera short ID utiliza a mesma transação da criação.
 
-Não há migration. Escritores novos da agenda devem usar os serviços de `appointmentSchedule.service.ts`; gravações diretas fora desse protocolo não recebem a garantia de exclusão. Bloqueios administrativos continuam podendo ser cadastrados sobre reservas já existentes, sem cancelá-las automaticamente.
+Escritores novos da agenda devem usar os serviços de `appointmentSchedule.service.ts`; gravações diretas fora desse protocolo não recebem a garantia de exclusão. Bloqueios administrativos continuam podendo ser cadastrados sobre reservas já existentes, sem cancelá-las automaticamente.
+
+## Estorno persistente e implantação
+
+Aplicar a migration `20260926120000-create-appointment-refund.js` antes de iniciar a versão nova do backend. Ela cria `appointment_refund`, com unicidade por PaymentIntent e índice para os itens pendentes. Não altera reservas existentes nem inicia estornos retroativos. Não remover essa tabela enquanto houver itens pendentes.
+
+O cron processa até 100 itens por execução, a cada 10 minutos, mesmo sem novas expirações. Cada item tem trava própria, contador de tentativas, próxima tentativa e último erro. Erros em uma notificação ou em outro item não impedem o processamento dos demais estornos. Uma rejeição pelo profissional agora informa que o estorno será processado, sem prometer conclusão antes do retorno do provedor.
+
+Antes de reenviar, o worker reconcilia os estornos no Stripe e usa chave idempotente estável. Estornos `pending`/`requires_action` continuam acompanhados; somente o valor integral confirmado como `succeeded` conclui o item. Após um timeout ou falha de commit, a próxima execução reconcilia novamente. Falhas terminais no provedor permitem uma nova tentativa; falhas persistentes ficam registradas para acompanhamento operacional. Documentação: [estornos](https://docs.stripe.com/api/refunds) e [idempotência](https://docs.stripe.com/api/idempotent_requests).
 
 ## Verificação reproduzível
 
@@ -40,7 +50,7 @@ O teste de integração aceita apenas PostgreSQL local com banco chamado `pr2_te
 
 Cobertura: timezone e equivalência de ISO, recorrências, bloqueios, virada de dia, exclusão da reserva original, criação/remarcação simultâneas, espera real por lock observada no PostgreSQL, rollback depois do UPDATE, preservação financeira, confirmação repetida e expiração. O script de contrato executa o helper real do frontend e compara com o parser do backend, incluindo remarcação e virada do dia.
 
-Resultado local: 25 testes de integração aprovados (também com processo em `Asia/Tokyo`); 358 testes unitários aprovados e uma falha preexistente de NLU. Contrato frontend/backend aprovado em 4 cenários sob `UTC`, `America/Sao_Paulo` e `Asia/Tokyo`.
+Resultado da revisão B04: 33 testes de integração aprovados em PostgreSQL, incluindo `up`/`down` da migration real, rollback da outbox, expiração e workers concorrentes, falha do provedor e retomada após falha na persistência. 373 testes unitários aprovados e uma falha preexistente de NLU. Typecheck e build aprovados. O Stripe foi simulado; não houve estorno real. Na etapa anterior, o contrato frontend/backend passou em 4 cenários sob `UTC`, `America/Sao_Paulo` e `Asia/Tokyo`.
 
 ## Limitação anterior à PR
 
