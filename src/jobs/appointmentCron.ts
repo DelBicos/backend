@@ -9,6 +9,8 @@ import { ServiceModel } from '../models/Service';
 import logger from '../utils/logger';
 import { archiveChatRoomForAppointment } from '../utils/chatRoom';
 import { syncBotSessionsForAppointmentStatus } from '../services/botAppointmentStatus.service';
+import { expirePendingAppointment } from '../services/appointmentSchedule.service';
+import { processAppointmentRefunds } from '../services/appointmentRefund.service';
 
 export const startAppointmentCron = () => {
   // Roda a cada 10 minutos
@@ -19,7 +21,7 @@ export const startAppointmentCron = () => {
       const expiredAppointments = await AppointmentModel.findAll({
         where: {
           status: 'pending',
-          createdAt: {
+          updatedAt: {
             [Op.lte]: twelveHoursAgo
           }
         },
@@ -30,48 +32,58 @@ export const startAppointmentCron = () => {
         ]
       });
 
-      if (expiredAppointments.length === 0) return;
-
       logger.info(`Encontrados ${expiredAppointments.length} agendamentos expirados.`);
 
       for (const appointment of expiredAppointments) {
-        appointment.status = 'canceled';
-        await appointment.save();
+        try {
+          // Revalida após adquirir a agenda: uma remarcação ou pagamento pode
+          // ter renovado o prazo desde a consulta inicial do job.
+          if (!await expirePendingAppointment(appointment, twelveHoursAgo)) continue;
 
-        // Arquiva a sala de chat do agendamento cancelado automaticamente
-        await archiveChatRoomForAppointment(appointment.id);
+          // Arquiva a sala de chat do agendamento cancelado automaticamente
+          await archiveChatRoomForAppointment(appointment.id);
 
-        const apptData: any = appointment;
-        const clientUser = apptData.Client?.User;
-        const professionalUser = apptData.Professional?.User;
-        const service = apptData.Service;
+          const apptData: any = appointment;
+          const clientUser = apptData.Client?.User;
+          const professionalUser = apptData.Professional?.User;
+          const service = apptData.Service;
 
-        if (clientUser) {
-          await NotificationModel.create({
-            user_id: clientUser.id,
-            title: "Agendamento Expirado",
-            message: `O seu agendamento para '${service?.title}' não foi aceito pelo profissional a tempo e foi cancelado automaticamente.`,
-            notification_type: "appointment",
-            related_entity_id: appointment.id,
-            is_read: false,
-          });
+          if (clientUser) {
+            await NotificationModel.create({
+              user_id: clientUser.id,
+              title: "Agendamento Expirado",
+              message: `O seu agendamento para '${service?.title}' não foi aceito pelo profissional a tempo e foi cancelado automaticamente.${appointment.payment_intent_id ? " O estorno do pagamento será processado automaticamente." : ""}`,
+              notification_type: "appointment",
+              related_entity_id: appointment.id,
+              is_read: false,
+            });
+          }
+
+          if (professionalUser) {
+            await NotificationModel.create({
+              user_id: professionalUser.id,
+              title: "Agendamento Expirado",
+              message: `Você não respondeu a solicitação para '${service?.title}' em 12 horas e ela foi cancelada automaticamente.`,
+              notification_type: "appointment",
+              related_entity_id: appointment.id,
+              is_read: false,
+            });
+          }
+
+          await syncBotSessionsForAppointmentStatus(appointment);
+        } catch (error) {
+          logger.error('Erro ao expirar agendamento:', { appointmentId: appointment.id, error });
         }
-
-        if (professionalUser) {
-          await NotificationModel.create({
-            user_id: professionalUser.id,
-            title: "Agendamento Expirado",
-            message: `Você não respondeu a solicitação para '${service?.title}' em 12 horas e ela foi cancelada automaticamente.`,
-            notification_type: "appointment",
-            related_entity_id: appointment.id,
-            is_read: false,
-          });
-        }
-
-        await syncBotSessionsForAppointmentStatus(appointment);
       }
     } catch (error) {
       logger.error('Erro ao executar cron job de agendamentos expirados:', error);
+    } finally {
+      // A fila deve continuar mesmo sem novas expirações ou se uma notificação falhar.
+      try {
+        await processAppointmentRefunds();
+      } catch (error) {
+        logger.error('Erro ao consultar fila de estornos:', error);
+      }
     }
   });
 };

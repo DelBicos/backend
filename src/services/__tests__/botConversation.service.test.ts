@@ -45,7 +45,7 @@ describe("processMessage - saudação global", () => {
       confidence: 1,
     });
 
-    const result = await processMessage(1, "auth-1", "oi", 77, "web");
+    const result = await processMessage(1, "auth-1", "oi", 77, "web", undefined, "Asia/Tokyo");
 
     expect(result.state).toBe("COLETANDO_DATA");
     expect(result.message).toContain("Olá!");
@@ -53,6 +53,7 @@ describe("processMessage - saudação global", () => {
     expect(result.context).toMatchObject({
       serviceName: "Limpeza residencial",
       matchedServiceIds: [10, 11],
+      timeZone: "America/Sao_Paulo",
     });
     expect(BotSessionManager.saveSession).toHaveBeenCalledWith(
       session,
