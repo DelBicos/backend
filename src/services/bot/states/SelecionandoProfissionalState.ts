@@ -104,8 +104,8 @@ export class SelecionandoProfissionalState implements BotStateNode {
       professionalRatingsCount: picked.professionalRatingsCount,
       professionalCity: picked.professionalCity,
       professionalState: picked.professionalState,
-      servicePrice: picked.price,
-      serviceDuration: picked.duration,
+      servicePrice: isAlterar ? ctx.servicePrice : picked.price,
+      serviceDuration: isAlterar ? ctx.serviceDuration : picked.duration,
       professionalOptionsData: undefined,
     };
 

@@ -37,7 +37,7 @@
     "docker:network": "docker network create delbicos-shared-network",
     "docker:migrate": "docker-compose exec delbicos-server npm run migrate",
     "docker:seed": "docker-compose exec delbicos-server npm run seed",
-    "test": "jest",
+    "test": "jest --selectProjects unit",
     "test:unit": "jest --selectProjects unit --no-coverage",
     "test:integration": "jest --selectProjects integration --no-coverage",
     "test:all": "jest --no-coverage"

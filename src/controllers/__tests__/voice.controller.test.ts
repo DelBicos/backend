@@ -46,6 +46,7 @@ describe("processVoiceCommand", () => {
         if (name === "x-voice-session-id") return "44";
         if (name === "x-voice-channel") return "voice-web";
         if (name === "x-voice-timezone") return "America/Sao_Paulo";
+        if (name === "x-voice-selected-time") return "2099-01-05T12:00:00Z";
         return undefined;
       }),
     };
@@ -60,7 +61,7 @@ describe("processVoiceCommand", () => {
       "quero agendar uma limpeza",
       44,
       "voice-web",
-      undefined,
+      "2099-01-05T12:00:00Z",
       "America/Sao_Paulo",
     );
     expect(response.json).toHaveBeenCalledWith({
