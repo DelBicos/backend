@@ -185,4 +185,59 @@ authRouter.post("/verify", AuthController.handleVerifyCode);
 
 authRouter.post("/resend", AuthController.handleResendCode);
 
+/**
+ * @swagger
+ * /auth/forgot-password:
+ *   post:
+ *     summary: Envia um codigo para redefinir a senha
+ *     description: A resposta e a mesma exista ou nao a conta.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email]
+ *             properties:
+ *               email: { type: string }
+ *     responses:
+ *       200:
+ *         description: Pedido recebido
+ *       400:
+ *         description: E-mail invalido
+ *       502:
+ *         description: Falha no envio de e-mail
+ */
+authRouter.post("/forgot-password", AuthController.handleForgotPassword);
+
+/**
+ * @swagger
+ * /auth/reset-password:
+ *   post:
+ *     summary: Confere o codigo e grava a nova senha
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, code, password]
+ *             properties:
+ *               email: { type: string }
+ *               code: { type: string }
+ *               password: { type: string }
+ *     responses:
+ *       200:
+ *         description: Senha alterada
+ *       400:
+ *         description: Codigo invalido ou senha fora da politica
+ *       404:
+ *         description: Codigo expirado
+ *       429:
+ *         description: Muitas tentativas invalidas
+ */
+authRouter.post("/reset-password", AuthController.handleResetPassword);
+
 export default authRouter;

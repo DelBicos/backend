@@ -18,25 +18,29 @@ export interface PendingUserData {
   address: Record<string, any>;
 }
 
-interface Entry {
-  data: PendingUserData;
+interface Entry<T> {
+  data: T;
   codes: Array<{ value: string; expiresAt: number }>;
   attempts: number;
 }
 
-export type VerifyResult =
-  | { status: "ok"; data: PendingUserData }
+export type VerifyResult<T = PendingUserData> =
+  | { status: "ok"; data: T }
   | { status: "not_found" }
   | { status: "invalid"; attemptsLeft: number }
   | { status: "locked" };
 
-export class PendingRegistrationStore {
-  private readonly entries = new Map<string, Entry>();
+/**
+ * Dados pendentes (cadastro, troca de senha...) confirmados por codigo
+ * enviado ao e-mail.
+ */
+export class VerificationCodeStore<T> {
+  private readonly entries = new Map<string, Entry<T>>();
 
   constructor(private readonly now: () => number = Date.now) {}
 
   /** Inicia (ou reinicia) o cadastro pendente com um novo codigo. */
-  start(email: string, data: PendingUserData, code: string): void {
+  start(email: string, data: T, code: string): void {
     this.prune();
     this.entries.set(email, {
       data,
@@ -46,7 +50,7 @@ export class PendingRegistrationStore {
   }
 
   /** Dados do cadastro pendente, se ainda houver codigo valido. */
-  get(email: string): PendingUserData | undefined {
+  get(email: string): T | undefined {
     return this.alive(email)?.data;
   }
 
@@ -61,7 +65,7 @@ export class PendingRegistrationStore {
     return true;
   }
 
-  verify(email: string, code: string): VerifyResult {
+  verify(email: string, code: string): VerifyResult<T> {
     const entry = this.alive(email);
     if (!entry) return { status: "not_found" };
 
@@ -86,7 +90,7 @@ export class PendingRegistrationStore {
     return this.entries.size;
   }
 
-  private alive(email: string): Entry | undefined {
+  private alive(email: string): Entry<T> | undefined {
     const entry = this.entries.get(email);
     if (!entry) return undefined;
     const now = this.now();
@@ -102,3 +106,5 @@ export class PendingRegistrationStore {
     for (const email of [...this.entries.keys()]) this.alive(email);
   }
 }
+
+export class PendingRegistrationStore extends VerificationCodeStore<PendingUserData> {}

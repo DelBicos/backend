@@ -9,14 +9,32 @@ export function verificationCodeEmail(params: {
   code: string;
   expiresInMinutes: number;
   resend?: boolean;
+  /** "reset": codigo para criar uma nova senha. */
+  purpose?: "register" | "reset";
 }) {
+  const isReset = params.purpose === "reset";
   const name = escapeHtml(params.name);
   const code = escapeHtml(params.code);
   const year = new Date().getFullYear();
 
-  const subject = params.resend
-    ? "Novo Código de Verificação - DelBicos"
-    : "Seu Código de Verificação";
+  const subject = isReset
+    ? "Redefinição de senha - DelBicos"
+    : params.resend
+      ? "Novo Código de Verificação - DelBicos"
+      : "Seu Código de Verificação";
+  const intro = isReset
+    ? `<p style="color: #666666; font-size: 16px; line-height: 1.5;">
+                      Recebemos um pedido para redefinir a senha da sua conta no <strong>DelBicos</strong>.
+                    </p>
+                    <p style="color: #666666; font-size: 16px; line-height: 1.5;">
+                      Use o código abaixo no app ou no site para criar uma nova senha:
+                    </p>`
+    : `<p style="color: #666666; font-size: 16px; line-height: 1.5;">
+                      Seja muito bem-vindo(a) ao <strong>DelBicos</strong>. Estamos felizes em ter você conosco!
+                    </p>
+                    <p style="color: #666666; font-size: 16px; line-height: 1.5;">
+                      Para garantir a segurança da sua conta e concluir seu cadastro, utilize o código abaixo:
+                    </p>`;
 
   const html = `
       <!DOCTYPE html>
@@ -41,12 +59,7 @@ export function verificationCodeEmail(params: {
                 <tr>
                   <td style="padding: 40px 30px;">
                     <h2 style="color: #333333; margin-top: 0; font-size: 22px;">Olá, ${name}! 👋</h2>
-                    <p style="color: #666666; font-size: 16px; line-height: 1.5;">
-                      Seja muito bem-vindo(a) ao <strong>DelBicos</strong>. Estamos felizes em ter você conosco!
-                    </p>
-                    <p style="color: #666666; font-size: 16px; line-height: 1.5;">
-                      Para garantir a segurança da sua conta e concluir seu cadastro, utilize o código abaixo:
-                    </p>
+                    ${intro}
                     <table role="presentation" border="0" cellpadding="0" cellspacing="0" width="100%" style="margin: 30px 0;">
                       <tr>
                         <td align="center">
@@ -63,7 +76,7 @@ export function verificationCodeEmail(params: {
                     </p>
                     <hr style="border: 0; border-top: 1px solid #eeeeee; margin: 30px 0;">
                     <p style="color: #666666; font-size: 14px; line-height: 1.5;">
-                      Se você não solicitou este código, por favor ignore este e-mail. Nenhuma ação é necessária.
+                      Se você não solicitou este código, por favor ignore este e-mail. ${isReset ? "Sua senha continua a mesma." : "Nenhuma ação é necessária."}
                     </p>
                   </td>
                 </tr>
