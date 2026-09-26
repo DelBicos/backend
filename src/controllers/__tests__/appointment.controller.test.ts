@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+jest.mock("../../services/botAppointmentStatus.service", () => ({ syncBotSessionsForAppointmentStatus: jest.fn() }));
 import { Sequelize } from "sequelize";
 import { getAllAppointments } from "../appointment.controller";
 import { AppointmentModel } from "../../models/Appointment";
@@ -73,6 +74,7 @@ describe("AppointmentController - getAllAppointments", () => {
         payment_intent_id: "pi_test_123",
         toJSON: () => ({
           id: 100,
+          short_id: "ABC100",
           professional_id: 20,
           client_id: 10,
           service_id: 5,
@@ -111,7 +113,8 @@ describe("AppointmentController - getAllAppointments", () => {
     expect(jsonMock).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
-          id: 100,
+          id: "ABC100",
+          numeric_id: 100,
           payment_method: "Cartão de Crédito",
           Address: expect.objectContaining({
             street: "Rua Exemplo",
@@ -135,6 +138,7 @@ describe("AppointmentController - getAllAppointments", () => {
         payment_intent_id: null,
         toJSON: () => ({
           id: 101,
+          short_id: "ABC101",
           payment_intent_id: null,
           Address: {
             street: "Av. Paulista",
@@ -156,7 +160,8 @@ describe("AppointmentController - getAllAppointments", () => {
 
     expect(jsonMock).toHaveBeenCalledWith([
       expect.objectContaining({
-        id: 101,
+        id: "ABC101",
+        numeric_id: 101,
         payment_method: "Cartão de Crédito",
         Address: expect.objectContaining({
           street: "Av. Paulista",

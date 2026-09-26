@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { withProfessionalScheduleLock } from "../services/appointmentSchedule.service";
 import { Op } from "sequelize";
 import { sequelize } from "../config/database";
 import { emitSSE } from "../utils/sse";
@@ -700,26 +701,29 @@ export const updateService = async (
         });
     }
 
-    await service.save();
+    await withProfessionalScheduleLock(service.professional_id, async transaction => {
+      await service.save({ transaction });
 
-    // Substituir availabilities se informadas
-    if (
-      Object.prototype.hasOwnProperty.call(req.body, "availabilities") &&
-      Array.isArray(req.body.availabilities)
-    ) {
-      await ServiceAvailabilityModel.destroy({ where: { service_id: id } });
-      if (req.body.availabilities.length > 0) {
-        await ServiceAvailabilityModel.bulkCreate(
-          req.body.availabilities.map((a: any) => ({
-            service_id: id,
-            day_of_week: Number(a.day),
-            start_time: a.start,
-            end_time: a.end,
-          })),
-        );
+      // Substituir availabilities atomicamente com a alteração do serviço.
+      if (
+        Object.prototype.hasOwnProperty.call(req.body, "availabilities") &&
+        Array.isArray(req.body.availabilities)
+      ) {
+        await ServiceAvailabilityModel.destroy({ where: { service_id: id }, transaction });
+        if (req.body.availabilities.length > 0) {
+          await ServiceAvailabilityModel.bulkCreate(
+            req.body.availabilities.map((a: any) => ({
+              service_id: id,
+              day_of_week: Number(a.day),
+              start_time: a.start,
+              end_time: a.end,
+            })),
+            { transaction },
+          );
+        }
       }
-    }
 
+    });
     const result = await ServiceModel.findByPk(id, {
       include: DEFAULT_SERVICE_INCLUDE as any,
     });
@@ -805,7 +809,7 @@ export const deleteService = async (
     if (!service) return;
 
     service.active = false;
-    await service.save();
+    await withProfessionalScheduleLock(service.professional_id, transaction => service.save({ transaction }));
     return res.status(204).send();
   } catch (error: any) {
     console.error("Erro deleteService:", error);

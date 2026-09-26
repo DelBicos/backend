@@ -9,6 +9,7 @@ import { ServiceModel } from '../models/Service';
 import logger from '../utils/logger';
 import { archiveChatRoomForAppointment } from '../utils/chatRoom';
 import { syncBotSessionsForAppointmentStatus } from '../services/botAppointmentStatus.service';
+import { expirePendingAppointment } from '../services/appointmentSchedule.service';
 
 export const startAppointmentCron = () => {
   // Roda a cada 10 minutos
@@ -19,7 +20,7 @@ export const startAppointmentCron = () => {
       const expiredAppointments = await AppointmentModel.findAll({
         where: {
           status: 'pending',
-          createdAt: {
+          updatedAt: {
             [Op.lte]: twelveHoursAgo
           }
         },
@@ -35,8 +36,9 @@ export const startAppointmentCron = () => {
       logger.info(`Encontrados ${expiredAppointments.length} agendamentos expirados.`);
 
       for (const appointment of expiredAppointments) {
-        appointment.status = 'canceled';
-        await appointment.save();
+        // Revalida após adquirir a agenda: uma remarcação ou pagamento pode
+        // ter renovado o prazo desde a consulta inicial do job.
+        if (!await expirePendingAppointment(appointment, twelveHoursAgo)) continue;
 
         // Arquiva a sala de chat do agendamento cancelado automaticamente
         await archiveChatRoomForAppointment(appointment.id);

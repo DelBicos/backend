@@ -8,6 +8,7 @@ import { ServiceModel } from "../models/Service";
 import { ensureChatRoomForAppointment } from "../utils/chatRoom";
 import { customAlphabet } from "nanoid";
 import { syncBotSessionsForAppointmentStatus } from "./botAppointmentStatus.service";
+import { createAppointmentWithScheduleLock } from "./appointmentSchedule.service";
 
 dotenv.config();
 
@@ -264,7 +265,7 @@ export const PaymentService = {
           is_read: false,
         });
       } else {
-        appointment = await AppointmentModel.create({
+        appointment = await createAppointmentWithScheduleLock({
           professional_id: Number(professionalId),
           client_id: clientId,
           service_id: Number(serviceId),

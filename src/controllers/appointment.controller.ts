@@ -15,6 +15,11 @@ import {
   syncChatRoomStatusForAppointment,
 } from "../utils/chatRoom";
 import { syncBotSessionsForAppointmentStatus } from "../services/botAppointmentStatus.service";
+import {
+  createAppointmentWithScheduleLock,
+  changePendingAppointmentStatus,
+  ScheduleConflictError,
+} from "../services/appointmentSchedule.service";
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -162,7 +167,7 @@ export const createAppointment = async (req: Request, res: Response) => {
       }
     }
 
-    const appointment = await AppointmentModel.create({
+    const appointment = await createAppointmentWithScheduleLock({
       professional_id: Number(professional_id),
       client_id: clientRecord.id,
       service_id: Number(service_id),
@@ -231,7 +236,7 @@ export const createAppointment = async (req: Request, res: Response) => {
     res.status(201).json(appointment);
   } catch (error: any) {
     logError("Erro ao criar appointment", error);
-    res.status(400).json({ error: error.message });
+    res.status(error instanceof ScheduleConflictError ? 409 : 400).json({ error: error.message });
   }
 };
 
@@ -375,13 +380,13 @@ export const confirmAppointment = async (req: Request, res: Response) => {
       });
     }
 
-    appointment.status = "confirmed";
-    await appointment.save();
+    await changePendingAppointmentStatus(appointment, "confirmed");
     await syncBotSessionsForAppointmentStatus(appointment);
     logger.info("Appointment confirmado", { appointmentId: id });
     res.json(appointment);
   } catch (error: any) {
     logError("Erro ao confirmar agendamento", error, { appointmentId: id });
+    if (error instanceof ScheduleConflictError) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: "Erro ao confirmar agendamento" });
   }
 };
@@ -435,8 +440,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       });
     }
 
-    appointment.status = status;
-    await appointment.save();
+    await changePendingAppointmentStatus(appointment, status);
 
     // Arquiva a sala de chat caso o agendamento seja cancelado
     await syncChatRoomStatusForAppointment(appointment.id, status);
@@ -486,6 +490,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
     logError("Erro ao atualizar status do agendamento", error, {
       appointmentId: id,
     });
+    if (error instanceof ScheduleConflictError) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: "Erro ao atualizar status do agendamento" });
   }
 };
