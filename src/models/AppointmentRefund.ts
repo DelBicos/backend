@@ -3,7 +3,7 @@ import { sequelize } from "../config/database";
 
 interface AppointmentRefund {
   id: number;
-  appointment_id: number;
+  appointment_id: number | null;
   payment_intent_id: string;
   status: "pending" | "completed";
   attempts: number;
@@ -17,7 +17,7 @@ export class AppointmentRefundModel extends Model<
   Optional<AppointmentRefund, "id" | "status" | "attempts" | "next_attempt_at">
 > implements AppointmentRefund {
   declare id: number;
-  declare appointment_id: number;
+  declare appointment_id: number | null;
   declare payment_intent_id: string;
   declare status: "pending" | "completed";
   declare attempts: number;
@@ -28,7 +28,7 @@ export class AppointmentRefundModel extends Model<
 AppointmentRefundModel.init({
   id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
   appointment_id: {
-    type: DataTypes.INTEGER, allowNull: false,
+    type: DataTypes.INTEGER, allowNull: true,
     references: { model: "appointment", key: "id" },
     onDelete: "RESTRICT", onUpdate: "CASCADE",
   },

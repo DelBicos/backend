@@ -24,11 +24,19 @@ Escritores novos da agenda devem usar os serviços de `appointmentSchedule.servi
 
 ## Estorno persistente e implantação
 
-Aplicar a migration `20260926120000-create-appointment-refund.js` antes de iniciar a versão nova do backend. Ela cria `appointment_refund`, com unicidade por PaymentIntent e índice para os itens pendentes. Não altera reservas existentes nem inicia estornos retroativos. Não remover essa tabela enquanto houver itens pendentes.
+Aplicar as migrations `20260926120000-create-appointment-refund.js` e `20260926121000-allow-unlinked-appointment-refund.js`, nessa ordem, antes de iniciar a versão nova do backend. A primeira cria `appointment_refund`, com unicidade por PaymentIntent e índice para os itens pendentes. A segunda permite registrar compensações de pagamentos que não chegaram a gerar uma reserva. Não iniciam estornos retroativos. Não remover essa tabela enquanto houver itens pendentes; o downgrade da segunda migration é recusado se houver registros sem reserva associada.
 
 O cron processa até 100 itens por execução, a cada 10 minutos, mesmo sem novas expirações. Cada item tem trava própria, contador de tentativas, próxima tentativa e último erro. Erros em uma notificação ou em outro item não impedem o processamento dos demais estornos. Uma rejeição pelo profissional agora informa que o estorno será processado, sem prometer conclusão antes do retorno do provedor.
 
 Antes de reenviar, o worker reconcilia os estornos no Stripe e usa chave idempotente estável. Estornos `pending`/`requires_action` continuam acompanhados; somente o valor integral confirmado como `succeeded` conclui o item. Após um timeout ou falha de commit, a próxima execução reconcilia novamente. Falhas terminais no provedor permitem uma nova tentativa; falhas persistentes ficam registradas para acompanhamento operacional. Documentação: [estornos](https://docs.stripe.com/api/refunds) e [idempotência](https://docs.stripe.com/api/idempotent_requests).
+
+## Confirmação financeira
+
+- A vinculação do pagamento usa a mesma transação e trava da agenda que a expiração. Se o pagamento vencer a corrida, renova o prazo de aceite. Se a expiração vencer, a reserva permanece cancelada e o pagamento tardio entra na fila de estorno, sem ser vinculado a ela.
+- Repetir a confirmação de um PaymentIntent já vinculado retorna a mesma reserva, sem consultar o preço atual do catálogo, renovar `updatedAt` ou repetir notificações. Verifica a propriedade do pagamento antes desse retorno. Isso preserva pagamentos após remarcação ou mudança de preço.
+- No primeiro pagamento, usa o preço contratado da reserva quando disponível; caso contrário, valida o preço do serviço no backend. Pagamento excedente, valor divergente e conflito de horário recebem compensação persistida. Um PaymentIntent em compensação não pode ser reutilizado para criar ou pagar outra reserva.
+- Chat, notificações e sincronização do bot são executados após o commit, isoladamente. Suas falhas não reembolsam uma reserva persistida nem transformam a confirmação em erro HTTP.
+- Erros inesperados de banco ou confirmação de commit não disparam estorno às cegas. O cliente pode repetir a confirmação com o mesmo PaymentIntent: o backend verifica o vínculo ou a compensação persistida. Se o banco estiver indisponível, a confirmação continua retornando erro até que possa ser persistida; esse caso não deve ser interpretado como autorização para pagar novamente.
 
 ## Verificação reproduzível
 
@@ -50,7 +58,7 @@ O teste de integração aceita apenas PostgreSQL local com banco chamado `pr2_te
 
 Cobertura: timezone e equivalência de ISO, recorrências, bloqueios, virada de dia, exclusão da reserva original, criação/remarcação simultâneas, espera real por lock observada no PostgreSQL, rollback depois do UPDATE, preservação financeira, confirmação repetida e expiração. O script de contrato executa o helper real do frontend e compara com o parser do backend, incluindo remarcação e virada do dia.
 
-Resultado da revisão B04: 33 testes de integração aprovados em PostgreSQL, incluindo `up`/`down` da migration real, rollback da outbox, expiração e workers concorrentes, falha do provedor e retomada após falha na persistência. 373 testes unitários aprovados e uma falha preexistente de NLU. Typecheck e build aprovados. O Stripe foi simulado; não houve estorno real. Na etapa anterior, o contrato frontend/backend passou em 4 cenários sob `UTC`, `America/Sao_Paulo` e `Asia/Tokyo`.
+Resultado da revisão B04 financeira: 49 testes de integração aprovados em PostgreSQL. Typecheck e build aprovados. Os testes cobrem `up`/`down` das migrations reais, rollback da outbox, expiração e workers concorrentes, falha do provedor, retomada após falha na persistência, efeitos posteriores ao commit, repetição após mudança de catálogo e as duas ordens da corrida pagamento/expiração. A suíte unitária teve 373 testes aprovados e uma falha preexistente de NLU. O Stripe foi simulado; não houve estorno real. Na etapa anterior, o contrato frontend/backend passou em 4 cenários sob `UTC`, `America/Sao_Paulo` e `Asia/Tokyo`.
 
 ## Limitação anterior à PR
 

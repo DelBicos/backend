@@ -8,9 +8,18 @@ import logger from "../utils/logger";
 /** Deve ser chamado dentro da transação que cancela a reserva, sob a trava da agenda. */
 export async function enqueueAppointmentRefund(appointment: AppointmentModel, transaction: Transaction) {
   if (!appointment.payment_intent_id) return;
+  await enqueuePaymentRefund(appointment.payment_intent_id, appointment.id, transaction);
+}
+
+/** Também registra pagamentos que não puderam gerar ou ser vinculados a uma reserva. */
+export async function enqueuePaymentRefund(
+  paymentIntentId: string,
+  appointmentId: number | null,
+  transaction: Transaction,
+): Promise<void> {
   await AppointmentRefundModel.findOrCreate({
-    where: { payment_intent_id: appointment.payment_intent_id },
-    defaults: { appointment_id: appointment.id, payment_intent_id: appointment.payment_intent_id },
+    where: { payment_intent_id: paymentIntentId },
+    defaults: { appointment_id: appointmentId, payment_intent_id: paymentIntentId },
     transaction,
   });
 }

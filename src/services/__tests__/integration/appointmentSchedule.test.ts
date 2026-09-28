@@ -1,3 +1,9 @@
+const mockPaymentRetrieve = jest.fn();
+const mockDirectRefund = jest.fn();
+jest.mock("stripe", () => jest.fn().mockImplementation(() => ({
+  paymentIntents: { retrieve: mockPaymentRetrieve }, refunds: { create: mockDirectRefund },
+})));
+jest.mock("../../botAppointmentStatus.service", () => ({ syncBotSessionsForAppointmentStatus: jest.fn() }));
 jest.mock("../../../config/database", () => {
   const { Sequelize } = require("sequelize");
   const uri = process.env.PR2_TEST_DATABASE_URL;
@@ -29,6 +35,7 @@ jest.mock("../../../models/Service", () => ({
     duration: "int",
     active: "bool",
     title: "text",
+    price_cents: "int",
   }),
 }));
 jest.mock("../../../models/Client", () => ({
@@ -128,6 +135,11 @@ import { BotSessionContext } from "../../../models/BotChatSession";
 import { AppointmentRefundModel } from "../../../models/AppointmentRefund";
 import { processAppointmentRefunds } from "../../appointmentRefund.service";
 import { ensureAppointmentRefund } from "../../appointmentRefundProvider.service";
+import { ensureChatRoomForAppointment } from "../../../utils/chatRoom";
+import { UserModel } from "../../../models/User";
+import { syncBotSessionsForAppointmentStatus } from "../../botAppointmentStatus.service";
+let paymentService: typeof import("../../payment.service").PaymentService;
+const previousStripeKey = process.env.STRIPE_SECRET_KEY;
 
 const date = "2099-01-05";
 const context: BotSessionContext = {
@@ -168,15 +180,29 @@ beforeAll(async () => {
   const migration = require("../../../../migrations/20260926120000-create-appointment-refund");
   await migration.down(sequelize.getQueryInterface());
   await migration.up(sequelize.getQueryInterface(), require("sequelize"));
+  const nullableMigration = require("../../../../migrations/20260926121000-allow-unlinked-appointment-refund");
+  await nullableMigration.up(sequelize.getQueryInterface(), require("sequelize"));
+  await nullableMigration.down(sequelize.getQueryInterface(), require("sequelize"));
+  await nullableMigration.up(sequelize.getQueryInterface(), require("sequelize"));
+  process.env.STRIPE_SECRET_KEY = "sk_test_integration_mock";
+  paymentService = require("../../payment.service").PaymentService;
 });
 afterAll(async () => {
   await sequelize.close();
+  if (previousStripeKey === undefined) delete process.env.STRIPE_SECRET_KEY;
+  else process.env.STRIPE_SECRET_KEY = previousStripeKey;
 });
 beforeEach(async () => {
   jest.restoreAllMocks();
   jest.clearAllMocks();
   await sequelize.truncate({ cascade: true });
   (ensureAppointmentRefund as jest.Mock).mockReset().mockResolvedValue(true);
+  mockPaymentRetrieve.mockReset();
+  mockDirectRefund.mockReset();
+  (NotificationModel.create as jest.Mock).mockReset();
+  (ensureChatRoomForAppointment as jest.Mock).mockReset();
+  (syncBotSessionsForAppointmentStatus as jest.Mock).mockReset();
+  (UserModel.findByPk as jest.Mock).mockResolvedValue({ id: 10 });
   await ProfessionalModel.create({ id: 1, user_id: 20 } as any);
   await ClientModel.create({ id: 3, user_id: 10, main_address_id: 4 } as any);
   await ServiceModel.create({
@@ -185,6 +211,7 @@ beforeEach(async () => {
     duration: 60,
     active: true,
     title: "Limpeza",
+    price_cents: 15000,
   } as any);
   await ProfessionalAvailabilityModel.create({
     professional_id: 1,
@@ -578,4 +605,221 @@ it("expiração sem pagamento não gera estorno", async () => {
   await appt.update({ payment_intent_id: null });
   await expirePendingAppointment(appt, new Date(Date.now() + 1000));
   expect(await AppointmentRefundModel.count()).toBe(0);
+});
+
+function paidIntent(appointmentId?: number, amount = 15000) {
+  mockPaymentRetrieve.mockResolvedValue({
+    id: "pi_paid", status: "succeeded", amount, amount_received: amount,
+    metadata: { professionalId: "1", serviceId: "2", addressId: "4",
+      selectedTime: `${date}T12:00:00Z`,
+      ...(appointmentId ? { appointmentId: String(appointmentId) } : {}),
+    },
+  });
+}
+
+async function unpaidReschedule() {
+  const appt = await AppointmentModel.create({ ...reservation, payment_intent_id: null });
+  await rescheduleBotAppointment(10, rescheduleContext(appt.id));
+  paidIntent(appt.id);
+  return appt;
+}
+
+async function expectWaitingForScheduleLock() {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const [rows] = await sequelize.query(
+      "SELECT pid FROM pg_stat_activity WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%professional%'",
+    );
+    if (rows.length) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("A operação concorrente não aguardou a trava da agenda");
+}
+
+it.each(["notificação", "sincronização"])("falha de %s após pagamento não gera estorno nem erro ao cliente", async (effect) => {
+  const appt = await unpaidReschedule();
+  const mock = effect === "notificação" ? NotificationModel.create : syncBotSessionsForAppointmentStatus;
+  (mock as jest.Mock).mockRejectedValueOnce(new Error("efeito indisponível"));
+  await expect(paymentService.confirmAndCreateAppointment("pi_paid", 10)).resolves.toMatchObject({ id: appt.id });
+  await appt.reload();
+  expect(appt.payment_intent_id).toBe("pi_paid");
+  expect(appt.status).toBe("pending");
+  expect(mockDirectRefund).not.toHaveBeenCalled();
+  expect(await AppointmentRefundModel.count()).toBe(0);
+});
+
+it("falha de chat após criação paga não desfaz a reserva nem estorna", async () => {
+  paidIntent();
+  (ensureChatRoomForAppointment as jest.Mock).mockRejectedValueOnce(new Error("chat indisponível"));
+  const appt = await paymentService.confirmAndCreateAppointment("pi_paid", 10);
+  expect(appt.payment_intent_id).toBe("pi_paid");
+  expect(await AppointmentModel.count()).toBe(1);
+  expect(await AppointmentRefundModel.count()).toBe(0);
+  expect(mockDirectRefund).not.toHaveBeenCalled();
+});
+
+it.each([true, false])("confirmação repetida ignora catálogo alterado e não renova prazo (com appointmentId: %s)", async (withId) => {
+  const appt = await original();
+  await rescheduleBotAppointment(10, rescheduleContext(appt.id));
+  await appt.reload();
+  const updatedAt = appt.updatedAt.getTime();
+  paidIntent(withId ? appt.id : undefined);
+  await ServiceModel.update({ price_cents: 20000, active: false }, { where: { id: 2 } });
+  const result = await paymentService.confirmAndCreateAppointment("pi_paid", 10);
+  expect(result.id).toBe(appt.id);
+  await appt.reload();
+  expect(appt.updatedAt.getTime()).toBe(updatedAt);
+  expect(Number(appt.final_price)).toBe(150);
+  expect(mockDirectRefund).not.toHaveBeenCalled();
+  expect(NotificationModel.create).not.toHaveBeenCalled();
+  expect(await AppointmentRefundModel.count()).toBe(0);
+});
+
+it("primeiro pagamento usa o preço contratado da reserva remarcada", async () => {
+  const appt = await unpaidReschedule();
+  await ServiceModel.update({ price_cents: 20000 }, { where: { id: 2 } });
+  await paymentService.confirmAndCreateAppointment("pi_paid", 10);
+  await appt.reload();
+  expect(appt.payment_intent_id).toBe("pi_paid");
+  expect(Number(appt.final_price)).toBe(150);
+  expect(await AppointmentRefundModel.count()).toBe(0);
+});
+
+it("duas confirmações simultâneas do mesmo pagamento produzem um vínculo e uma notificação", async () => {
+  const appt = await unpaidReschedule();
+  const results = await Promise.all([
+    paymentService.confirmAndCreateAppointment("pi_paid", 10),
+    paymentService.confirmAndCreateAppointment("pi_paid", 10),
+  ]);
+  expect(results.map((result) => result.id)).toEqual([appt.id, appt.id]);
+  expect(NotificationModel.create).toHaveBeenCalledTimes(1);
+  expect(await AppointmentRefundModel.count()).toBe(0);
+});
+
+it("pagamento após expiração gera compensação persistida sem vincular o pagamento à reserva cancelada", async () => {
+  const appt = await unpaidReschedule();
+  await expirePendingAppointment(appt, new Date(Date.now() + 1000));
+  await expect(paymentService.confirmAndCreateAppointment("pi_paid", 10)).rejects.toMatchObject({ code: "APPOINTMENT_NOT_PAYABLE" });
+  await appt.reload();
+  expect(appt.status).toBe("canceled");
+  expect(appt.payment_intent_id).toBeNull();
+  expect(await AppointmentRefundModel.count()).toBe(1);
+  await expect(paymentService.confirmAndCreateAppointment("pi_paid", 10)).rejects.toMatchObject({ code: "PAYMENT_REFUND_PENDING" });
+  expect(await AppointmentRefundModel.count()).toBe(1);
+  await processAppointmentRefunds();
+  expect(ensureAppointmentRefund).toHaveBeenCalledWith("pi_paid");
+});
+
+it("pagamento que obtém a trava primeiro renova o prazo e impede expiração concorrente", async () => {
+  const appt = await unpaidReschedule();
+  await sequelize.query("UPDATE appointment SET updated_at = :old WHERE id = :id", {
+    replacements: { old: new Date(Date.now() - 24 * 3600000), id: appt.id },
+  });
+  let expiry: Promise<boolean> | undefined;
+  AppointmentModel.addHook("beforeUpdate", "payment-first", async (instance: AppointmentModel) => {
+    if (instance.changed("payment_intent_id")) {
+      expiry = expirePendingAppointment(appt, new Date(Date.now() - 12 * 3600000));
+      await expectWaitingForScheduleLock();
+    }
+  });
+  try {
+    await paymentService.confirmAndCreateAppointment("pi_paid", 10);
+    expect(expiry).toBeDefined();
+    expect(await expiry).toBe(false);
+  } finally { AppointmentModel.removeHook("beforeUpdate", "payment-first"); }
+  await appt.reload();
+  expect(appt.status).toBe("pending");
+  expect(appt.payment_intent_id).toBe("pi_paid");
+  expect(await AppointmentRefundModel.count()).toBe(0);
+});
+
+it("expiração que obtém a trava primeiro força compensação do pagamento concorrente", async () => {
+  const appt = await unpaidReschedule();
+  let confirmation: Promise<any> | undefined;
+  AppointmentModel.addHook("beforeUpdate", "expiry-first", async (instance: AppointmentModel) => {
+    if (instance.status === "canceled") {
+      confirmation = paymentService.confirmAndCreateAppointment("pi_paid", 10).catch((error) => error);
+      await expectWaitingForScheduleLock();
+    }
+  });
+  try {
+    await expirePendingAppointment(appt, new Date(Date.now() + 1000));
+    expect(confirmation).toBeDefined();
+    expect(await confirmation).toMatchObject({ code: "APPOINTMENT_NOT_PAYABLE" });
+  } finally { AppointmentModel.removeHook("beforeUpdate", "expiry-first"); }
+  await appt.reload();
+  expect(appt.payment_intent_id).toBeNull();
+  expect(appt.status).toBe("canceled");
+  expect(await AppointmentRefundModel.count()).toBe(1);
+});
+
+it("erro de persistência faz rollback e permite repetir, sem estorno às cegas", async () => {
+  const appt = await unpaidReschedule();
+  const realSave = AppointmentModel.prototype.save;
+  jest.spyOn(AppointmentModel.prototype, "save").mockImplementationOnce(async function (this: AppointmentModel, options: any) {
+    await realSave.call(this, options);
+    throw new Error("falha depois do UPDATE");
+  });
+  await expect(paymentService.confirmAndCreateAppointment("pi_paid", 10)).rejects.toThrow("falha depois do UPDATE");
+  await appt.reload();
+  expect(appt.payment_intent_id).toBeNull();
+  expect(mockDirectRefund).not.toHaveBeenCalled();
+  expect(await AppointmentRefundModel.count()).toBe(0);
+  await paymentService.confirmAndCreateAppointment("pi_paid", 10);
+  await appt.reload();
+  expect(appt.payment_intent_id).toBe("pi_paid");
+});
+
+it("valor incorreto sem reserva registra estorno durável e impede criação numa repetição", async () => {
+  paidIntent(undefined, 10000);
+  await expect(paymentService.confirmAndCreateAppointment("pi_paid", 10)).rejects.toMatchObject({ code: "AMOUNT_MISMATCH" });
+  expect((await AppointmentRefundModel.findOne())?.appointment_id).toBeNull();
+  expect(await AppointmentModel.count()).toBe(0);
+  await ServiceModel.update({ price_cents: 10000 }, { where: { id: 2 } });
+  await expect(paymentService.confirmAndCreateAppointment("pi_paid", 10)).rejects.toMatchObject({ code: "PAYMENT_REFUND_PENDING" });
+  expect(await AppointmentModel.count()).toBe(0);
+});
+
+it("cliente diferente não pode reembolsar nem assumir o pagamento de outra reserva", async () => {
+  const appt = await original();
+  paidIntent(appt.id);
+  await ClientModel.create({ id: 9, user_id: 99 } as any);
+  await expect(paymentService.confirmAndCreateAppointment("pi_paid", 99)).rejects.toMatchObject({ code: "PAYMENT_NOT_OWNED" });
+  expect(await AppointmentRefundModel.count()).toBe(0);
+  expect(mockDirectRefund).not.toHaveBeenCalled();
+});
+
+it("pagamentos diferentes simultâneos preservam o primeiro e compensam apenas o excedente", async () => {
+  const appt = await unpaidReschedule();
+  const intent = await mockPaymentRetrieve();
+  mockPaymentRetrieve.mockImplementation(async (id: string) => ({ ...intent, id }));
+  const results = await Promise.allSettled([
+    paymentService.confirmAndCreateAppointment("pi_one", 10),
+    paymentService.confirmAndCreateAppointment("pi_two", 10),
+  ]);
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  await appt.reload();
+  const refund = (await AppointmentRefundModel.findOne())!;
+  expect(["pi_one", "pi_two"]).toContain(appt.payment_intent_id);
+  expect(["pi_one", "pi_two"]).toContain(refund.payment_intent_id);
+  expect(refund.payment_intent_id).not.toBe(appt.payment_intent_id);
+  expect(await AppointmentRefundModel.count()).toBe(1);
+});
+
+it("nova criação paga com slot ocupado registra compensação sem criar reserva", async () => {
+  await AppointmentModel.create({ ...reservation, payment_intent_id: null });
+  paidIntent();
+  await expect(paymentService.confirmAndCreateAppointment("pi_paid", 10)).rejects.toMatchObject({ code: "SCHEDULE_CONFLICT" });
+  expect(await AppointmentModel.count()).toBe(1);
+  expect((await AppointmentRefundModel.findOne())?.appointment_id).toBeNull();
+});
+
+it("falha ao gravar compensação não produz efeito no Stripe e pode ser retentada", async () => {
+  const appt = await unpaidReschedule();
+  await expirePendingAppointment(appt, new Date(Date.now() + 1000));
+  jest.spyOn(AppointmentRefundModel, "findOrCreate").mockRejectedValueOnce(new Error("outbox indisponível"));
+  await expect(paymentService.confirmAndCreateAppointment("pi_paid", 10)).rejects.toThrow("outbox indisponível");
+  expect(await AppointmentRefundModel.count()).toBe(0);
+  expect(mockDirectRefund).not.toHaveBeenCalled();
+  await expect(paymentService.confirmAndCreateAppointment("pi_paid", 10)).rejects.toMatchObject({ code: "APPOINTMENT_NOT_PAYABLE" });
+  expect(await AppointmentRefundModel.count()).toBe(1);
 });
