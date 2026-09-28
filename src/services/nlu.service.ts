@@ -584,7 +584,12 @@ function extractServiceCandidate(message: string): string | undefined {
     "contratar",
     "chamar",
   ]);
-  if (genericTerms.has(normalizeForRules(candidate))) return undefined;
+  // Depois de remover "quero/agendar", o candidato pode ser somente a data.
+  // A regra ancorada preserva nomes como "segunda via" e "segunda opinião".
+  if (
+    genericTerms.has(normalizeForRules(candidate)) ||
+    isStandaloneDateInput(candidate)
+  ) return undefined;
   if (
     parsePortugueseDate(candidate) ||
     parsePortugueseDate(message) ||

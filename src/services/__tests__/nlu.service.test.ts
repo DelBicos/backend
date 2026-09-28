@@ -434,13 +434,38 @@ describe("analyzeMessage", () => {
     },
   );
 
-  it("não interpreta uma resposta de data como nome de serviço", async () => {
+  it.each([
+    "quero segunda",
+    "quero segunda-feira",
+    "preciso de terça",
+    "quero quarta por favor",
+    "quero agendar quinta",
+    "quero sexta que vem",
+    "quero sábado",
+    "quero domingo",
+    "quero amanhã",
+    "quero segunda às 14:30",
+  ])("não interpreta uma resposta de data como nome de serviço: %s", async (message) => {
     mockClassifier("AGENDAR");
 
-    const result = await analyzeMessage("quero segunda");
+    const result = await analyzeMessage(message);
 
     expect(result.intent).toBe("AGENDAR");
     expect(result.entities.service).toBeUndefined();
+    expect(result.entities.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
+
+  it.each([
+    ["quero segunda via", "segunda via"],
+    ["quero segunda opinião", "segunda opinião"],
+    ["quero limpeza na segunda", "limpeza"],
+    ["quero segunda via na sexta", "segunda via"],
+  ])("preserva serviço distinto de uma resposta de data: %s", async (message, service) => {
+    mockClassifier("AGENDAR");
+
+    const result = await analyzeMessage(message);
+
+    expect(result.entities.service).toBe(service);
   });
 
   it("extrai data por extenso e período sem confundir com o serviço", async () => {

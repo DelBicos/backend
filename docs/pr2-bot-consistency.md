@@ -58,10 +58,12 @@ O teste de integração aceita apenas PostgreSQL local com banco chamado `pr2_te
 
 Cobertura: timezone e equivalência de ISO, recorrências, bloqueios, virada de dia, exclusão da reserva original, criação/remarcação simultâneas, espera real por lock observada no PostgreSQL, rollback depois do UPDATE, preservação financeira, confirmação repetida e expiração. O script de contrato executa o helper real do frontend e compara com o parser do backend, incluindo remarcação e virada do dia.
 
-Resultado da revisão B04 financeira: 49 testes de integração aprovados em PostgreSQL. Typecheck e build aprovados. Os testes cobrem `up`/`down` das migrations reais, rollback da outbox, expiração e workers concorrentes, falha do provedor, retomada após falha na persistência, efeitos posteriores ao commit, repetição após mudança de catálogo e as duas ordens da corrida pagamento/expiração. A suíte unitária teve 373 testes aprovados e uma falha preexistente de NLU. O Stripe foi simulado; não houve estorno real. Na etapa anterior, o contrato frontend/backend passou em 4 cenários sob `UTC`, `America/Sao_Paulo` e `Asia/Tokyo`.
+Resultado da revisão B04 financeira: 49 testes de integração aprovados em PostgreSQL. Typecheck e build aprovados. Os testes cobrem `up`/`down` das migrations reais, rollback da outbox, expiração e workers concorrentes, falha do provedor, retomada após falha na persistência, efeitos posteriores ao commit, repetição após mudança de catálogo e as duas ordens da corrida pagamento/expiração. Após a correção da NLU, a suíte unitária completa passou: 387 testes em 24 suítes, sem falhas. O Stripe foi simulado; não houve estorno real. Na etapa anterior, o contrato frontend/backend passou em 4 cenários sob `UTC`, `America/Sao_Paulo` e `Asia/Tokyo`.
 
-## Limitação anterior à PR
+## Extração de datas na NLU
 
-A suíte de NLU já falhava na base em `não interpreta uma resposta de data como nome de serviço`: retorna `service: "segunda"`. Esse comportamento não foi alterado aqui. Os mocks de sincronização do chatbot nos testes de pagamento/listagem foram isolados, e as fixtures da listagem foram adequadas ao contrato existente de `id` público e `numeric_id`.
+A falha preexistente em `não interpreta uma resposta de data como nome de serviço` foi corrigida. Após remover o prefixo de intenção (por exemplo, `quero`), o extrator agora descarta candidatos que sejam integralmente uma expressão de data, usando a regra ancorada já existente. Assim, `quero segunda` fornece a data sem inventar um serviço; nomes como `segunda via` e `segunda opinião` continuam preservados. A suíte de NLU passa em 119 cenários, incluindo as regressões adicionadas. Não foi necessário alterar ou retreinar o classificador SVM.
+
+Os mocks de sincronização do chatbot nos testes de pagamento/listagem foram isolados, e as fixtures da listagem foram adequadas ao contrato existente de `id` público e `numeric_id`.
 
 Antes do merge, validar visualmente criação e remarcação (texto e voz) com a branch PR2 do frontend. Não houve chamada real ao Stripe nem alteração do banco do aplicativo durante os testes.
