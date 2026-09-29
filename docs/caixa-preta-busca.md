@@ -1,10 +1,10 @@
-# Teste de Caixa Preta — Busca Semântica e Agendamento
+# Teste de Caixa Preta — Busca Semântica
 
 > Técnicas: **Partição de Equivalência** e **Análise de Valor Limite**.  
 > Escopo: interfaces públicas do DelBicos usadas em [www.delbicos.com.br](https://www.delbicos.com.br) (app DelBicosV2 + API DelBicosBackend).  
 > Os testes observam apenas entrada e saída da API. Não se baseiam em ramos internos do código.
 
-**Execução:** `npm run test:unit` em 28/09/2026 — **92 testes, todos passando**.
+**Execução:** `npm run test:unit` — suíte de busca de serviços, profissionais, disponibilidade e raio.
 
 ---
 
@@ -16,9 +16,6 @@
 | Busca semântica de profissionais | `GET /api/professionals` | `termo` | `200` + `{ professionals, totalCount, currentPage, pageSize }` |
 | Busca para agendar | `GET /api/professionals/search-availability` | `subCategoryId`, `date`, `lat`, `lng` | `200` (lista) ou `400` |
 | Configurar raio | `PUT /api/professionals/:id/radius` | `service_radius_km` | `200` ou `400` |
-| Criar agendamento | `POST /api/appointments` | `service_id`, `professional_id`, `start_time`, `end_time`, endereço/coords | `201` / `400` / `401` / `403` / `404` |
-| Avaliar agendamento | `POST /api/appointments/:id/review` | `rating` (1–5), `review` (0–500 chars) | `200` ou `400` |
-| Iniciar pagamento do agendamento | `POST /api/payments/create-payment-intent` | `amount` > 0, `currency` ISO-3, dados do horário | `200` ou `400` |
 
 ---
 
@@ -44,27 +41,6 @@ Cada classe representa um conjunto de entradas que o sistema deve tratar da mesm
 | PE-AG-I1 | Inválida | `subCategoryId` ausente | só `date` | `400` |
 | PE-AG-I2 | Inválida | `date` ausente | só `subCategoryId` | `400` |
 | PE-AG-I3 | Inválida | Data em formato não ISO | `01/10/2026` | `400` |
-
-### 2.3 Criação de agendamento
-
-| ID da classe | Tipo | Domínio | Representante | Resultado esperado |
-| ------------ | ---- | ------- | ------------- | ------------------ |
-| PE-CR-V1 | Válida | Cliente autenticado, serviço ativo, dentro do raio | payload completo | `201`, `status=pending` |
-| PE-CR-I1 | Inválida | Sem autenticação | sem `user` | `401` |
-| PE-CR-I2 | Inválida | Usuário sem perfil de cliente | user sem Client | `403` |
-| PE-CR-I3 | Inválida | Campo obrigatório ausente | falta `service_id` / `professional_id` / `start_time` / `end_time` | `400` |
-| PE-CR-I4 | Inválida | Serviço inativo | `active=false` | `400` |
-| PE-CR-I5 | Inválida | Coordenadas não numéricas | `client_lat="abc"` | `400` |
-| PE-CR-I6 | Inválida | Fora do raio | SP × Rio, raio 10 km | `400` |
-
-### 2.4 Pagamento do agendamento
-
-| ID da classe | Tipo | Domínio | Representante | Resultado esperado |
-| ------------ | ---- | ------- | ------------- | ------------------ |
-| PE-PG-V1 | Válida | `amount` número > 0, `currency` 3 letras, metadados completos | `150.50` + `"BRL"` | `200` + `clientSecret` |
-| PE-PG-I1 | Inválida | `amount` ≤ 0 ou não numérico | `0`, `-10`, `"50"` | `400` |
-| PE-PG-I2 | Inválida | `currency` com tamanho ≠ 3 | `"br"`, `"brls"` | `400` |
-| PE-PG-I3 | Inválida | Metadado de horário ausente | falta `selectedTime` | `400` |
 
 ---
 
@@ -94,9 +70,9 @@ Raio de referência: **10 km**.
 
 | Distância | Relação com o limite | Esperado | Caso |
 | --------- | -------------------- | -------- | ---- |
-| 0 km | mínimo (mesmo ponto) | aceito | AG-L-03, AG-L-07 |
-| 9,99 km | logo abaixo do raio | aceito | AG-L-01, AG-L-08 |
-| 10,5 km | logo acima do raio | recusado / excluído | AG-L-02, AG-L-09 |
+| 0 km | mínimo (mesmo ponto) | aceito | AG-L-03 |
+| 9,99 km | logo abaixo do raio | aceito | AG-L-01 |
+| 10,5 km | logo acima do raio | excluído | AG-L-02 |
 
 ### 3.4 `service_radius_km` ≥ 0
 
@@ -105,20 +81,6 @@ Raio de referência: **10 km**.
 | `-1` | `400` | AG-L-05 |
 | `0` | aceito | AG-L-04 |
 | `1` | aceito | AG-L-06 |
-
-### 3.5 Avaliação `rating` ∈ [1, 5] e `review` ≤ 500
-
-| Variável | mín−1 | mín | máx | máx+1 |
-| -------- | ----- | --- | --- | ----- |
-| `rating` | `0` → `400` (AG-L-12) | `1` (AG-L-10) | `5` (AG-L-11) | `6` → `400` (AG-L-13) |
-| `review.length` | — | `0` (omitido) | `500` (AG-L-14) | `501` → `400` (AG-L-15) |
-
-### 3.6 Valor do pagamento (`amount` > 0) e moeda (tamanho = 3)
-
-| Variável | abaixo | no limite | acima |
-| -------- | ------ | --------- | ----- |
-| `amount` | `0` → `400` | `0.01` → `200` (1 centavo) | `150.50` → `200` |
-| `currency.length` | `2` (`"br"`) → `400` | `3` (`"BRL"`) → `200` | `4` (`"brls"`) → `400` |
 
 ---
 
@@ -153,24 +115,13 @@ Raio de referência: **10 km**.
 | AG-L-04 | VL | raio `0` | mínimo | `200` |
 | AG-L-05 | VL | raio `-1` | mín−1 | `400` |
 | AG-L-06 | VL | raio `1` | mín+1 | `200` |
-| AG-L-07 | VL | criar agendamento dist 0 | mínimo | `201` |
-| AG-L-08 | VL | criar agendamento 9,99 km | abaixo | `201` |
-| AG-L-09 | VL | criar agendamento 10,5 km | acima | `400` |
-| AG-L-10 | VL | `rating=1` | mínimo | aceito |
-| AG-L-11 | VL | `rating=5` | máximo | aceito |
-| AG-L-12 | VL | `rating=0` | mín−1 | `400` |
-| AG-L-13 | VL | `rating=6` | máx+1 | `400` |
-| AG-L-14 | VL | review 500 chars | máximo | aceito |
-| AG-L-15 | VL | review 501 chars | máx+1 | `400` |
-| AG-L-16 | VL | `amount=0.01` | mín+ε | `200`, 1 centavo |
 
 ---
 
 ## 5. Tabela de execução
 
 Comando: `npm run test:unit`  
-Ambiente: Node local, Jest projeto `unit` (sem banco).  
-Data: 28/09/2026.
+Ambiente: Node local, Jest projeto `unit` (sem banco).
 
 | ID | Resultado obtido | Status | Evidência (arquivo de teste) |
 | -- | ---------------- | ------ | ---------------------------- |
@@ -201,16 +152,6 @@ Data: 28/09/2026.
 | AG-L-04 | raio gravado `0` | PASSOU | `professional.search.test.ts` |
 | AG-L-05 | `400` número ≥ 0 | PASSOU | `professional.search.test.ts` |
 | AG-L-06 | raio gravado `1` | PASSOU | `professional.search.test.ts` |
-| AG-L-07 | `201` | PASSOU | `appointment.controller.test.ts` |
-| AG-L-08 | `201` | PASSOU | `appointment.controller.test.ts` |
-| AG-L-09 | `400` fora do raio | PASSOU | `appointment.controller.test.ts` |
-| AG-L-10 | avaliação salva | PASSOU | `appointment.controller.test.ts` |
-| AG-L-11 | avaliação salva | PASSOU | `appointment.controller.test.ts` |
-| AG-L-12 | `400` rating obrigatório | PASSOU | `appointment.controller.test.ts` |
-| AG-L-13 | `400` entre 1 e 5 | PASSOU | `appointment.controller.test.ts` |
-| AG-L-14 | salva | PASSOU | `appointment.controller.test.ts` |
-| AG-L-15 | `400` máximo 500 | PASSOU | `appointment.controller.test.ts` |
-| AG-L-16 | `amount=1` centavo, `200` | PASSOU | `payment.controller.test.ts` |
 
 **Resumo da execução**
 
@@ -218,14 +159,9 @@ Data: 28/09/2026.
 | ----- | ------ | ------ |
 | Busca de serviços | 13 | 0 |
 | Busca de profissionais / disponibilidade / raio | 14 | 0 |
-| Agendamento (criação, consulta, avaliação) | 32 | 0 |
-| Pagamento do agendamento | 18 | 0 |
-| Serviço de pagamento | 15 | 0 |
-| **Total** | **92** | **0** |
 
 ---
 
 ## 6. Observação de comportamento nas fronteiras
 
 - `day` fora de `[0, 6]` **não é rejeitado** pela API de busca: o filtro é aplicado e a lista tende a ficar vazia. Os casos BS-I-02 e BS-I-03 registram esse comportamento observado.
-- `rating=0` cai na partição “campo obrigatório ausente”, não na mensagem “entre 1 e 5”, porque `0` é tratado como valor vazio. AG-L-12 documenta o limite inferior real da interface.
