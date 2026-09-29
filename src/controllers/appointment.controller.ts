@@ -817,7 +817,7 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
       const distanceMeters = getDistanceInMeters(profLat, profLng, addrLat, addrLng);
       const MAX_DISTANCE_METERS = 300;
 
-      if (distanceMeters > MAX_DISTANCE_METERS) {
+      if (distanceMeters > MAX_DISTANCE_METERS && process.env.ENVIRONMENT === 'production') {
         const roundedDistance = Math.round(distanceMeters);
         return res.status(400).json({
           error: `Você está a ${roundedDistance}m do endereço do cliente. Aproxime-se (menos de ${MAX_DISTANCE_METERS}m) para confirmar a chegada.`,
@@ -846,11 +846,13 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
       await NotificationModel.create({
         user_id: clientUser.id,
         title: "Profissional chegou no local! 🎯",
-        message: `O profissional ${profUser?.name || ""} chegou! Seu código para iniciar o serviço é: ${code}`,
+        message: `O profissional ${profUser?.name || ""} chegou! Seu código de confirmação de 4 dígitos é: ${code}. Informe este código ao profissional para iniciar o serviço.`,
         notification_type: "appointment",
         related_entity_id: appointment.id,
         is_read: false,
       });
+
+      await syncBotSessionsForAppointmentStatus(appointment);
 
       emitAppointmentStatusUpdate(clientUser.id, {
         appointment_id: appointment.id,

@@ -22,12 +22,13 @@ export function getAppointmentPaymentStatus(
 export function getAppointmentStatusMessage(
   status: AppointmentStatus,
   paid: boolean,
+  code?: string | null,
 ): string {
   if (status === "in_transit") {
     return "🚗 O profissional está a caminho do local do serviço.";
   }
   if (status === "arrived") {
-    return "🎯 O profissional chegou ao local do atendimento.";
+    return `🎯 O profissional chegou ao local do atendimento! Seu código de confirmação é: ${code || ""}. Informe este código ao profissional para iniciar o serviço.`;
   }
   if (status === "in_progress") {
     return "⚡ O serviço está em andamento.";
