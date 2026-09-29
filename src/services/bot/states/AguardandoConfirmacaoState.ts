@@ -51,14 +51,16 @@ export class AguardandoConfirmacaoState implements BotStateNode {
       };
     }
 
-    const replies = {
+    const replies: Record<string, string> = {
       confirmed: appointment.payment_intent_id
         ? `\u2705 O pagamento do agendamento ID ${appointment.id} foi confirmado. O agendamento est\u00e1 confirmado e pago.`
         : `\u2705 O profissional confirmou o agendamento ID ${appointment.id}. O pagamento est\u00e1 pendente; use a op\u00e7\u00e3o Pagar para finalizar.`,
       in_transit: `🚗 O profissional informou que está a caminho do agendamento ID ${appointment.id}.`,
+      arrived: `🎯 O profissional informou que chegou ao local do agendamento ID ${appointment.id}.`,
+      in_progress: `⚡ O serviço do agendamento ID ${appointment.id} está em andamento.`,
       canceled: `\u274c O agendamento ID ${appointment.id} foi recusado ou cancelado. Posso ajud\u00e1-lo a escolher outra op\u00e7\u00e3o.`,
       completed: `\u2705 O agendamento ID ${appointment.id} foi conclu\u00eddo. Posso ajud\u00e1-lo com mais alguma coisa?`,
-    } as const;
+    };
 
     return {
       reply: replies[appointment.status],

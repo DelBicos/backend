@@ -7,6 +7,8 @@ import {
   updateAppointmentStatus,
   createAppointment,
   markInTransitAppointment,
+  markArrivedAppointment,
+  startServiceAppointment,
 } from "../controllers/appointment.controller";
 import authMiddleware from "../middlewares/auth.middleware";
 
@@ -532,5 +534,7 @@ router.get("/:id/receipt", authMiddleware, getAppointmentInvoice);
  *         description: Agendamento não encontrado
  */
 router.post("/:id/in-transit", authMiddleware, markInTransitAppointment);
+router.post("/:id/arrived", authMiddleware, markArrivedAppointment);
+router.post("/:id/start-service", authMiddleware, startServiceAppointment);
 
 export default router;

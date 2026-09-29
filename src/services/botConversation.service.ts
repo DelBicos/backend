@@ -36,6 +36,8 @@ export interface BotSessionHistory {
       | "pending"
       | "confirmed"
       | "in_transit"
+      | "arrived"
+      | "in_progress"
       | "completed"
       | "canceled"
       | null;

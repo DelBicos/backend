@@ -2,6 +2,8 @@ export type AppointmentStatus =
   | "pending"
   | "confirmed"
   | "in_transit"
+  | "arrived"
+  | "in_progress"
   | "completed"
   | "canceled";
 
@@ -14,7 +16,7 @@ export function getAppointmentPaymentStatus(
   appointment: AppointmentPaymentSnapshot,
 ): "not_available" | "pending" | "paid" {
   if (appointment.payment_intent_id) return "paid";
-  return appointment.status === "confirmed" || appointment.status === "in_transit" ? "pending" : "not_available";
+  return appointment.status === "confirmed" || appointment.status === "in_transit" || appointment.status === "arrived" || appointment.status === "in_progress" ? "pending" : "not_available";
 }
 
 export function getAppointmentStatusMessage(
@@ -23,6 +25,12 @@ export function getAppointmentStatusMessage(
 ): string {
   if (status === "in_transit") {
     return "🚗 O profissional está a caminho do local do serviço.";
+  }
+  if (status === "arrived") {
+    return "🎯 O profissional chegou ao local do atendimento.";
+  }
+  if (status === "in_progress") {
+    return "⚡ O serviço está em andamento.";
   }
   if (status === "confirmed" && paid) {
     return "\u2705 Pagamento confirmado. Seu agendamento est\u00e1 confirmado e pago.";
