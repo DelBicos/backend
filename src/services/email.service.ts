@@ -1,4 +1,4 @@
-import sgMail from "../config/sendgrid";
+import { getSenderAddress, getSmtpTransporter } from "../config/mailer";
 import { sendViaAzureFunction } from "../utils/azureEmailFunction";
 
 import logger, { logError } from "../utils/logger";
@@ -8,50 +8,45 @@ interface EmailParams {
   html: string;
 }
 
+/** Tenta o SMTP (principal) e, se falhar ou nao estiver configurado, a Azure Function. */
+async function sendViaSmtp({ to, subject, html }: EmailParams): Promise<boolean> {
+  const transporter = getSmtpTransporter();
+  if (!transporter) {
+    logger.warn("SMTP não configurado (SMTP_USER/SMTP_PASS); usando fallback");
+    return false;
+  }
+  const from = getSenderAddress();
+  if (!from) {
+    logger.error("Remetente de e-mail não configurado");
+    return false;
+  }
+  try {
+    await transporter.sendMail({ from, to, subject, html });
+    return true;
+  } catch (error) {
+    // Nao registra destinatario nem conteudo da mensagem.
+    const code =
+      typeof error === "object" && error !== null && "code" in error
+        ? String((error as { code?: unknown }).code)
+        : "desconhecido";
+    logger.error(`Falha ao enviar e-mail por SMTP (código ${code})`);
+    return false;
+  }
+}
+
 export const EmailService = {
-  sendTransactionalEmail: async ({
-    to,
-    subject,
-    html,
-  }: EmailParams): Promise<boolean> => {
-    const fromEmail = process.env.SENDER_EMAIL_VERIFICADO;
-
-    if (!fromEmail) {
-      logger.error("E-mail remetente verificado não encontrado no .env");
-      return false;
-    }
-
-    const msg = {
-      to,
-      from: fromEmail,
-      subject,
-      html,
-    };
+  sendTransactionalEmail: async (params: EmailParams): Promise<boolean> => {
+    if (await sendViaSmtp(params)) return true;
 
     try {
-      await sgMail.send(msg);
-      return true;
-    } catch (error) {
-      logError("Erro ao enviar e-mail pelo serviço:", error);
-      if (typeof error === "object" && error !== null && "response" in error) {
-        const err = error as { response?: { body?: unknown } };
-        logger.error(err.response?.body);
+      const fallbackResult = await sendViaAzureFunction(params);
+      if (fallbackResult) {
+        logger.info("E-mail enviado via Azure Function fallback");
+        return true;
       }
-      // Tentar fallback via Azure Function
-      try {
-        const fallbackResult = await sendViaAzureFunction({
-          to,
-          subject,
-          html,
-        });
-        if (fallbackResult) {
-          logger.info("E-mail enviado via Azure Function fallback");
-          return true;
-        }
-      } catch (err) {
-        logError("Erro no fallback via Azure Function:", err);
-      }
-      return false;
+    } catch (err) {
+      logError("Erro no fallback via Azure Function:", err);
     }
+    return false;
   },
 };

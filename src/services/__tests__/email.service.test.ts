@@ -1,38 +1,47 @@
-jest.mock("../../config/sendgrid", () => ({ __esModule: true, default: { send: jest.fn() } }));
+const sendMail = jest.fn();
+jest.mock("../../config/mailer", () => ({
+  getSmtpTransporter: jest.fn(),
+  getSenderAddress: jest.fn(),
+}));
 jest.mock("../../utils/azureEmailFunction", () => ({ sendViaAzureFunction: jest.fn() }));
 
-import sgMail from "../../config/sendgrid";
+import { getSenderAddress, getSmtpTransporter } from "../../config/mailer";
 import { sendViaAzureFunction } from "../../utils/azureEmailFunction";
 import { EmailService } from "../email.service";
 
-describe("EmailService: fallback Azure", () => {
-  const previousSender = process.env.SENDER_EMAIL_VERIFICADO;
+describe("EmailService: SMTP com fallback Azure", () => {
   const message = { to: "user@example.com", subject: "Teste", html: "<p>Mensagem</p>" };
 
   beforeEach(() => {
     jest.resetAllMocks();
-    process.env.SENDER_EMAIL_VERIFICADO = "sender@example.com";
-    jest.spyOn(console, "error").mockImplementation();
-    jest.spyOn(console, "info").mockImplementation();
+    (getSmtpTransporter as jest.Mock).mockReturnValue({ sendMail });
+    (getSenderAddress as jest.Mock).mockReturnValue('"DelBicos" <sender@example.com>');
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-    if (previousSender === undefined) delete process.env.SENDER_EMAIL_VERIFICADO;
-    else process.env.SENDER_EMAIL_VERIFICADO = previousSender;
-  });
-
-  it("não chama o fallback quando SendGrid funciona", async () => {
-    (sgMail.send as jest.Mock).mockResolvedValue([]);
+  it("envia por SMTP e não chama o fallback", async () => {
+    sendMail.mockResolvedValue({ messageId: "1" });
     await expect(EmailService.sendTransactionalEmail(message)).resolves.toBe(true);
+    expect(sendMail).toHaveBeenCalledWith({ from: '"DelBicos" <sender@example.com>', ...message });
     expect(sendViaAzureFunction).not.toHaveBeenCalled();
   });
 
-  it.each([true, false])("propaga o resultado Azure (%s) após falha do SendGrid", async (result) => {
-    (sgMail.send as jest.Mock).mockRejectedValue(new Error("SendGrid indisponível"));
+  it.each([true, false])("propaga o resultado Azure (%s) após falha do SMTP", async (result) => {
+    sendMail.mockRejectedValue(Object.assign(new Error("auth"), { code: "EAUTH" }));
     (sendViaAzureFunction as jest.Mock).mockResolvedValue(result);
     await expect(EmailService.sendTransactionalEmail(message)).resolves.toBe(result);
-    expect(sendViaAzureFunction).toHaveBeenCalledTimes(1);
     expect(sendViaAzureFunction).toHaveBeenCalledWith(message);
+  });
+
+  it("usa o fallback quando o SMTP não está configurado", async () => {
+    (getSmtpTransporter as jest.Mock).mockReturnValue(null);
+    (sendViaAzureFunction as jest.Mock).mockResolvedValue(true);
+    await expect(EmailService.sendTransactionalEmail(message)).resolves.toBe(true);
+    expect(sendMail).not.toHaveBeenCalled();
+  });
+
+  it("retorna false quando nenhum envio funciona", async () => {
+    (getSmtpTransporter as jest.Mock).mockReturnValue(null);
+    (sendViaAzureFunction as jest.Mock).mockRejectedValue(new Error("rede"));
+    await expect(EmailService.sendTransactionalEmail(message)).resolves.toBe(false);
   });
 });
