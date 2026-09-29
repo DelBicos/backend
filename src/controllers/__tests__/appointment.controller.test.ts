@@ -1,4 +1,8 @@
 import { Request, Response } from "express";
+jest.mock("../../services/bot/states/appointmentActions", () => ({ cancelBotAppointment: jest.fn() }));
+jest.mock("../../utils/chatRoom", () => ({ syncChatRoomStatusForAppointment: jest.fn() }));
+import { cancelBotAppointment } from "../../services/bot/states/appointmentActions";
+import { cancelClientAppointment } from "../appointment.controller";
 jest.mock("../../services/botAppointmentStatus.service", () => ({ syncBotSessionsForAppointmentStatus: jest.fn() }));
 import { Sequelize } from "sequelize";
 import { getAllAppointments } from "../appointment.controller";
@@ -26,6 +30,27 @@ jest.mock("../../utils/logger", () => ({
   logError: jest.fn(),
   logDatabase: jest.fn(),
 }));
+
+describe("cancelClientAppointment", () => {
+  beforeEach(() => jest.clearAllMocks());
+  it("cancela apenas a reserva pertencente ao cliente autenticado", async () => {
+    (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 10 });
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({ id: 100, client_id: 10 });
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    await cancelClientAppointment({ user: { id: 7 }, params: { id: "ABC" } } as any, res as any);
+    expect(AppointmentModel.findOne).toHaveBeenCalledWith({ where: { short_id: "ABC", client_id: 10 } });
+    expect(cancelBotAppointment).toHaveBeenCalledWith(7, 100);
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+  it("não cancela quando a reserva não pertence ao cliente", async () => {
+    (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 10 });
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue(null);
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    await cancelClientAppointment({ user: { id: 7 }, params: { id: "ABC" } } as any, res as any);
+    expect(cancelBotAppointment).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+});
 
 describe("AppointmentController - getAllAppointments", () => {
   let req: Partial<Request>;

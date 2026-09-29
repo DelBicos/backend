@@ -1,4 +1,5 @@
 import { Request, Response } from "express";
+import { cancelBotAppointment } from "../services/bot/states/appointmentActions";
 import { AppointmentModel } from "../models/Appointment";
 import { UserModel } from "../models/User";
 import { ClientModel } from "../models/Client";
@@ -28,6 +29,36 @@ const formatTime = (dateStr: string | Date) =>
     hour: "2-digit",
     minute: "2-digit",
   });
+
+export const cancelClientAppointment = async (req: Request, res: Response) => {
+  const user = (req as AuthenticatedRequest).user;
+  if (!user) return res.status(401).json({ error: "Usuário não autenticado" });
+  try {
+    const client = await ClientModel.findOne({ where: { user_id: user.id } });
+    if (!client) return res.status(403).json({ error: "Perfil de cliente necessário" });
+    const appointment = await AppointmentModel.findOne({
+      where: { short_id: req.params.id, client_id: client.id },
+    });
+    if (!appointment) return res.status(404).json({ error: "Agendamento não encontrado" });
+    await cancelBotAppointment(user.id, appointment.id);
+    try {
+      await syncChatRoomStatusForAppointment(appointment.id, "canceled");
+      appointment.status = "canceled";
+      await syncBotSessionsForAppointmentStatus(appointment);
+    } catch (error) {
+      logError("Falha ao sincronizar cancelamento", error);
+    }
+    return res.status(200).json({ status: "canceled" });
+  } catch (error) {
+    if (error instanceof Error && [
+      "Não é possível cancelar um agendamento já concluído",
+      "Este agendamento já está cancelado",
+      "Agendamento não encontrado",
+    ].includes(error.message)) return res.status(409).json({ error: error.message });
+    logError("Erro ao cancelar agendamento", error);
+    return res.status(500).json({ error: "Não foi possível cancelar o agendamento" });
+  }
+};
 
 export const createAppointment = async (req: Request, res: Response) => {
   try {

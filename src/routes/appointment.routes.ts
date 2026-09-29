@@ -6,10 +6,12 @@ import {
   getAppointmentInvoice,
   updateAppointmentStatus,
   createAppointment,
+  cancelClientAppointment,
 } from "../controllers/appointment.controller";
 import authMiddleware from "../middlewares/auth.middleware";
 
 const router = Router();
+router.post("/:id/cancel", authMiddleware, cancelClientAppointment);
 
 /**
  * @swagger
