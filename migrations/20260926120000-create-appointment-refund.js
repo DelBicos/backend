@@ -17,9 +17,14 @@ module.exports = {
       created_at: { type: Sequelize.DATE, allowNull: false, defaultValue: Sequelize.literal("CURRENT_TIMESTAMP") },
       updated_at: { type: Sequelize.DATE, allowNull: false, defaultValue: Sequelize.literal("CURRENT_TIMESTAMP") },
     });
-    await queryInterface.addIndex("appointment_refund", ["status", "next_attempt_at"], {
-      name: "idx_appointment_refund_due",
-    });
+    // Adiciona o índice somente se não existir (evita erro em re-runs)
+    const existing = await queryInterface.showIndex("appointment_refund");
+    const exists = existing && existing.some((i) => i.name === "idx_appointment_refund_due");
+    if (!exists) {
+      await queryInterface.addIndex("appointment_refund", ["status", "next_attempt_at"], {
+        name: "idx_appointment_refund_due",
+      });
+    }
   },
   async down(queryInterface) {
     await queryInterface.dropTable("appointment_refund");
