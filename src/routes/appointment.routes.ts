@@ -9,6 +9,7 @@ import {
   markInTransitAppointment,
   markArrivedAppointment,
   startServiceAppointment,
+  getAppointmentById,
 } from "../controllers/appointment.controller";
 import authMiddleware from "../middlewares/auth.middleware";
 
@@ -533,6 +534,7 @@ router.get("/:id/receipt", authMiddleware, getAppointmentInvoice);
  *       404:
  *         description: Agendamento não encontrado
  */
+router.get("/:id", authMiddleware, getAppointmentById);
 router.post("/:id/in-transit", authMiddleware, markInTransitAppointment);
 router.post("/:id/arrived", authMiddleware, markArrivedAppointment);
 router.post("/:id/start-service", authMiddleware, startServiceAppointment);

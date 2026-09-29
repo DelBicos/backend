@@ -962,3 +962,59 @@ export const startServiceAppointment = async (req: Request, res: Response) => {
   }
 };
 
+export const getAppointmentById = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: ServiceModel,
+          as: "Service",
+        },
+        {
+          model: ClientModel,
+          as: "Client",
+          include: [
+            {
+              model: UserModel,
+              as: "User",
+              attributes: ["id", "name", "avatar_uri", "phone", "email"],
+            },
+          ],
+        },
+        {
+          model: ProfessionalModel,
+          as: "Professional",
+          include: [
+            {
+              model: UserModel,
+              as: "User",
+              attributes: ["id", "name", "avatar_uri", "phone", "email"],
+            },
+          ],
+        },
+        {
+          model: AddressModel,
+          as: "Address",
+        },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    res.json(appointment);
+  } catch (error: any) {
+    logError("Erro ao buscar agendamento por ID", error, { paramId });
+    res.status(500).json({ error: "Erro interno ao buscar agendamento" });
+  }
+};
+
