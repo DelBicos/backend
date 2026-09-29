@@ -1,7 +1,7 @@
 import { BotChatSessionModel, BotSessionContext } from "../../../models/BotChatSession";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
-import { cancelBotAppointment, createBotAppointment } from "./appointmentActions";
+import { cancelBotAppointment, createBotAppointment, rescheduleBotAppointment } from "./appointmentActions";
 import { formatDatePtBR } from "../../../utils/date.util";
 import { logError } from "../../../utils/logger";
 
@@ -57,29 +57,27 @@ export class ConfirmacaoState implements BotStateNode {
 
       if (pendingAction === "RESCHEDULE") {
         if (!ctx.appointmentId) throw new Error("ID do agendamento original não encontrado");
-        await cancelBotAppointment(userId, ctx.appointmentId);
-        
         const reschedCtx: BotSessionContext = {
           ...ctx,
           date: ctx.newDate ?? ctx.date,
           time: ctx.newTime ?? ctx.time,
         };
-        const newAppointment = await createBotAppointment(userId, reschedCtx, selectedTimeIso);
+        const rescheduledAppointment = await rescheduleBotAppointment(userId, reschedCtx, selectedTimeIso);
         return {
           reply:
             `✅ Reagendamento concluído!\n\n` +
-            `Novo agendamento ID: ${newAppointment.id}\n` +
+            `Agendamento ID: ${rescheduledAppointment.id}\n` +
             `Serviço: ${ctx.serviceName}\n` +
             `Data: ${formatDatePtBR(reschedCtx.date!)}\n` +
             `Horário: ${reschedCtx.time}\n\n` +
             `Aguarde a confirmação do profissional.`,
           nextState: "AGUARDANDO_CONFIRMACAO",
           contextUpdate: {
-            appointmentId: newAppointment.id,
-            appointmentStatus: "pending",
-            appointmentPaid: false,
+            appointmentId: rescheduledAppointment.id,
+            appointmentStatus: rescheduledAppointment.status,
+            appointmentPaid: Boolean(rescheduledAppointment.payment_intent_id),
           },
-          appointmentId: newAppointment.id,
+          appointmentId: rescheduledAppointment.id,
         };
       }
 

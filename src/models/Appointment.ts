@@ -1,4 +1,4 @@
-import { DataTypes, Model, Optional } from "sequelize";
+import { DataTypes, Model, Optional, Transaction } from "sequelize";
 import { sequelize } from "../config/database";
 import { customAlphabet } from 'nanoid';
 
@@ -44,6 +44,7 @@ export interface IAppointment {
   status?: "pending" | "confirmed" | "completed" | "canceled";
   payment_intent_id?: string | null;
   createdAt?: Date;
+  updatedAt?: Date;
 }
 
 type AppointmentCreationalAttributes = Optional<IAppointment, "id" | "status" | "short_id">;
@@ -179,7 +180,7 @@ AppointmentModel.init(
     ],
     timestamps: true,
     hooks: {
-      beforeValidate: async (appointment: AppointmentModel) => {
+      beforeValidate: async (appointment: AppointmentModel, options) => {
         if (!appointment.short_id) {
           let shortId: string;
           let attempts = 0;
@@ -190,7 +191,7 @@ AppointmentModel.init(
             if (attempts > 100) {
               throw new Error('Não foi possível gerar short_id único após 100 tentativas');
             }
-            const existing = await AppointmentModel.findOne({ where: { short_id: shortId } });
+            const existing = await AppointmentModel.findOne({ where: { short_id: shortId }, transaction: (options as { transaction?: Transaction }).transaction });
             if (!existing) {
               appointment.short_id = shortId;
               unique = true;
