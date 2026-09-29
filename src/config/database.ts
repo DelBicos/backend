@@ -7,6 +7,7 @@ import pg from "pg"; // Importação essencial da POC
 // override: false — variáveis do Docker Compose têm prioridade sobre o .env copiado
 dotenv.config({ override: false });
 
+import logger, { logError } from "../utils/logger";
 /** Ambiente Docker Compose local (Postgres no serviço "postgres"). */
 function isRunningInDocker(): boolean {
   return (
@@ -28,8 +29,8 @@ function normalizeMongoUriForRuntime(uri: string): string {
     if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
       const previous = url.hostname;
       url.hostname = "mongo";
-      console.warn(
-        `⚠️ MongoDB: host "${previous}" substituído por "mongo" (Docker).`,
+      logger.warn(
+        `MongoDB: host "${previous}" substituído por "mongo" (Docker).`,
       );
     }
     return url.toString();
@@ -80,9 +81,6 @@ const getSSLOptions = (dialect: "mysql" | "postgres") => {
       rejectUnauthorized: false, // Necessário para o Neon
     };
   }
-  if (environment !== "development") {
-    return { ssl: "Amazon RDS" };
-  }
   return undefined;
 };
 
@@ -100,11 +98,11 @@ const generateSequelizeConnection = (): Sequelize => {
       dialectOptions: {
         ssl: getSSLOptions(dialect),
       },
-      logging: process.env.DB_LOGGING === "true" ? console.log : false,
+      logging: process.env.DB_LOGGING === "true" ? (sql: string) => logger.debug(sql) : false,
     });
   }
 
-  // Fallback para variáveis individuais (Docker/RDS)
+  // Fallback para variáveis individuais (Docker local / Azure Database)
   return new Sequelize(
     process.env.SEQUELIZE_DB_NAME || "neondb",
     process.env.SEQUELIZE_DB_USER || "neondb_owner",
@@ -117,7 +115,7 @@ const generateSequelizeConnection = (): Sequelize => {
       dialectOptions: {
         ssl: getSSLOptions(dialect),
       },
-      logging: process.env.DB_LOGGING === "true" ? console.log : false,
+      logging: process.env.DB_LOGGING === "true" ? (sql: string) => logger.debug(sql) : false,
     },
   );
 };
@@ -135,21 +133,19 @@ export async function connectDatabase(): Promise<void> {
     // O 'alter: true' atualiza o banco sem apagar dados se você mudar o Model
     if (environment === "development" || process.env.DB_SYNC === "true") {
       await sequelize.sync({ alter: true });
-      if (databaseUrl?.includes("aws")) {
-        console.log("✅ Tabelas sincronizadas no RDS.");
-      } else if (databaseUrl?.includes("neon")) {
-        console.log("✅ Tabelas sincronizadas no Neon.");
+      if (databaseUrl?.includes("neon")) {
+        logger.info("Tabelas sincronizadas no Neon.");
       } else {
-        console.log("✅ Tabelas sincronizadas no banco local.");
+        logger.info("Tabelas sincronizadas no banco local.");
       }
     }
 
     const dialect = getDialect();
-    console.log(
-      `✅ Database connection established [${dialect.toUpperCase()}]`,
+    logger.info(
+      `Database connection established [${dialect.toUpperCase()}]`,
     );
   } catch (error) {
-    console.error("❌ Unable to connect to the database:", error);
+    logError("Unable to connect to the database:", error);
     // process.exit(1); // Opcional: encerra se o banco falhar
   }
 }
@@ -158,15 +154,15 @@ export async function connectMongo() {
   try {
     const rawUri = process.env.MONGODB_URI;
     if (!rawUri)
-      return console.warn(
-        "⚠️ MONGODB_URI não definida. Logs salvos apenas localmente.",
+      return logger.warn(
+        "MONGODB_URI não definida. Logs salvos apenas localmente.",
       );
 
     const uri = normalizeMongoUriForRuntime(rawUri);
     await mongoose.connect(uri);
-    console.log("✅ Conectado ao MongoDB.");
+    logger.info("Conectado ao MongoDB.");
   } catch (error) {
-    console.error("❌ Erro MongoDB:", error);
+    logError("Erro MongoDB:", error);
   }
 }
 
@@ -191,13 +187,13 @@ function resolveChatMongoUri(): string {
       const withoutDb = logsUri.replace(/\/[^/]*$/, "");
       uri = `${withoutDb}/delbicos_chat`;
     }
-    console.warn(
-      `⚠️ MONGODB_CHAT_URI não definida. Chat derivado de MONGODB_URI.`,
+    logger.warn(
+      `MONGODB_CHAT_URI não definida. Chat derivado de MONGODB_URI.`,
     );
   } else {
     uri = "mongodb://localhost:27017/delbicos_chat";
-    console.warn(
-      "⚠️ MONGODB_CHAT_URI não definida. Chat usando fallback localhost.",
+    logger.warn(
+      "MONGODB_CHAT_URI não definida. Chat usando fallback localhost.",
     );
   }
 
@@ -206,18 +202,18 @@ function resolveChatMongoUri(): string {
 
 const chatMongoUri = resolveChatMongoUri();
 
-console.info(
-  `ℹ️ MongoDB chat: ${chatMongoUri.replace(/\/\/([^@]+@)?/, "//")}`,
+logger.info(
+  `MongoDB chat: ${chatMongoUri.replace(/\/\/([^@]+@)?/, "//")}`,
 );
 
 export const chatMongoConnection = mongoose.createConnection(chatMongoUri);
 
 chatMongoConnection.on("connected", () => {
-  console.log("✅ Conectado ao MongoDB (chat).");
+  logger.info("Conectado ao MongoDB (chat).");
 });
 
 chatMongoConnection.on("error", (error) => {
-  console.error("❌ Erro MongoDB (chat):", error);
+  logError("Erro MongoDB (chat):", error);
 });
 
 /** Indica se a conexão dedicada do chat está pronta para operações. */

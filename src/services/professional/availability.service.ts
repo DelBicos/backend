@@ -5,7 +5,8 @@
  * avulsas (/availabilities/:id) usam os mesmos casos de uso; nas aninhadas o
  * professionalId restringe o escopo da busca.
  */
-import { Op } from "sequelize";
+import { CreationAttributes, Op, WhereOptions } from "sequelize";
+import type { Body } from "../../utils/requestBody.util";
 import { ProfessionalAvailabilityModel } from "../../models/ProfessionalAvailability";
 import { ProfessionalModel } from "../../models/Professional";
 import { HttpError } from "../../errors/HttpError";
@@ -50,7 +51,7 @@ export async function hasOverlap(
   window: AvailabilityWindow,
   excludeId?: number,
 ): Promise<boolean> {
-  const where: any = {
+  const where: WhereOptions<ProfessionalAvailabilityModel> & Record<string, unknown> = {
     professional_id: professionalId,
     recurrence_pattern: window.recurrence_pattern,
     is_available: true,
@@ -78,7 +79,7 @@ async function assertOwner(professionalId: number, userId: number) {
 
 async function findScoped(rawId: unknown, rawProfessionalId?: unknown) {
   const id = parsePositiveId(rawId);
-  const where: any = { id };
+  const where: WhereOptions<ProfessionalAvailabilityModel> & Record<string, unknown> = { id };
   if (rawProfessionalId !== undefined) {
     where.professional_id = parsePositiveId(rawProfessionalId, "professionalId");
   }
@@ -104,32 +105,32 @@ export async function get(rawId: unknown, rawProfessionalId?: unknown) {
   return findScoped(rawId, rawProfessionalId);
 }
 
-export async function create(userId: number, rawProfessionalId: unknown, body: any) {
+export async function create(userId: number, rawProfessionalId: unknown, body: Body) {
   const professionalId = parsePositiveId(rawProfessionalId, "professionalId");
   await assertOwner(professionalId, userId);
 
   const payload = {
     professional_id: professionalId,
-    days_of_week: body.days_of_week,
-    start_day_of_month: body.start_day_of_month || null,
-    end_day_of_month: body.end_day_of_month || null,
-    start_day: body.start_day || null,
-    end_day: body.end_day || null,
-    start_time: body.start_time,
-    end_time: body.end_time,
+    days_of_week: body.days_of_week as string | undefined,
+    start_day_of_month: (body.start_day_of_month as number) || null,
+    end_day_of_month: (body.end_day_of_month as number) || null,
+    start_day: (body.start_day as string) || null,
+    end_day: (body.end_day as string) || null,
+    start_time: body.start_time as string,
+    end_time: body.end_time as string,
     is_available: typeof body.is_available === "boolean" ? body.is_available : true,
-    recurrence_pattern: body.recurrence_pattern || "none",
+    recurrence_pattern: (body.recurrence_pattern as string) || "none",
   };
 
   if (await hasOverlap(professionalId, payload)) throw HttpError.conflict(CONFLICT_MESSAGE);
-  return ProfessionalAvailabilityModel.create(payload as any);
+  return ProfessionalAvailabilityModel.create(payload as unknown as CreationAttributes<ProfessionalAvailabilityModel>);
 }
 
 /** Atualiza campos permitidos; a janela resultante tambem nao pode sobrepor outra. */
 export async function update(
   userId: number,
   rawId: unknown,
-  body: any,
+  body: Body,
   rawProfessionalId?: unknown,
 ) {
   const availability = await findScoped(rawId, rawProfessionalId);
@@ -140,7 +141,7 @@ export async function update(
     if (Object.prototype.hasOwnProperty.call(body, key)) changes[key] = body[key];
   }
 
-  const merged = { ...(availability.toJSON() as any), ...changes };
+  const merged = { ...availability.toJSON(), ...changes } as unknown as AvailabilityWindow & { is_available?: boolean };
   if (
     merged.is_available !== false &&
     (await hasOverlap(availability.professional_id, merged, availability.id))

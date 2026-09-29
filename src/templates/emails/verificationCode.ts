@@ -9,20 +9,33 @@ export function verificationCodeEmail(params: {
   code: string;
   expiresInMinutes: number;
   resend?: boolean;
-  /** "reset": codigo para criar uma nova senha. */
-  purpose?: "register" | "reset";
+  /**
+   * "reset": codigo para criar uma nova senha; "mfa": segundo fator no login
+   * ou na ativacao da verificacao em duas etapas.
+   */
+  purpose?: "register" | "reset" | "mfa";
 }) {
   const isReset = params.purpose === "reset";
+  const isMfa = params.purpose === "mfa";
   const name = escapeHtml(params.name);
   const code = escapeHtml(params.code);
   const year = new Date().getFullYear();
 
   const subject = isReset
     ? "Redefinição de senha - DelBicos"
-    : params.resend
+    : isMfa
+      ? "Seu código de acesso - DelBicos"
+      : params.resend
       ? "Novo Código de Verificação - DelBicos"
       : "Seu Código de Verificação";
-  const intro = isReset
+  const intro = isMfa
+    ? `<p style="color: #666666; font-size: 16px; line-height: 1.5;">
+                      Alguém está tentando entrar na sua conta do <strong>DelBicos</strong> com a verificação em duas etapas.
+                    </p>
+                    <p style="color: #666666; font-size: 16px; line-height: 1.5;">
+                      Se foi você, digite o código abaixo:
+                    </p>`
+    : isReset
     ? `<p style="color: #666666; font-size: 16px; line-height: 1.5;">
                       Recebemos um pedido para redefinir a senha da sua conta no <strong>DelBicos</strong>.
                     </p>
@@ -76,7 +89,7 @@ export function verificationCodeEmail(params: {
                     </p>
                     <hr style="border: 0; border-top: 1px solid #eeeeee; margin: 30px 0;">
                     <p style="color: #666666; font-size: 14px; line-height: 1.5;">
-                      Se você não solicitou este código, por favor ignore este e-mail. ${isReset ? "Sua senha continua a mesma." : "Nenhuma ação é necessária."}
+                      Se você não solicitou este código, por favor ignore este e-mail. ${isReset ? "Sua senha continua a mesma." : isMfa ? "Sua conta continua protegida; considere trocar a senha." : "Nenhuma ação é necessária."}
                     </p>
                   </td>
                 </tr>

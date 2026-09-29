@@ -1,5 +1,4 @@
 import { Router } from "express";
-import adminAuth from "../middlewares/admin.middleware";
 import { testEmailFallback } from "../controllers/email.controller";
 
 const emailRouter = Router();
@@ -15,7 +14,7 @@ const emailRouter = Router();
  * @swagger
  * /utilities/test-email-fallback:
  *   post:
- *     summary: Testa envio de e-mail via fallback Lambda (somente development)
+ *     summary: Testa envio de e-mail via fallback Azure Function (somente development)
  *     tags: [Utilities]
  *     requestBody:
  *       required: true
@@ -37,17 +36,16 @@ const emailRouter = Router();
  *                 type: string
  *     responses:
  *       200:
- *         description: E-mail encaminhado para Lambda com sucesso
+ *         description: E-mail encaminhado para Azure Function com sucesso
  *       400:
  *         description: Body invalido
  *       404:
  *         description: Endpoint indisponivel fora de development
  *       502:
- *         description: Falha na invocacao da Lambda
+ *         description: Falha na invocacao da Azure Function
  *       500:
  *         description: Erro interno
  */
-// Apenas administradores (e somente em development): evita relay aberto de e-mail.
-emailRouter.post("/test-email-fallback", adminAuth, testEmailFallback);
+emailRouter.post("/test-email-fallback", testEmailFallback);
 
 export default emailRouter;

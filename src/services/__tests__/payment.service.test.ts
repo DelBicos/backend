@@ -26,6 +26,8 @@ jest.mock("../../utils/logger", () => ({
 
 const mockPaymentIntentsCreate = jest.fn();
 const mockPaymentIntentsRetrieve = jest.fn();
+const mockPaymentIntentsCapture = jest.fn();
+const mockPaymentIntentsCancel = jest.fn();
 const mockRefundsCreate = jest.fn();
 
 jest.mock("stripe", () =>
@@ -33,6 +35,8 @@ jest.mock("stripe", () =>
     paymentIntents: {
       create: mockPaymentIntentsCreate,
       retrieve: mockPaymentIntentsRetrieve,
+      capture: mockPaymentIntentsCapture,
+      cancel: mockPaymentIntentsCancel,
     },
     refunds: { create: mockRefundsCreate },
   })),
@@ -94,6 +98,7 @@ describe("createPaymentIntent", () => {
       amount: 5000,
       currency: "brl",
       automatic_payment_methods: { enabled: true },
+      capture_method: "manual",
       metadata: { orderId: "order_abc" },
     });
   });
@@ -211,7 +216,7 @@ describe("createBookingPaymentIntent", () => {
 describe("confirmAndCreateAppointment", () => {
   const succeededIntent = (metadata: Record<string, string>) => ({
     id: "pi_1",
-    status: "succeeded",
+    status: "requires_capture",
     metadata,
   });
 
@@ -271,7 +276,7 @@ describe("confirmAndCreateAppointment", () => {
     expect(appt.end_time).toEqual(new Date("2030-01-10T14:30:00.000Z"));
   });
 
-  it("estorna quando o horario ficou ocupado antes da confirmacao", async () => {
+  it("libera a reserva quando o horario ficou ocupado antes da confirmacao", async () => {
     mocked(AppointmentModel.findOne).mockResolvedValue(null);
     mockPaymentIntentsRetrieve.mockResolvedValue(succeededIntent(baseMetadata));
     mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
@@ -279,9 +284,124 @@ describe("confirmAndCreateAppointment", () => {
     mocked(appointmentService.assertProfessionalIsFree).mockRejectedValue(
       HttpError.conflict("Horário ocupado."),
     );
-    mockRefundsCreate.mockResolvedValue({});
+    mockPaymentIntentsCancel.mockResolvedValue({});
 
     await expectHttpError(PaymentService.confirmAndCreateAppointment("pi_1", 1), 409);
+    expect(mockPaymentIntentsCancel).toHaveBeenCalledWith("pi_1");
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+});
+
+describe("capturePayment", () => {
+  it("cobra o valor reservado", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "requires_capture" });
+    mockPaymentIntentsCapture.mockResolvedValue({});
+    await PaymentService.capturePayment("pi_1");
+    expect(mockPaymentIntentsCapture).toHaveBeenCalledWith("pi_1");
+  });
+
+  it("e idempotente quando ja foi cobrado", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "succeeded" });
+    await PaymentService.capturePayment("pi_1");
+    expect(mockPaymentIntentsCapture).not.toHaveBeenCalled();
+  });
+
+  it("falha com 409 se a reserva foi cancelada ou expirou", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "canceled" });
+    await expectHttpError(PaymentService.capturePayment("pi_1"), 409);
+    expect(mockPaymentIntentsCapture).not.toHaveBeenCalled();
+  });
+
+  it("falha com 409 se o Stripe recusar a captura", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "requires_capture" });
+    mockPaymentIntentsCapture.mockRejectedValue(new Error("expired"));
+    await expectHttpError(PaymentService.capturePayment("pi_1"), 409);
+  });
+});
+
+describe("settleUnusedPayment", () => {
+  it("libera a reserva quando ainda nao foi cobrado", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "requires_capture" });
+    mockPaymentIntentsCancel.mockResolvedValue({});
+    await expect(PaymentService.settleUnusedPayment("pi_1")).resolves.toBe("released");
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+
+  it("estorna quando o valor ja foi cobrado", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "succeeded" });
+    mockRefundsCreate.mockResolvedValue({});
+    await expect(PaymentService.settleUnusedPayment("pi_1")).resolves.toBe("refunded");
     expect(mockRefundsCreate).toHaveBeenCalledWith({ payment_intent: "pi_1" });
+  });
+
+  it("nao faz nada se a reserva ja foi cancelada", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "canceled" });
+    await expect(PaymentService.settleUnusedPayment("pi_1")).resolves.toBe("released");
+    expect(mockPaymentIntentsCancel).not.toHaveBeenCalled();
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+  });
+
+  it("retorna failed quando o Stripe der erro", async () => {
+    mockPaymentIntentsRetrieve.mockRejectedValue(new Error("network"));
+    await expect(PaymentService.settleUnusedPayment("pi_1")).resolves.toBe("failed");
+  });
+});
+
+describe("settleWithRetention", () => {
+  it("reservado + retencao parcial: captura so o valor retido", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "requires_capture", amount: 10000 });
+    mockPaymentIntentsCapture.mockResolvedValue({});
+    const split = await PaymentService.settleWithRetention("pi_1", 20);
+    expect(mockPaymentIntentsCapture).toHaveBeenCalledWith("pi_1", { amount_to_capture: 2000 });
+    expect(split).toEqual({ status: "ok", paidCents: 10000, retainedCents: 2000, refundedCents: 8000 });
+  });
+
+  it("reservado + 0%: libera tudo", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "requires_capture", amount: 10000 });
+    mockPaymentIntentsCancel.mockResolvedValue({});
+    const split = await PaymentService.settleWithRetention("pi_1", 0);
+    expect(mockPaymentIntentsCancel).toHaveBeenCalledWith("pi_1");
+    expect(split.refundedCents).toBe(10000);
+  });
+
+  it("ja cobrado: estorna so a diferenca", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "succeeded", amount: 10000 });
+    mockRefundsCreate.mockResolvedValue({});
+    const split = await PaymentService.settleWithRetention("pi_1", 30);
+    expect(mockRefundsCreate).toHaveBeenCalledWith({ payment_intent: "pi_1", amount: 7000 });
+    expect(split).toMatchObject({ retainedCents: 3000, refundedCents: 7000 });
+  });
+
+  it("ja cobrado + 100%: nao estorna nada", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "succeeded", amount: 10000 });
+    const split = await PaymentService.settleWithRetention("pi_1", 100);
+    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    expect(split).toMatchObject({ retainedCents: 10000, refundedCents: 0 });
+  });
+
+  it("reservado + 100%: captura o valor total", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "requires_capture", amount: 10000 });
+    mockPaymentIntentsCapture.mockResolvedValue({});
+    await PaymentService.settleWithRetention("pi_1", 100);
+    expect(mockPaymentIntentsCapture).toHaveBeenCalledWith("pi_1", { amount_to_capture: 10000 });
+  });
+
+  it("retorna failed em erro do Stripe ou status inesperado", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue({ id: "pi_1", status: "requires_payment_method", amount: 100 });
+    await expect(PaymentService.settleWithRetention("pi_1", 0)).resolves.toMatchObject({ status: "failed" });
+    mockPaymentIntentsRetrieve.mockRejectedValue(new Error("boom"));
+    await expect(PaymentService.settleWithRetention("pi_1", 0)).resolves.toMatchObject({ status: "failed" });
+  });
+});
+
+describe("refundAmount", () => {
+  it("estorna o valor pedido", async () => {
+    mockRefundsCreate.mockResolvedValue({});
+    await expect(PaymentService.refundAmount("pi_1", 1234)).resolves.toBe(true);
+    expect(mockRefundsCreate).toHaveBeenCalledWith({ payment_intent: "pi_1", amount: 1234 });
+  });
+  it("retorna false quando o Stripe falha", async () => {
+    mockRefundsCreate.mockRejectedValue(new Error("x"));
+    await expect(PaymentService.refundAmount("pi_1", 1)).resolves.toBe(false);
   });
 });

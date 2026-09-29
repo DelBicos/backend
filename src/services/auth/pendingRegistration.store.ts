@@ -9,13 +9,24 @@ export const CODE_TTL_MS = 10 * 60 * 1000;
 export const MAX_VERIFY_ATTEMPTS = 5;
 const MAX_ACTIVE_CODES = 3;
 
+export interface PendingAddress {
+  postal_code: string;
+  street: string;
+  number: string;
+  complement?: string;
+  neighborhood: string;
+  city: string;
+  state: string;
+  country_iso?: string;
+}
+
 export interface PendingUserData {
   name: string;
   email: string;
   phone?: string;
   passwordHash: string;
   cpf: string;
-  address: Record<string, any>;
+  address: PendingAddress;
 }
 
 interface Entry<T> {

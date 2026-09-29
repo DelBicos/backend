@@ -24,6 +24,7 @@ import {
 } from "./credentials";
 import {
   CODE_TTL_MS,
+  PendingAddress,
   PendingRegistrationStore,
   PendingUserData,
 } from "./pendingRegistration.store";
@@ -56,7 +57,36 @@ export interface RegistrationInput {
   password?: unknown;
   phone?: unknown;
   cpf?: unknown;
-  address?: any;
+  address?: unknown;
+}
+
+const optionalText = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value.trim() : undefined;
+
+/** Aceita so os campos conhecidos do endereco; o banco exige todos, menos complemento e pais. */
+function parseAddress(value: unknown): PendingAddress {
+  const raw = (typeof value === "object" && value !== null ? value : {}) as Record<string, unknown>;
+  const postal_code = optionalText(raw.postal_code);
+  const street = optionalText(raw.street);
+  const number = raw.number === undefined || raw.number === null ? undefined : optionalText(String(raw.number));
+  const neighborhood = optionalText(raw.neighborhood);
+  const city = optionalText(raw.city);
+  const state = optionalText(raw.state);
+  if (!postal_code || !street || !number || !neighborhood || !city || !state) {
+    throw HttpError.badRequest(
+      "Endereço incompleto. CEP, rua, número, bairro, cidade e estado são obrigatórios.",
+    );
+  }
+  return {
+    postal_code,
+    street,
+    number,
+    complement: optionalText(raw.complement),
+    neighborhood,
+    city,
+    state,
+    country_iso: optionalText(raw.country_iso),
+  };
 }
 
 /** Valida os dados, guarda o cadastro pendente e envia o codigo por e-mail. */
@@ -64,10 +94,7 @@ export async function startRegistration(input: RegistrationInput) {
   if (!input.name || !input.email || !input.password || !input.cpf) {
     throw HttpError.badRequest("Campos obrigatórios ausentes (nome, email, senha, cpf).");
   }
-  const address = input.address;
-  if (!address || !address.postal_code || !address.street || !address.number) {
-    throw HttpError.badRequest("Endereço incompleto. CEP, Rua e Número são obrigatórios.");
-  }
+  const address = parseAddress(input.address);
 
   const email = normalizeEmail(input.email);
   const password = assertPasswordPolicy(input.password);

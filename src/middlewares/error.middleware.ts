@@ -27,10 +27,10 @@ export function errorHandler(
   }
 
   // JSON malformado enviado pelo cliente (body-parser)
-  if ((err as any)?.type === "entity.parse.failed") {
+  if (errorType(err) === "entity.parse.failed") {
     return res.status(400).json({ error: "JSON inválido no corpo da requisição" });
   }
-  if ((err as any)?.type === "entity.too.large") {
+  if (errorType(err) === "entity.too.large") {
     return res.status(413).json({ error: "Corpo da requisição muito grande" });
   }
 
@@ -39,4 +39,8 @@ export function errorHandler(
     path: req.originalUrl,
   });
   return res.status(500).json({ error: "Erro interno do servidor" });
+}
+
+function errorType(err: unknown): unknown {
+  return typeof err === "object" && err !== null ? (err as { type?: unknown }).type : undefined;
 }

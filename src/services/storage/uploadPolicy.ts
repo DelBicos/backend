@@ -30,7 +30,12 @@ export function buildObjectKey(folder: string, userId: number, fileType: unknown
   return `${folder}/${userId}/${randomUUID()}.${ext}`;
 }
 
-/** URLs de imagem aceitas para salvar no perfil. */
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
+/**
+ * URLs de imagem aceitas para salvar no perfil: https. Fora de producao,
+ * http em localhost tambem vale (emulador Azurite do Azure Storage).
+ */
 export function assertHttpsUrl(value: unknown, field: string): string {
   if (typeof value !== "string") throw HttpError.badRequest(`${field} inválido`);
   let url: URL;
@@ -39,7 +44,11 @@ export function assertHttpsUrl(value: unknown, field: string): string {
   } catch {
     throw HttpError.badRequest(`${field} inválido`);
   }
-  if (url.protocol !== "https:") {
+  const localDev =
+    url.protocol === "http:" &&
+    LOCAL_HOSTS.has(url.hostname) &&
+    (process.env.ENVIRONMENT || process.env.NODE_ENV) !== "production";
+  if (url.protocol !== "https:" && !localDev) {
     throw HttpError.badRequest(`${field} deve usar https`);
   }
   return url.toString();

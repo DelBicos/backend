@@ -3,24 +3,27 @@
  * faceis de testar isoladamente.
  */
 import { HttpError } from "../../errors/HttpError";
+import { MIN_ADVANCE_HOURS } from "../../constants/booking";
 import { distanceKm, toCoordinate } from "../../utils/geo.util";
 
-export const MIN_ADVANCE_DAYS = 2;
 export const MAX_REVIEW_LENGTH = 500;
 
-export type AppointmentStatus = "pending" | "confirmed" | "completed" | "canceled";
+export type AppointmentStatus =
+  | "pending"
+  | "confirmed"
+  | "completed"
+  | "canceled"
+  | "no_show";
 
-/** Agendamentos exigem no minimo 2 dias (a partir de hoje, 00:00) de antecedencia. */
+/** Agendamentos exigem no minimo 12 horas de antecedencia. */
 export function assertMinimumAdvance(start: Date, now: Date = new Date()): void {
   if (Number.isNaN(start.getTime())) {
     throw HttpError.badRequest("Data/hora de início inválida");
   }
-  const minDate = new Date(now);
-  minDate.setHours(0, 0, 0, 0);
-  minDate.setDate(minDate.getDate() + MIN_ADVANCE_DAYS);
-  if (start < minDate) {
+  const earliest = now.getTime() + MIN_ADVANCE_HOURS * 3_600_000;
+  if (start.getTime() < earliest) {
     throw HttpError.badRequest(
-      "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
+      `Os agendamentos precisam ser feitos com no mínimo ${MIN_ADVANCE_HOURS} horas de antecedência.`,
     );
   }
 }

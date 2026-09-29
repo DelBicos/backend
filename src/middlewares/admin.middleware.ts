@@ -3,6 +3,7 @@ import { AdminModel } from "../models/Admin";
 import { ITokenPayload } from "../interfaces/authentication.interface";
 import { extractBearerToken, verifyToken } from "../utils/jwt.util";
 
+import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 /** Exige JWT valido de um usuario cadastrado como administrador. */
 export default async function adminAuth(
   req: Request,
@@ -30,7 +31,7 @@ export default async function adminAuth(
         .status(403)
         .json({ msg: "Acesso negado: somente administradores" });
 
-    (req as any).user = user;
+    (req as AuthenticatedRequest).user = user;
     next();
   } catch (error) {
     next(error);

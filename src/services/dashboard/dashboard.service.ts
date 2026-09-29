@@ -58,7 +58,11 @@ export async function getKpis(userId: number) {
 
   // Aliases em snake_case: o Postgres converte identificadores sem aspas para
   // minusculas, entao "totalServices" voltava como "totalservices" (KPI zerado).
-  const [row]: any[] = await sequelize.query(
+  const [row] = await sequelize.query<{
+    total_services: string | number | null;
+    total_earnings: string | number | null;
+    avg_rating: string | number | null;
+  }>(
     `
       SELECT
         COUNT(*) AS total_services,
@@ -87,7 +91,7 @@ export async function getEarningsOverTime(userId: number, query: { from?: unknow
   const { from, to } = resolvePeriod(query);
   const month = monthExpression(sequelize.getDialect());
 
-  const rows: any[] = await sequelize.query(
+  const rows = await sequelize.query<{ month: string; total: string | number | null }>(
     `
       SELECT ${month} AS month,
              SUM(COALESCE(a.final_price, s.price)) AS total
@@ -116,7 +120,7 @@ export async function getServicesByCategory(
   const professionalId = await requireProfessionalId(userId);
   const { from, to } = resolvePeriod(query);
 
-  const rows: any[] = await sequelize.query(
+  const rows = await sequelize.query<{ category: string; count: string | number }>(
     `
       SELECT c.title AS category, COUNT(*) AS count
       FROM appointment a

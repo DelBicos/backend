@@ -5,6 +5,7 @@ import { cancelBotAppointment, createBotAppointment } from "./appointmentActions
 import { formatDatePtBR } from "../../../utils/date.util";
 import { logError } from "../../../utils/logger";
 
+import { errorMessage } from "../../../utils/errors.util";
 export class ConfirmacaoState implements BotStateNode {
   public async handle(
     userMessage: string,
@@ -102,10 +103,10 @@ export class ConfirmacaoState implements BotStateNode {
         },
         appointmentId: appointment.id,
       };
-    } catch (error: any) {
+    } catch (error) {
       logError("Bot: erro ao executar ação de confirmação", error, { userId });
       return {
-        reply: `❌ ${error.message ?? "Ocorreu um erro. Por favor, tente novamente."}`,
+        reply: `❌ ${errorMessage(error, "Ocorreu um erro. Por favor, tente novamente.")}`,
         nextState: pendingAction === "CREATE" || pendingAction === "RESCHEDULE"
           ? "COLETANDO_HORARIO"
           : "INICIO",

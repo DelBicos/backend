@@ -7,6 +7,13 @@
  *   pode confirma-lo;
  * - a confirmacao e idempotente: o mesmo PaymentIntent nunca gera dois
  *   agendamentos.
+ *
+ * Ciclo do dinheiro (autorizar agora, cobrar so quando o profissional aceita):
+ * 1. o cliente confirma o cartao -> Stripe "requires_capture" (valor reservado);
+ * 2. profissional aceita -> capturePayment() cobra de fato;
+ * 3. profissional recusa / pedido expira -> settleUnusedPayment() libera a
+ *    reserva (nada e cobrado, sem taxa de estorno).
+ * Se o valor ja tiver sido capturado, settleUnusedPayment() faz o estorno.
  */
 import Stripe from "stripe";
 import { AppointmentModel } from "../models/Appointment";
@@ -20,7 +27,12 @@ import { ensureChatRoomForAppointment } from "../utils/chatRoom";
 import logger from "../utils/logger";
 import { syncBotSessionsForAppointmentStatus } from "./botAppointmentStatus.service";
 
+import { errorMessage } from "../utils/errors.util";
+import { PaymentSettlementOperations } from "./payment/settlement";
+export type { PaymentSettlement, PaymentSplit } from "./payment/settlement";
+import type { PaymentSplit } from "./payment/settlement";
 const CURRENCY = "brl";
+
 
 interface PaymentIntentParams {
   amount: number;
@@ -121,6 +133,8 @@ async function notifyPaymentConfirmation(
 }
 
 export const PaymentService = {
+  ...PaymentSettlementOperations,
+
   /** Cria um PaymentIntent no Stripe e retorna o client_secret. */
   createPaymentIntent: async ({
     amount,
@@ -132,6 +146,8 @@ export const PaymentService = {
         amount: Math.round(amount),
         currency,
         automatic_payment_methods: { enabled: true },
+        // Reserva o valor no cartao; a cobranca so ocorre na aceitacao.
+        capture_method: "manual",
         metadata: metadata as Stripe.MetadataParam,
       });
 
@@ -139,13 +155,13 @@ export const PaymentService = {
         throw new Error("Falha ao obter o identificador de pagamento do provedor.");
       }
       return paymentIntent.client_secret;
-    } catch (error: any) {
+    } catch (error) {
       logger.error("[PaymentService] Erro na API do Stripe ao criar Payment Intent", {
-        reason: error?.message,
+        reason: errorMessage(error),
       });
       throw new Error(
         `Erro ao iniciar o processo de pagamento: ${
-          error.message || "Erro desconhecido do provedor de pagamento."
+          errorMessage(error, "Erro desconhecido do provedor de pagamento.")
         }`,
       );
     }
@@ -225,8 +241,8 @@ export const PaymentService = {
     let paymentIntent: Stripe.PaymentIntent;
     try {
       paymentIntent = await getStripe().paymentIntents.retrieve(paymentIntentId);
-    } catch (error: any) {
-      throw HttpError.badRequest(`Erro ao verificar pagamento: ${error.message}`);
+    } catch (error) {
+      throw HttpError.badRequest(`Erro ao verificar pagamento: ${errorMessage(error)}`);
     }
 
     const metadata = paymentIntent.metadata || {};
@@ -235,8 +251,9 @@ export const PaymentService = {
     }
     if (alreadyLinked) return alreadyLinked;
 
-    if (paymentIntent.status !== "succeeded") {
-      throw HttpError.badRequest("O pagamento não foi concluído com sucesso.");
+    // "requires_capture" = valor reservado; "succeeded" cobre pagamentos antigos.
+    if (!["requires_capture", "succeeded"].includes(paymentIntent.status)) {
+      throw HttpError.badRequest("O pagamento não foi autorizado.");
     }
 
     const { professionalId, serviceId, selectedTime, addressId } = metadata;
@@ -281,17 +298,17 @@ export const PaymentService = {
         isNewAppointment = true;
         await ensureChatRoomForAppointment(appointment);
       }
-    } catch (error: any) {
-      // Pagamento aprovado mas agendamento nao pode ser gravado: estorna.
-      logger.error("[PaymentService] Falha ao gravar agendamento pago; estornando", {
+    } catch (error) {
+      // Pagamento autorizado mas agendamento nao pode ser gravado: libera.
+      logger.error("[PaymentService] Falha ao gravar agendamento pago; liberando", {
         paymentIntentId,
-        reason: error?.message,
+        reason: errorMessage(error),
       });
-      await PaymentService.refundPaymentIntent(paymentIntentId);
+      await PaymentService.settleUnusedPayment(paymentIntentId);
       if (error instanceof HttpError) {
         throw new HttpError(
           error.status,
-          `${error.message} O pagamento foi estornado.`,
+          `${error.message} Nenhum valor foi cobrado.`,
         );
       }
       throw new Error("Erro ao salvar o agendamento no banco de dados.");
@@ -307,9 +324,9 @@ export const PaymentService = {
     try {
       // O pagamento ja foi persistido; falha no push nao desfaz nada.
       await syncBotSessionsForAppointmentStatus(appointment);
-    } catch (syncError: any) {
+    } catch (syncError) {
       logger.warn("[PaymentService] Falha ao sincronizar status no chatbot", {
-        reason: syncError?.message,
+        reason: errorMessage(syncError),
       });
     }
     return appointment;
@@ -342,17 +359,4 @@ export const PaymentService = {
     return receiptUrl;
   },
 
-  refundPaymentIntent: async (paymentIntentId: string): Promise<boolean> => {
-    try {
-      await getStripe().refunds.create({ payment_intent: paymentIntentId });
-      logger.info("[PaymentService] Reembolso acionado no Stripe", { paymentIntentId });
-      return true;
-    } catch (error: any) {
-      logger.error("[PaymentService] Erro ao processar reembolso no Stripe", {
-        paymentIntentId,
-        reason: error?.message,
-      });
-      return false;
-    }
-  },
 };

@@ -22,12 +22,17 @@ const expectHttpError = (fn: () => unknown, status: number) => {
 describe("assertMinimumAdvance", () => {
   const now = new Date("2026-09-24T15:00:00");
 
-  it("rejeita agendamento para amanha (menos de 2 dias)", () => {
-    expectHttpError(() => assertMinimumAdvance(new Date("2026-09-25T10:00:00"), now), 400);
+  it("rejeita agendamento com menos de 12 horas de antecedencia", () => {
+    expectHttpError(() => assertMinimumAdvance(new Date("2026-09-25T02:59:00"), now), 400);
+    expectHttpError(() => assertMinimumAdvance(new Date("2026-09-24T16:00:00"), now), 400);
   });
 
-  it("aceita exatamente o limite (daqui a 2 dias, 00:00)", () => {
-    expect(() => assertMinimumAdvance(new Date("2026-09-26T00:00:00"), now)).not.toThrow();
+  it("aceita exatamente o limite (agora + 12 horas)", () => {
+    expect(() => assertMinimumAdvance(new Date("2026-09-25T03:00:00"), now)).not.toThrow();
+  });
+
+  it("aceita agendamento para o dia seguinte com folga", () => {
+    expect(() => assertMinimumAdvance(new Date("2026-09-25T10:00:00"), now)).not.toThrow();
   });
 
   it("rejeita data invalida", () => {

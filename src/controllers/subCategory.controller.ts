@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import { SubCategoryModel } from "../models/Subcategory";
 import { CategoryModel } from "../models/Category";
 
+import { logError } from "../utils/logger";
+import { errorMessage } from "../utils/errors.util";
 export const listAllSubCategories = async (req: Request, res: Response) => {
   try {
     const subcategories = await SubCategoryModel.findAll({
@@ -9,8 +11,8 @@ export const listAllSubCategories = async (req: Request, res: Response) => {
       order: [["title", "ASC"]],
     });
     return res.json(subcategories);
-  } catch (error: any) {
-    console.error("Erro ao listar todas as subcategorias:", error);
+  } catch (error) {
+    logError("Erro ao listar todas as subcategorias:", error);
     return res.status(500).json({ error: "Erro interno do servidor" });
   }
 };
@@ -38,11 +40,11 @@ export const getAllSubCategories = async (req: Request, res: Response) => {
     });
 
     return res.json(subcategories);
-  } catch (error: any) {
-    console.error("Erro ao buscar subcategorias:", error);
+  } catch (error) {
+    logError("Erro ao buscar subcategorias:", error);
     return res.status(500).json({
       error: "Erro interno do servidor",
-      message: error.message,
+      message: errorMessage(error),
     });
   }
 };

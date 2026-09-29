@@ -10,7 +10,14 @@ const data: PendingUserData = {
   email: "ana@x.com",
   passwordHash: "$2a$hash",
   cpf: "12345678901",
-  address: {},
+  address: {
+    postal_code: "01310100",
+    street: "Av. Paulista",
+    number: "1000",
+    neighborhood: "Bela Vista",
+    city: "São Paulo",
+    state: "SP",
+  },
 };
 
 describe("PendingRegistrationStore", () => {

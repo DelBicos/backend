@@ -36,7 +36,13 @@ export function stringSimilarity(s1: string, s2: string): number {
   return (longer.length - levenshteinDistance(longer, shorter)) / longer.length;
 }
 
-export function calculateMatchScore(svc: any, normalizedSearch: string, searchKeywords: string[]): number {
+/** Servico com o que a busca precisa (titulo, subcategoria e categoria). */
+export interface MatchableService {
+  title: string;
+  Subcategory?: { title: string; Category?: { title: string } | null } | null;
+}
+
+export function calculateMatchScore(svc: MatchableService, normalizedSearch: string, searchKeywords: string[]): number {
   const svcTitleNorm = normalizeText(svc.title);
   const subcatTitleNorm = svc.Subcategory ? normalizeText(svc.Subcategory.title) : "";
   const catTitleNorm = svc.Subcategory && svc.Subcategory.Category ? normalizeText(svc.Subcategory.Category.title) : "";

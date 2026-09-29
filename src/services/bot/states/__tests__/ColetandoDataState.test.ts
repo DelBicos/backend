@@ -101,10 +101,11 @@ describe("ColetandoDataState", () => {
   });
 
   it.each(["sábado que vem", "proximo sabado"])(
-    'continua o agendamento com "%s" quando o sábado imediato viola as 48 horas',
+    'continua o agendamento com "%s" quando o sábado imediato viola as 12 horas',
     async (message) => {
     jest.useFakeTimers();
-    jest.setSystemTime(new Date("2026-09-18T15:00:00.000Z"));
+    // Sábado 12:00 em São Paulo: o próprio sábado já não cumpre as 12 horas.
+    jest.setSystemTime(new Date("2026-09-19T15:00:00.000Z"));
 
     try {
       (ServiceModel.findAll as jest.Mock).mockResolvedValue([

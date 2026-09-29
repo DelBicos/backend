@@ -2,7 +2,7 @@
  * Casos de uso do agendamento. Concentra regras de negocio e autorizacao;
  * os controllers apenas traduzem HTTP <-> chamadas deste modulo.
  */
-import { Op, Transaction } from "sequelize";
+import { Includeable, Op, Transaction } from "sequelize";
 import { AppointmentModel } from "../../models/Appointment";
 import { UserModel } from "../../models/User";
 import { ClientModel } from "../../models/Client";
@@ -11,6 +11,7 @@ import { ServiceModel } from "../../models/Service";
 import { AddressModel } from "../../models/Address";
 import { SubCategoryModel } from "../../models/Subcategory";
 import { HttpError } from "../../errors/HttpError";
+import { assertSlotInAgenda } from "../availability.service";
 import logger from "../../utils/logger";
 import {
   ensureChatRoomForAppointment,
@@ -37,6 +38,7 @@ import {
   notifyReviewReceived,
 } from "./appointment.notifications";
 
+import type { AppointmentWithRelations } from "./appointment.types";
 const USER_PUBLIC_ATTRIBUTES = ["id", "name", "avatar_uri", "phone", "email"];
 
 /** Statuses que ocupam a agenda do profissional. */
@@ -52,7 +54,7 @@ const BLOCKING_STATUSES = ["pending", "confirmed"];
  */
 export async function findAppointmentByPublicId(
   publicId: string | number,
-  options: { include?: any[]; transaction?: Transaction } = {},
+  options: { include?: Includeable[]; transaction?: Transaction } = {},
 ): Promise<AppointmentModel | null> {
   const raw = String(publicId ?? "").trim();
   if (!raw) return null;
@@ -71,7 +73,7 @@ export async function findAppointmentByPublicId(
 
 async function requireAppointment(
   publicId: string | number,
-  include?: any[],
+  include?: Includeable[],
 ): Promise<AppointmentModel> {
   const appointment = await findAppointmentByPublicId(publicId, { include });
   if (!appointment) throw HttpError.notFound("Agendamento não encontrado");
@@ -103,7 +105,7 @@ async function requireResponsibleProfessional(
 
 /** No app, o "id" do agendamento e o short_id. */
 export function toPublicAppointment(appointment: AppointmentModel) {
-  const json = appointment.toJSON() as any;
+  const json = { ...appointment.toJSON() } as Record<string, unknown>;
   json.id = json.short_id;
   delete json.short_id;
   json.payment_method = "Cartão de Crédito";
@@ -116,9 +118,11 @@ export async function assertProfessionalIsFree(
   start: Date,
   end: Date,
   transaction?: Transaction,
+  excludeAppointmentId?: number,
 ): Promise<void> {
   const conflict = await AppointmentModel.findOne({
     where: {
+      ...(excludeAppointmentId ? { id: { [Op.ne]: excludeAppointmentId } } : {}),
       professional_id: professionalId,
       status: { [Op.in]: BLOCKING_STATUSES },
       start_time: { [Op.lt]: end },
@@ -175,18 +179,24 @@ export async function validateBookingRequest(params: {
     throw HttpError.badRequest("Você não pode agendar um serviço consigo mesmo");
   }
 
-  const mainAddress = (professional as any).MainAddress;
+  const mainAddress = (professional as AppointmentWithRelations["Professional"])?.MainAddress;
   assertWithinServiceRadius({
     professionalLat: mainAddress?.lat,
     professionalLng: mainAddress?.lng,
     clientLat: address.lat,
     clientLng: address.lng,
-    radiusKm: (professional as any).service_radius_km,
+    radiusKm: (professional as AppointmentWithRelations["Professional"])?.service_radius_km ?? undefined,
   });
 
   const durationMinutes = Number(service.duration) || 60;
   const end = new Date(start.getTime() + durationMinutes * 60_000);
   assertValidPeriod(start, end);
+  await assertSlotInAgenda({
+    professionalId: professional.id,
+    start,
+    durationMinutes,
+    serviceId: service.id,
+  });
 
   return { client, professional, service, address, end };
 }
@@ -299,11 +309,28 @@ export async function listAppointmentsForUser(
   return appointments.map(toPublicAppointment);
 }
 
-/** Profissional aceita um agendamento pendente. */
+/**
+ * Devolve o dinheiro de um agendamento que nao vai acontecer e informa o
+ * resultado para a notificacao ("processing" = nao foi possivel confirmar).
+ */
+export async function returnPaymentFor(appointment: {
+  payment_intent_id?: string | null;
+}): Promise<"none" | "released" | "refunded" | "processing"> {
+  if (!appointment.payment_intent_id) return "none";
+  const settlement = await PaymentService.settleUnusedPayment(appointment.payment_intent_id);
+  return settlement === "failed" ? "processing" : settlement;
+}
+
+/** Profissional aceita um agendamento pendente (cobra o valor reservado). */
 export async function confirmAppointment(userId: number, publicId: string) {
   const appointment = await requireAppointment(publicId);
   await requireResponsibleProfessional(appointment, userId, "aceitar");
   assertStatus(appointment.status, "pending", "aceitar");
+
+  // Cobra antes de confirmar: se a reserva expirou, o pedido segue pendente.
+  if (appointment.payment_intent_id) {
+    await PaymentService.capturePayment(appointment.payment_intent_id);
+  }
 
   appointment.status = "confirmed";
   await appointment.save();
@@ -319,7 +346,8 @@ export async function confirmAppointment(userId: number, publicId: string) {
 
 /**
  * Profissional responde a um agendamento pendente (aceitar ou recusar).
- * Na recusa, estorna o pagamento (se houver) e arquiva o chat.
+ * Na aceitacao, cobra o valor reservado; na recusa, libera a reserva no
+ * cartao (ou estorna, se ja cobrado) e arquiva o chat.
  */
 export async function respondToAppointment(userId: number, publicId: string, status: unknown) {
   const response = assertProfessionalResponse(status);
@@ -330,21 +358,27 @@ export async function respondToAppointment(userId: number, publicId: string, sta
   await requireResponsibleProfessional(appointment, userId, "alterar");
   assertStatus(appointment.status, "pending", "alterar");
 
+  if (response === "confirmed" && appointment.payment_intent_id) {
+    await PaymentService.capturePayment(appointment.payment_intent_id);
+  }
+
   appointment.status = response;
+  if (response === "canceled") {
+    appointment.canceled_by = "professional";
+    appointment.canceled_at = new Date();
+    appointment.cancellation_reason = "Pedido recusado pelo profissional";
+    appointment.retained_cents = 0;
+  }
   await appointment.save();
   await syncChatRoomStatusForAppointment(appointment.id, response);
 
-  const clientUserId: number | undefined = (appointment as any).Client?.user_id;
-  const serviceTitle: string | undefined = (appointment as any).Service?.title;
+  const clientUserId: number | undefined = (appointment as AppointmentWithRelations).Client?.user_id;
+  const serviceTitle: string | undefined = (appointment as AppointmentWithRelations).Service?.title;
 
   if (response === "confirmed") {
     await notifyAppointmentAccepted(clientUserId, serviceTitle, appointment.id);
   } else {
-    let refund: "none" | "refunded" | "processing" = "none";
-    if (appointment.payment_intent_id) {
-      const refunded = await PaymentService.refundPaymentIntent(appointment.payment_intent_id);
-      refund = refunded ? "refunded" : "processing";
-    }
+    const refund = await returnPaymentFor(appointment);
     await notifyAppointmentRejected(clientUserId, serviceTitle, appointment.id, refund);
   }
 
@@ -377,8 +411,8 @@ export async function completeAppointment(
   await syncBotSessionsForAppointmentStatus(appointment);
 
   await notifyAppointmentCompleted(
-    (appointment as any).Client?.user_id,
-    (appointment as any).Service?.title,
+    (appointment as AppointmentWithRelations).Client?.user_id,
+    (appointment as AppointmentWithRelations).Service?.title,
     appointment.id,
   );
 
@@ -397,14 +431,14 @@ export async function reviewAppointment(
     { model: ClientModel, as: "Client", attributes: ["id", "user_id"] },
   ]);
 
-  if ((appointment as any).Client?.user_id !== userId) {
+  if ((appointment as AppointmentWithRelations).Client?.user_id !== userId) {
     throw HttpError.forbidden("Você não tem permissão para avaliar este agendamento");
   }
   assertStatus(appointment.status, "completed", "avaliar");
 
   const isUpdate = appointment.rating !== null && appointment.rating !== undefined;
   appointment.rating = rating;
-  appointment.review = review as any;
+  appointment.review = review as string;
   await appointment.save();
 
   if (!isUpdate) {
@@ -459,8 +493,8 @@ export async function getAppointmentInvoice(userId: number, publicId: string) {
     throw HttpError.notFound("Agendamento não encontrado ou não pertence a este usuário.");
   }
 
-  const data: any = appointment;
-  const price = parseFloat(data.final_price ?? data.Service?.price ?? "0");
+  const data = appointment as AppointmentWithRelations;
+  const price = parseFloat(String(data.final_price ?? data.Service?.price ?? "0"));
   const address = data.Address;
 
   return {

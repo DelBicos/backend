@@ -13,7 +13,7 @@ function requireUserId(req: AuthenticatedRequest): number {
 }
 
 export const AvatarController = {
-  /** Lista todos os arquivos do bucket: restrito a administradores na rota. */
+  /** Lista os arquivos do container: restrito a administradores na rota. */
   listFiles: asyncHandler(async (_req: Request, res: Response) => {
     res.json(await getStorageAdapter().listFiles());
   }),
@@ -25,11 +25,12 @@ export const AvatarController = {
   /** URL de upload do avatar; a chave e gerada no servidor (avatars/<userId>/<uuid>). */
   getPresignedUrl: asyncHandler<AuthenticatedRequest>(async (req, res: Response) => {
     const key = buildObjectKey("avatars", requireUserId(req), req.body?.fileType);
-    const { uploadUrl, fileUrl } = await getStorageAdapter().generateUploadUrl(
-      key,
-      String(req.body.fileType).toLowerCase(),
-    );
-    res.json({ uploadUrl, fileUrl });
+    const { uploadUrl, fileUrl, uploadHeaders } =
+      await getStorageAdapter().generateUploadUrl(
+        key,
+        String(req.body.fileType).toLowerCase(),
+      );
+    res.json({ uploadUrl, fileUrl, uploadHeaders: uploadHeaders ?? {} });
   }),
 
   getUserAvatar: asyncHandler(async (req: Request, res: Response) => {

@@ -6,6 +6,7 @@ jest.mock("../../../models/User");
 jest.mock("../../../models/Client");
 jest.mock("../../../models/Address");
 jest.mock("../../../models/Professional");
+jest.mock("../../../models/Admin");
 jest.mock("../../../models/Notification");
 jest.mock("../../email.service", () => ({
   EmailService: { sendTransactionalEmail: jest.fn() },
@@ -23,6 +24,7 @@ import { UserModel } from "../../../models/User";
 import { ClientModel } from "../../../models/Client";
 import { AddressModel } from "../../../models/Address";
 import { ProfessionalModel } from "../../../models/Professional";
+import { AdminModel } from "../../../models/Admin";
 import { EmailService } from "../../email.service";
 import { saveLoginLog } from "../../loginLog.service";
 import { assertPasswordPolicy, normalizeEmail, verifyPassword } from "../credentials";
@@ -106,11 +108,47 @@ describe("login", () => {
     mocked(ClientModel.findOne).mockResolvedValue({ id: 7, cpf: "123", main_address_id: null });
     mocked(ProfessionalModel.findOne).mockResolvedValue({ id: 20, cpf: "123", description: "d" });
 
-    const result = await account.login(req, { email: " ANA@x.com ", password: "segredo1" });
+    const result: any = await account.login(req, { email: " ANA@x.com ", password: "segredo1" });
 
     expect(result.token).toEqual(expect.any(String));
     expect(result.user).toMatchObject({ id: 1, client_id: 7, professional_id: 20 });
+    expect(result.user.admin).toBe(false);
     expect(saveLoginLog).toHaveBeenCalled();
+  });
+
+  it("marca administradores para o app abrir o painel", async () => {
+    mocked(UserModel.findOne).mockResolvedValue(user());
+    mocked(ClientModel.findOne).mockResolvedValue({ id: 7, cpf: "123", main_address_id: null });
+    mocked(ProfessionalModel.findOne).mockResolvedValue(null);
+    mocked(AdminModel.findOne).mockResolvedValue({ id: 1 });
+
+    const result: any = await account.login(req, { email: "ana@x.com", password: "segredo1" });
+    expect(result.user.admin).toBe(true);
+  });
+});
+
+describe("login de administrador sem cadastro de cliente", () => {
+  it("abre sessao do painel", async () => {
+    mocked(UserModel.findOne).mockResolvedValue({
+      id: 9, name: "Admin", email: "admin@x.com", phone: "1", active: true,
+      password: bcrypt.hashSync("segredo1", 4),
+    });
+    mocked(ClientModel.findOne).mockResolvedValue(null);
+    mocked(AdminModel.findOne).mockResolvedValue({ id: 1 });
+
+    const result: any = await account.login(req, { email: "admin@x.com", password: "segredo1" });
+    expect(result.token).toEqual(expect.any(String));
+    expect(result.user).toMatchObject({ id: 9, admin: true, professional_id: null });
+  });
+
+  it("sem ser admin continua recusando quem nao tem cliente", async () => {
+    mocked(UserModel.findOne).mockResolvedValue({
+      id: 9, name: "X", email: "x@x.com", phone: "1", active: true,
+      password: bcrypt.hashSync("segredo1", 4),
+    });
+    mocked(ClientModel.findOne).mockResolvedValue(null);
+    mocked(AdminModel.findOne).mockResolvedValue(null);
+    await expectHttpError(account.login(req, { email: "x@x.com", password: "segredo1" }), 403);
   });
 });
 
@@ -158,7 +196,14 @@ describe("registration", () => {
     password: "segredo1",
     cpf: "123.456.789-01",
     phone: "15999999999",
-    address: { postal_code: "18000-000", street: "Rua A", number: "10" },
+    address: {
+      postal_code: "18000-000",
+      street: "Rua A",
+      number: "10",
+      neighborhood: "Centro",
+      city: "Sorocaba",
+      state: "SP",
+    },
   };
 
   beforeEach(() => {

@@ -1,4 +1,4 @@
-import express, { Express } from "express";
+import express, { Express, RequestHandler } from "express";
 import path from "path";
 import fs from "fs";
 import swaggerJSDoc from "swagger-jsdoc";
@@ -22,6 +22,7 @@ import professionalRoutes from "./routes/professional.routes";
 import appointmentRoutes from "./routes/appointment.routes";
 import userRoutes from "./routes/user.routes";
 import authRouter from "./routes/auth.routes";
+import verificationRoutes from "./routes/verification.routes";
 import notificationRoutes from "./routes/notification.routes";
 import paymentRouter from "./routes/payment.routes";
 import adminRoutes from "./routes/admin.routes";
@@ -66,7 +67,7 @@ export function createApp(): Express {
 
   // Documentacao e arquivos estaticos
   const swaggerSpec = swaggerJSDoc(swaggerOptions);
-  app.use("/docs", swaggerUi.serve as any, swaggerUi.setup(swaggerSpec) as any);
+  app.use("/docs", swaggerUi.serve as unknown as RequestHandler, swaggerUi.setup(swaggerSpec) as unknown as RequestHandler);
 
   const baseDir =
     process.env.ENVIRONMENT === "production" ? process.cwd() : path.resolve(__dirname, "..");
@@ -92,6 +93,7 @@ export function createApp(): Express {
   app.use("/api/notifications", notificationRoutes);
   app.use("/api/payments", paymentRouter);
   app.use("/auth", authRateLimiter, authRouter);
+  app.use("/api/verification", verificationRoutes);
   app.use("/api/admin", adminRoutes);
   app.use("/api/dashboard", dashboardRoutes);
   app.use("/api/favorites", favoriteRoutes);

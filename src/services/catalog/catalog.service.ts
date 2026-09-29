@@ -1,7 +1,7 @@
 /**
  * Casos de uso do catalogo de servicos oferecidos pelos profissionais (RF03).
  */
-import { Op } from "sequelize";
+import { IncludeOptions, Op, WhereOptions } from "sequelize";
 import { sequelize } from "../../config/database";
 import { ServiceModel } from "../../models/Service";
 import { ServiceAvailabilityModel } from "../../models/ServiceAvailability";
@@ -29,6 +29,9 @@ import {
   toAvailabilityRows,
 } from "./catalog.rules";
 
+/** Parametros de consulta (?a=b) ainda nao validados. */
+type QueryParams = Record<string, unknown>;
+
 const CREATE_COOLDOWN_MS = 10_000;
 const createCooldown = new CooldownTracker(CREATE_COOLDOWN_MS);
 
@@ -46,7 +49,7 @@ const AVAILABILITIES_INCLUDE = {
 const PUBLIC_PROFESSIONAL_INCLUDE = {
   model: ProfessionalModel,
   as: "Professional",
-  attributes: ["id", "user_id", "main_address_id", "description"],
+  attributes: ["id", "user_id", "main_address_id", "description", "identity_verified_at"],
   include: [
     { model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri"] },
     { model: AddressModel, as: "MainAddress", attributes: ["city", "state"] },
@@ -66,8 +69,10 @@ const SUBCATEGORY_WITH_CATEGORY_INCLUDE = {
 
 const DETAIL_INCLUDE = [SUBCATEGORY_INCLUDE, PUBLIC_PROFESSIONAL_INCLUDE, AVAILABILITIES_INCLUDE];
 
+type AvailabilityRow = Parameters<typeof normalizeAvailabilities>[0][number];
+
 /** Serializa o servico com horarios normalizados (HH:MM). */
-function present(service: any, extra: Record<string, unknown> = {}) {
+function present(service: ServiceModel & { Availabilities?: AvailabilityRow[] }, extra: Record<string, unknown> = {}) {
   return {
     ...service.toJSON(),
     ...extra,
@@ -76,7 +81,7 @@ function present(service: any, extra: Record<string, unknown> = {}) {
 }
 
 async function findDetailed(id: number) {
-  const service = await ServiceModel.findByPk(id, { include: DETAIL_INCLUDE as any });
+  const service = await ServiceModel.findByPk(id, { include: DETAIL_INCLUDE });
   if (!service) throw HttpError.notFound("Serviço não encontrado");
   return present(service);
 }
@@ -119,7 +124,7 @@ async function resolveSubcategory(subcategoryId: unknown, categoryId?: unknown) 
 // Leitura publica
 // ---------------------------------------------------------------------------
 
-export async function listByProfessional(rawProfessionalId: unknown, query: any) {
+export async function listByProfessional(rawProfessionalId: unknown, query: QueryParams) {
   const professionalId = parsePositiveId(rawProfessionalId, "professionalId");
   const { limit, offset } = parsePagination(query.page, query.limit, {
     limit: 20,
@@ -136,27 +141,27 @@ export async function listByProfessional(rawProfessionalId: unknown, query: any)
 }
 
 /** Catalogo publico com filtros: category_id, subcategory_id, q, day, page, limit. */
-export async function listPublic(query: any) {
+export async function listPublic(query: QueryParams) {
   const { page, limit, offset } = parsePagination(query.page, query.limit, {
     limit: 20,
     maxLimit: 100,
   });
 
-  const where: any = { active: true };
+  const where: WhereOptions<ServiceModel> & Record<string, unknown> = { active: true };
   const subcategoryId = optionalPositiveId(query.subcategory_id);
   if (subcategoryId) where.subcategory_id = subcategoryId;
   if (typeof query.q === "string" && query.q.trim()) {
     where.title = { [Op.like]: `%${query.q.trim()}%` };
   }
 
-  const availabilityInclude: any = { ...AVAILABILITIES_INCLUDE, required: false };
+  const availabilityInclude: IncludeOptions = { ...AVAILABILITIES_INCLUDE, required: false };
   const day = Number(query.day);
   if (query.day !== undefined && Number.isInteger(day)) {
     availabilityInclude.where = { day_of_week: day };
     availabilityInclude.required = true;
   }
 
-  const subcategoryInclude: any = { ...SUBCATEGORY_INCLUDE };
+  const subcategoryInclude: IncludeOptions = { ...SUBCATEGORY_INCLUDE };
   const categoryId = optionalPositiveId(query.category_id);
   if (categoryId) subcategoryInclude.where = { category_id: categoryId };
 
@@ -185,25 +190,25 @@ export async function getPublicById(rawId: unknown) {
  * Busca semantica: o banco filtra os candidatos (fonte de verdade) e o
  * nlp-service apenas ordena por similaridade.
  */
-export async function searchSemantic(query: any) {
+export async function searchSemantic(query: QueryParams) {
   const text = typeof query.q === "string" ? query.q.trim() : "";
   if (text.length < 2 || text.length > 500) {
     throw HttpError.badRequest("q deve ter entre 2 e 500 caracteres");
   }
   const { page, limit } = parsePagination(query.page, query.limit, { limit: 20, maxLimit: 50 });
 
-  const where: any = { active: true };
+  const where: WhereOptions<ServiceModel> & Record<string, unknown> = { active: true };
   const subcategoryId = optionalPositiveId(query.subcategory_id);
   if (subcategoryId) where.subcategory_id = subcategoryId;
 
-  const subcategoryInclude: any = { ...SUBCATEGORY_WITH_CATEGORY_INCLUDE };
+  const subcategoryInclude: IncludeOptions = { ...SUBCATEGORY_WITH_CATEGORY_INCLUDE };
   const categoryId = optionalPositiveId(query.category_id);
   if (categoryId) {
     subcategoryInclude.where = { category_id: categoryId };
     subcategoryInclude.required = true;
   }
 
-  const availabilityInclude: any = {
+  const availabilityInclude: IncludeOptions = {
     model: ServiceAvailabilityModel,
     as: "Availabilities",
     attributes: [],
@@ -242,7 +247,7 @@ export async function searchSemantic(query: any) {
   try {
     hits = await rankSemanticCandidates(
       text,
-      candidates.map((service: any) => ({ id: service.id, text: semanticDocument(service) })),
+      candidates.map((service) => ({ id: service.id, text: semanticDocument(service) })),
       { limit: rankingLimit },
     );
   } catch (error) {
@@ -265,7 +270,7 @@ export async function searchSemantic(query: any) {
       { ...PUBLIC_PROFESSIONAL_INCLUDE, attributes: ["id", "user_id", "description"] },
     ],
   });
-  const serviceById = new Map(services.map((service: any) => [service.id, service]));
+  const serviceById = new Map(services.map((service) => [service.id, service]));
 
   const data = pageHits.flatMap((hit) => {
     const service = serviceById.get(hit.id);
@@ -409,7 +414,7 @@ export async function updateForUser(userId: number, rawId: unknown, input: Servi
 }
 
 /** Todos os servicos (ativos e inativos) do profissional autenticado. */
-export async function listForUser(userId: number, query: any) {
+export async function listForUser(userId: number, query: QueryParams) {
   const professional = await requireProfessionalForUser(userId);
   const { page, limit, offset } = parsePagination(query.page, query.limit, {
     limit: 50,

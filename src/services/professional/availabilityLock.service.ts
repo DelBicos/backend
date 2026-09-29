@@ -39,9 +39,9 @@ export async function create(
     professional_id: professionalId,
     start_time: start,
     end_time: end,
-    reason: body.reason ? String(body.reason) : null,
+    reason: body.reason ? String(body.reason) : undefined,
     created_by: userId,
-  } as any);
+  });
 }
 
 export async function remove(userId: number, rawId: unknown) {

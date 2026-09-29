@@ -95,10 +95,12 @@ export async function notifyAppointmentRejected(
   clientUserId: number | undefined,
   serviceTitle: string | undefined,
   appointmentId: number,
-  refund: "none" | "refunded" | "processing",
+  refund: "none" | "released" | "refunded" | "processing",
 ) {
   const refundMsg =
-    refund === "refunded"
+    refund === "released"
+      ? " A reserva no seu cartão foi liberada e nenhum valor foi cobrado."
+      : refund === "refunded"
       ? " O valor do pagamento foi estornado com sucesso."
       : refund === "processing"
         ? " O estorno do pagamento está sendo processado."
@@ -156,4 +158,108 @@ export async function notifyPaymentConfirmed(
     )} às ${formatAppointmentTime(startTime)} foi confirmado!`,
     appointmentId,
   );
+}
+
+const money = (cents: number) =>
+  (cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+export async function notifyAppointmentCanceled(params: {
+  recipientUserId: number | undefined;
+  canceledBy: "client" | "professional" | "system";
+  serviceTitle?: string;
+  appointmentId: number;
+  refundedCents: number;
+  retainedCents: number;
+}) {
+  const { canceledBy, serviceTitle, refundedCents, retainedCents } = params;
+  const who =
+    canceledBy === "client"
+      ? "O cliente cancelou"
+      : canceledBy === "professional"
+        ? "O profissional cancelou"
+        : "O sistema cancelou";
+  const money_note =
+    retainedCents > 0
+      ? ` Foram retidos ${money(retainedCents)} conforme a política de cancelamento e ${money(refundedCents)} devolvidos.`
+      : refundedCents > 0
+        ? ` O valor de ${money(refundedCents)} foi devolvido integralmente.`
+        : "";
+  await notify(
+    params.recipientUserId,
+    "Agendamento cancelado",
+    `${who} o serviço '${serviceTitle}'.${money_note}`,
+    params.appointmentId,
+  );
+}
+
+export async function notifyNoShow(
+  clientUserId: number | undefined,
+  serviceTitle: string | undefined,
+  appointmentId: number,
+) {
+  await notify(
+    clientUserId,
+    "Não comparecimento registrado",
+    `O profissional registrou que você não compareceu ao serviço '${serviceTitle}', e o valor foi retido. Se isso não procede, abra uma disputa em até 7 dias.`,
+    appointmentId,
+  );
+}
+
+export async function notifyRescheduleRequested(
+  recipientUserId: number | undefined,
+  serviceTitle: string | undefined,
+  appointmentId: number,
+  newStart: Date,
+) {
+  await notify(
+    recipientUserId,
+    "Pedido de reagendamento",
+    `Foi pedido reagendar '${serviceTitle}' para ${formatAppointmentDate(newStart)} às ${formatAppointmentTime(newStart)}. Responda em Meus Agendamentos.`,
+    appointmentId,
+  );
+}
+
+export async function notifyRescheduleAnswered(
+  requesterUserId: number | undefined,
+  serviceTitle: string | undefined,
+  appointmentId: number,
+  accepted: boolean,
+) {
+  await notify(
+    requesterUserId,
+    accepted ? "Reagendamento aceito" : "Reagendamento recusado",
+    accepted
+      ? `O novo horário de '${serviceTitle}' foi confirmado.`
+      : `O pedido de reagendamento de '${serviceTitle}' foi recusado. O horário original continua valendo.`,
+    appointmentId,
+  );
+}
+
+export async function notifyDisputeOpened(
+  professionalUserId: number | undefined,
+  serviceTitle: string | undefined,
+  appointmentId: number,
+) {
+  await notify(
+    professionalUserId,
+    "Disputa aberta",
+    `O cliente abriu uma disputa sobre o serviço '${serviceTitle}'. A equipe DelBicos vai analisar o caso.`,
+    appointmentId,
+  );
+}
+
+export async function notifyDisputeResolved(params: {
+  userIds: Array<number | undefined>;
+  serviceTitle?: string;
+  appointmentId: number;
+  resolution: "refund_full" | "refund_partial" | "rejected";
+  refundCents: number;
+}) {
+  const text =
+    params.resolution === "rejected"
+      ? "A disputa foi analisada e não houve alteração no valor."
+      : `A disputa foi analisada e ${money(params.refundCents)} foram devolvidos ao cliente.`;
+  for (const userId of params.userIds) {
+    await notify(userId, "Disputa resolvida", `Serviço '${params.serviceTitle}': ${text}`, params.appointmentId);
+  }
 }

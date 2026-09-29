@@ -2,7 +2,7 @@
  * Casos de uso do perfil profissional: busca publica, perfil, disponibilidade,
  * cadastro (RF02) e raio de atuacao (RF04).
  */
-import { Op, UniqueConstraintError, literal } from "sequelize";
+import { Op, UniqueConstraintError, WhereOptions, literal } from "sequelize";
 import { ProfessionalModel } from "../../models/Professional";
 import { ProfessionalGalleryModel } from "../../models/ProfessionalGallery";
 import { UserModel } from "../../models/User";
@@ -30,6 +30,8 @@ const PUBLIC_PROFESSIONAL_ATTRIBUTES = [
   "main_address_id",
   "description",
   "service_radius_km",
+  "identity_verified_at",
+  "cancellations_count",
   "createdAt",
   "updatedAt",
 ];
@@ -58,6 +60,37 @@ export function roundCoordinate(value: unknown): number | null {
   return Math.round(n * factor) / factor;
 }
 
+/** Parametros de consulta (?a=b) ainda nao validados. */
+type QueryParams = Record<string, unknown>;
+
+interface ListedProfessionalRow {
+  id: number;
+  identity_verified_at?: Date | null;
+  User?: { name?: string | null; avatar_uri?: string | null; banner_uri?: string | null };
+  MainAddress?: { city: string; state: string; lat: number | string; lng: number | string } | null;
+  Services?: { title: string }[];
+  Appointments?: { rating?: number | null }[];
+  dataValues: { distance_km?: number };
+}
+
+interface AvailabilityProfessional {
+  id: number;
+  service_radius_km?: number | null;
+  identity_verified_at?: Date | null;
+  User?: { name?: string | null; avatar_uri?: string | null };
+  MainAddress?: { city?: string; state?: string; lat: number | string; lng: number | string } | null;
+  Services: { id: number; title: string; price: number | string; duration?: number }[];
+}
+
+interface ProfileJson {
+  identity_verified_at?: Date | null;
+  verified?: boolean;
+  MainAddress?: { lat: number | string | null; lng: number | string | null } & Record<string, unknown>;
+  Appointments?: { Client?: { User?: { name: string } & Record<string, unknown> } & Record<string, unknown> }[];
+  rating?: number;
+  ratings_count?: number;
+}
+
 const COMPLETED_WITH_RATING = { status: "completed", rating: { [Op.not]: null } };
 
 /** Mapa professional_id -> notas, com uma unica consulta. */
@@ -69,7 +102,7 @@ async function ratingsByProfessional(professionalIds: number[]) {
     attributes: ["professional_id", "rating"],
     raw: true,
   });
-  for (const row of rows as any[]) {
+  for (const row of rows as unknown as { professional_id: number; rating: number }[]) {
     const list = map.get(row.professional_id) ?? [];
     list.push(row.rating);
     map.set(row.professional_id, list);
@@ -103,14 +136,14 @@ async function findWithRelations(id: number) {
 // ---------------------------------------------------------------------------
 
 /** Lista paginada (page 0-based) com busca por nome e ordenacao por distancia. */
-export async function searchPublic(query: any) {
+export async function searchPublic(query: QueryParams) {
   const page = Math.max(0, Math.floor(Number(query.page) || 0));
   const limit = Math.min(50, Math.max(1, Math.floor(Number(query.limit) || 12)));
   const lat = parseOptionalCoordinate(query.lat);
   const lng = parseOptionalCoordinate(query.lng);
   const hasLatLng = lat !== undefined && lng !== undefined;
 
-  const where: any = {};
+  const where: WhereOptions<ProfessionalModel> & Record<string, unknown> = {};
   if (query.termo) {
     // Busca publica apenas pelo nome: e-mail e CPF sao dados pessoais.
     const likeOp = ProfessionalModel.sequelize?.getDialect() === "postgres" ? Op.iLike : Op.like;
@@ -132,8 +165,8 @@ export async function searchPublic(query: any) {
 
   const { rows, count } = await ProfessionalModel.findAndCountAll({
     attributes: distanceLiteral
-      ? ["id", [distanceLiteral, "distance_km"]]
-      : ["id"],
+      ? ["id", "identity_verified_at", [distanceLiteral, "distance_km"]]
+      : ["id", "identity_verified_at"],
     subQuery: false,
     include: [
       {
@@ -172,11 +205,12 @@ export async function searchPublic(query: any) {
     distinct: true,
   });
 
-  const professionals = rows.map((prof: any) => ({
+  const professionals = (rows as ListedProfessionalRow[]).map((prof) => ({
     id: prof.id,
     name: prof.User?.name || "Profissional",
     avatar_uri: prof.User?.avatar_uri,
     banner_uri: prof.User?.banner_uri,
+    verified: Boolean(prof.identity_verified_at),
     MainAddress: prof.MainAddress
       ? {
           city: prof.MainAddress.city,
@@ -187,7 +221,7 @@ export async function searchPublic(query: any) {
       : null,
     Services: prof.Services || [],
     distance_km: prof.dataValues.distance_km,
-    ...averageRating((prof.Appointments ?? []).map((a: any) => a.rating)),
+    ...averageRating((prof.Appointments ?? []).map((a) => a.rating)),
   }));
 
   return {
@@ -237,12 +271,13 @@ export async function getPublicProfile(rawId: unknown) {
   });
   if (!professional) throw HttpError.notFound("Profissional não encontrado");
 
-  const data: any = professional;
+  const data = professional as ProfessionalModel & { Appointments?: { rating?: number | null }[] };
   const { rating, ratings_count } = averageRating(
-    (data.Appointments ?? []).map((a: any) => a.rating),
+    (data.Appointments ?? []).map((a) => a.rating),
     2,
   );
-  const json = data.toJSON();
+  const json = data.toJSON() as unknown as ProfileJson;
+  json.verified = Boolean(json.identity_verified_at);
   if (json.MainAddress) {
     json.MainAddress = {
       ...json.MainAddress,
@@ -250,7 +285,7 @@ export async function getPublicProfile(rawId: unknown) {
       lng: roundCoordinate(json.MainAddress.lng),
     };
   }
-  json.Appointments = (json.Appointments ?? []).map((a: any) =>
+  json.Appointments = (json.Appointments ?? []).map((a) =>
     a.Client?.User
       ? {
           ...a,
@@ -268,7 +303,7 @@ export async function getPublicProfile(rawId: unknown) {
  * Profissionais com horario livre numa data para uma subcategoria,
  * respeitando o raio de atuacao quando a localizacao do cliente e informada.
  */
-export async function searchAvailability(query: any) {
+export async function searchAvailability(query: QueryParams) {
   if (!query.subCategoryId || !query.date) {
     throw HttpError.badRequest("subCategoryId e date são obrigatórios.");
   }
@@ -279,7 +314,7 @@ export async function searchAvailability(query: any) {
   const hasLatLng = lat !== undefined && lng !== undefined;
 
   const professionals = await ProfessionalModel.findAll({
-    attributes: ["id", "service_radius_km"],
+    attributes: ["id", "service_radius_km", "identity_verified_at"],
     include: [
       {
         model: ServiceModel,
@@ -296,7 +331,7 @@ export async function searchAvailability(query: any) {
   const ratings = await ratingsByProfessional(professionals.map((p) => p.id));
 
   const results = await Promise.all(
-    professionals.map(async (prof: any) => {
+    (professionals as unknown as AvailabilityProfessional[]).map(async (prof) => {
       const address = prof.MainAddress;
       const distance =
         hasLatLng && address
@@ -306,7 +341,7 @@ export async function searchAvailability(query: any) {
       if (radius && hasLatLng && distance > radius) return null;
 
       // Pode haver varios servicos na subcategoria: usa o primeiro com vaga.
-      for (const service of prof.Services as any[]) {
+      for (const service of prof.Services) {
         const slots = await getAvailableSlots(prof.id, date, service.duration || 60, service.id);
         if (slots.length === 0) continue;
 
@@ -315,6 +350,7 @@ export async function searchAvailability(query: any) {
           id: prof.id,
           name: prof.User?.name,
           imageUrl: prof.User?.avatar_uri,
+          verified: Boolean(prof.identity_verified_at),
           serviceName: service.title,
           priceFrom: service.price,
           serviceId: service.id,
@@ -322,7 +358,7 @@ export async function searchAvailability(query: any) {
           ratingsCount: ratings_count,
           distance: Number.isFinite(distance) ? parseFloat(distance.toFixed(1)) : 0,
           location: `${address?.city}, ${address?.state}`,
-          offeredServices: prof.Services.map((s: any) => s.title),
+          offeredServices: prof.Services.map((s) => s.title),
           availableTimes: slots,
         };
       }

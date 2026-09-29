@@ -31,8 +31,10 @@ const servers = isAzure
 // In development, __dirname is /…/src/config — resolve up to src/
 const routesGlob = path.resolve(__dirname, "../routes/*.js");
 const modelsGlob = path.resolve(__dirname, "../models/*.js");
+const docsGlob = path.resolve(__dirname, "../docs/*.js");
 const routesGlobTs = path.resolve(__dirname, "../routes/*.ts");
 const modelsGlobTs = path.resolve(__dirname, "../models/*.ts");
+const docsGlobTs = path.resolve(__dirname, "../docs/*.ts");
 
 const swaggerOptions: Options = {
   definition: {
@@ -53,7 +55,8 @@ const swaggerOptions: Options = {
     },
     servers,
   },
-  apis: isProduction ? [routesGlob, modelsGlob] : [routesGlobTs, modelsGlobTs],
+  apis: isProduction ? [routesGlob, modelsGlob, docsGlob]
+    : [routesGlobTs, modelsGlobTs, docsGlobTs],
 };
 
 export default swaggerOptions;

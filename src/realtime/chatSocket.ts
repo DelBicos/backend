@@ -23,9 +23,12 @@ interface SendMessagePayload {
 const roomChannel = (roomId: number) => `room:${roomId}`;
 const userChannel = (userId: number) => `user:${userId}`;
 
+/** Resposta enviada ao cliente no callback (ack) dos eventos. */
+type SocketAck = (resp: { ok: boolean; [key: string]: unknown }) => void;
+
 export interface AppointmentStatusSocketPayload {
   appointment_id: number;
-  status: "pending" | "confirmed" | "completed" | "canceled";
+  status: "pending" | "confirmed" | "completed" | "canceled" | "no_show";
   session_ids: number[];
   message: string;
   payment_status: "not_available" | "pending" | "paid";
@@ -82,7 +85,7 @@ export function initChatSocket(httpServer: HttpServer): Server {
     }
 
     // Entrar numa sala (valida participação)
-    socket.on("room:join", async (roomId: number, ack?: (resp: any) => void) => {
+    socket.on("room:join", async (roomId: number, ack?: SocketAck) => {
       try {
         if (!socket.userId) return ack?.({ ok: false, error: "Não autenticado" });
 
@@ -113,7 +116,7 @@ export function initChatSocket(httpServer: HttpServer): Server {
     // Enviar mensagem
     socket.on(
       "message:send",
-      async (payload: SendMessagePayload, ack?: (resp: any) => void) => {
+      async (payload: SendMessagePayload, ack?: SocketAck) => {
         try {
           if (!socket.userId)
             return ack?.({ ok: false, error: "Não autenticado" });

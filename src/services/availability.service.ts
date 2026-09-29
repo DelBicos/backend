@@ -3,6 +3,7 @@ import { ProfessionalAvailabilityModel } from "../models/ProfessionalAvailabilit
 import { ServiceAvailabilityModel } from "../models/ServiceAvailability";
 import { ServiceModel } from "../models/Service";
 import { AppointmentModel } from "../models/Appointment";
+import { HttpError } from "../errors/HttpError";
 
 /**
  * Retorna os horários disponíveis de um profissional para uma data específica.
@@ -11,6 +12,7 @@ import { AppointmentModel } from "../models/Appointment";
  * @param date           - Data no formato YYYY-MM-DD
  * @param serviceDuration - Duração do serviço em minutos
  * @param serviceId      - ID do serviço (opcional; sem ele, considera todos os serviços ativos)
+ * @param excludeAppointmentId - agendamento a ignorar nos bloqueios (reagendamento)
  * @returns Array de strings HH:MM ordenado e sem duplicatas
  */
 export async function getAvailableSlots(
@@ -18,6 +20,7 @@ export async function getAvailableSlots(
   date: string,
   serviceDuration: number,
   serviceId?: number,
+  excludeAppointmentId?: number,
 ): Promise<string[]> {
   const targetDate = new Date(`${date}T12:00:00.000Z`);
   const dayOfWeek = targetDate.getUTCDay(); // 0=Dom..6=Sáb
@@ -56,7 +59,7 @@ export async function getAvailableSlots(
     if (profServices.length > 0) {
       serviceRules = await ServiceAvailabilityModel.findAll({
         where: {
-          service_id: profServices.map((s: any) => s.id),
+          service_id: profServices.map((s) => s.id),
           day_of_week: dayOfWeek,
         },
       });
@@ -80,6 +83,7 @@ export async function getAvailableSlots(
       professional_id: professionalId,
       status: { [Op.in]: ["confirmed", "pending"] },
       start_time: { [Op.between]: [startOfDay, endOfDay] },
+      ...(excludeAppointmentId ? { id: { [Op.ne]: excludeAppointmentId } } : {}),
     },
   });
 
@@ -149,4 +153,40 @@ export async function getAvailableSlots(
   }
 
   return [...new Set(availableSlots)].sort();
+}
+
+/**
+ * Garante que o horario escolhido esta na agenda publicada do profissional
+ * (regras de disponibilidade, sem bloqueios nem outro agendamento). O app so
+ * oferece esses horarios; aqui o servidor nao confia nisso.
+ *
+ * Os horarios da agenda sao "relogio da parede" guardados como UTC, o mesmo
+ * criterio usado ao listar os horarios livres.
+ */
+export async function assertSlotInAgenda(params: {
+  professionalId: number;
+  start: Date;
+  durationMinutes: number;
+  serviceId?: number;
+  excludeAppointmentId?: number;
+}): Promise<void> {
+  const { professionalId, start, durationMinutes, serviceId, excludeAppointmentId } = params;
+  const date = start.toISOString().slice(0, 10);
+  const time = start.toLocaleTimeString("pt-BR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "UTC",
+  });
+  const slots = await getAvailableSlots(
+    professionalId,
+    date,
+    durationMinutes,
+    serviceId,
+    excludeAppointmentId,
+  );
+  if (!slots.includes(time)) {
+    throw HttpError.conflict(
+      "Esse horário não está disponível na agenda do profissional. Escolha outro horário.",
+    );
+  }
 }

@@ -3,6 +3,10 @@ import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 import { AddressModel } from "../models/Address";
 import { ClientModel } from "../models/Client";
 
+import { logError } from "../utils/logger";
+import { errorMessage } from "../utils/errors.util";
+import type { CreationAttributes } from "sequelize";
+import { bodyOf } from "../utils/requestBody.util";
 /** Rota legada: exige JWT e so retorna os enderecos do proprio usuario. */
 export const getAllAddressByUserId = async (
   req: AuthenticatedRequest,
@@ -24,8 +28,8 @@ export const getAllAddressByUserId = async (
     });
 
     res.json(addresses);
-  } catch (error: any) {
-    console.error("Erro ao buscar endereços:", error);
+  } catch (error) {
+    logError("Erro ao buscar endereços:", error);
     res.status(500).json({ error: "Erro interno do servidor" });
   }
 };
@@ -58,8 +62,8 @@ export const getAddressesForAuthenticatedUser = async (
     });
 
     res.json(addressesWithPrimaryFlag);
-  } catch (error: any) {
-    console.error("Erro ao buscar endereços do usuário autenticado:", error);
+  } catch (error) {
+    logError("Erro ao buscar endereços do usuário autenticado:", error);
     res.status(500).json({ error: "Erro interno do servidor" });
   }
 };
@@ -75,13 +79,13 @@ export const createAddressForAuthenticatedUser = async (
   }
 
   try {
-    const { id, user_id, isPrimary, ...fields } = (req.body ?? {}) as any;
+    const { id, user_id, isPrimary, ...fields } = bodyOf(req);
     const payload = { ...fields, user_id: userId };
-    const address = await AddressModel.create(payload as any);
+    const address = await AddressModel.create(payload as unknown as CreationAttributes<AddressModel>);
     res.status(201).json(address);
-  } catch (error: any) {
-    console.error("Erro ao criar endereço para usuário autenticado:", error);
-    res.status(400).json({ error: error.message });
+  } catch (error) {
+    logError("Erro ao criar endereço para usuário autenticado:", error);
+    res.status(400).json({ error: errorMessage(error) });
   }
 };
 
@@ -113,9 +117,9 @@ export const updateAddressForAuthenticatedUser = async (
       return;
     }
 
-    const { user_id, id, isPrimary, ...updatable } = req.body as any;
+    const { user_id, id, isPrimary, ...updatable } = bodyOf(req);
 
-    await address.update(updatable);
+    await address.update(updatable as Partial<CreationAttributes<AddressModel>>);
 
     if (isPrimary === true) {
       const client = await ClientModel.findOne({ where: { user_id: userId } });
@@ -124,8 +128,8 @@ export const updateAddressForAuthenticatedUser = async (
       }
     }
     res.json(address);
-  } catch (error: any) {
-    console.error("Erro ao atualizar endereço do usuário autenticado:", error);
+  } catch (error) {
+    logError("Erro ao atualizar endereço do usuário autenticado:", error);
     res.status(500).json({ error: "Erro interno do servidor" });
   }
 };
@@ -160,8 +164,8 @@ export const deleteAddressForAuthenticatedUser = async (
 
     await address.destroy();
     res.json({ message: "Endereço deletado" });
-  } catch (error: any) {
-    console.error("Erro ao deletar endereço do usuário autenticado:", error);
+  } catch (error) {
+    logError("Erro ao deletar endereço do usuário autenticado:", error);
     res.status(500).json({ error: "Erro interno do servidor" });
   }
 };

@@ -3,6 +3,8 @@ import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 import { HttpError } from "../errors/HttpError";
 import { asyncHandler } from "../utils/asyncHandler";
 import * as AppointmentService from "../services/appointment/appointment.service";
+import * as Lifecycle from "../services/appointment/appointment.lifecycle";
+import * as Disputes from "../services/appointment/dispute.service";
 
 /** Controllers finos: extraem dados do HTTP e delegam ao AppointmentService. */
 
@@ -83,5 +85,61 @@ export const getAppointmentInvoice = asyncHandler<AuthenticatedRequest>(
       req.params.id,
     );
     res.json(invoice);
+  },
+);
+
+export const previewCancellation = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(await Lifecycle.previewCancellation(requireUserId(req), req.params.id));
+  },
+);
+
+export const cancelAppointment = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(await Lifecycle.cancelAppointment(requireUserId(req), req.params.id, req.body?.reason));
+  },
+);
+
+export const markNoShow = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(await Lifecycle.markNoShow(requireUserId(req), req.params.id));
+  },
+);
+
+export const requestReschedule = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(
+      await Lifecycle.requestReschedule(requireUserId(req), req.params.id, req.body?.start_time),
+    );
+  },
+);
+
+export const respondToReschedule = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(
+      await Lifecycle.respondToReschedule(requireUserId(req), req.params.id, req.body?.accept),
+    );
+  },
+);
+
+export const openDispute = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    const dispute = await Disputes.openDispute(requireUserId(req), req.params.id, {
+      reason: req.body?.reason,
+      description: req.body?.description,
+    });
+    res.status(201).json(dispute);
+  },
+);
+
+export const getDispute = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(await Disputes.getDisputeForAppointment(requireUserId(req), req.params.id));
+  },
+);
+
+export const listRescheduleSlots = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(await Lifecycle.listRescheduleSlots(requireUserId(req), req.params.id, req.query.date));
   },
 );

@@ -16,7 +16,14 @@ jest.mock("../../botAppointmentStatus.service", () => ({
   syncBotSessionsForAppointmentStatus: jest.fn(),
 }));
 jest.mock("../../payment.service", () => ({
-  PaymentService: { refundPaymentIntent: jest.fn() },
+  PaymentService: {
+    settleUnusedPayment: jest.fn(),
+    capturePayment: jest.fn(),
+  },
+}));
+jest.mock("../../availability.service", () => ({
+  assertSlotInAgenda: jest.fn().mockResolvedValue(undefined),
+  getAvailableSlots: jest.fn(),
 }));
 jest.mock("../appointment.notifications", () => ({
   formatAppointmentDate: jest.fn(() => "01/10/2026"),
@@ -147,7 +154,7 @@ describe("respondToAppointment", () => {
     await expectHttpError(service.respondToAppointment(1, "ABC123", "confirmed"), 403);
   });
 
-  it("recusa estorna o pagamento e notifica o cliente", async () => {
+  it("aceite cobra o valor reservado antes de confirmar", async () => {
     const appt = makeAppointment({
       payment_intent_id: "pi_1",
       Client: { user_id: 5 },
@@ -155,18 +162,45 @@ describe("respondToAppointment", () => {
     });
     mocked(AppointmentModel.findOne).mockResolvedValue(appt);
     mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
-    mocked(PaymentService.refundPaymentIntent).mockResolvedValue(true);
+
+    await service.respondToAppointment(1, "ABC123", "confirmed");
+
+    expect(PaymentService.capturePayment).toHaveBeenCalledWith("pi_1");
+    expect(appt.status).toBe("confirmed");
+  });
+
+  it("se a captura falhar, o pedido continua pendente", async () => {
+    const appt = makeAppointment({ payment_intent_id: "pi_1" });
+    mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
+    mocked(PaymentService.capturePayment).mockRejectedValue(HttpError.conflict("expirou"));
+
+    await expectHttpError(service.respondToAppointment(1, "ABC123", "confirmed"), 409);
+    expect(appt.status).toBe("pending");
+    expect(appt.save).not.toHaveBeenCalled();
+  });
+
+  it("recusa libera a reserva do cartao e notifica o cliente", async () => {
+    const appt = makeAppointment({
+      payment_intent_id: "pi_1",
+      Client: { user_id: 5 },
+      Service: { title: "Limpeza" },
+    });
+    mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
+    mocked(PaymentService.settleUnusedPayment).mockResolvedValue("released");
 
     await service.respondToAppointment(1, "ABC123", "canceled");
 
     expect(appt.status).toBe("canceled");
     expect(appt.save).toHaveBeenCalled();
-    expect(PaymentService.refundPaymentIntent).toHaveBeenCalledWith("pi_1");
+    expect(PaymentService.settleUnusedPayment).toHaveBeenCalledWith("pi_1");
+    expect(PaymentService.capturePayment).not.toHaveBeenCalled();
     expect(notifications.notifyAppointmentRejected).toHaveBeenCalledWith(
       5,
       "Limpeza",
       10,
-      "refunded",
+      "released",
     );
   });
 

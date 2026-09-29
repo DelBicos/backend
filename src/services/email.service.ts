@@ -1,6 +1,7 @@
 import sgMail from "../config/sendgrid";
-import { sendViaLambda } from "../utils/emailFallback";
+import { sendViaAzureFunction } from "../utils/azureEmailFunction";
 
+import logger, { logError } from "../utils/logger";
 interface EmailParams {
   to: string;
   subject: string;
@@ -16,7 +17,7 @@ export const EmailService = {
     const fromEmail = process.env.SENDER_EMAIL_VERIFICADO;
 
     if (!fromEmail) {
-      console.error("E-mail remetente verificado não encontrado no .env");
+      logger.error("E-mail remetente verificado não encontrado no .env");
       return false;
     }
 
@@ -31,20 +32,24 @@ export const EmailService = {
       await sgMail.send(msg);
       return true;
     } catch (error) {
-      console.error("Erro ao enviar e-mail pelo serviço:", error);
+      logError("Erro ao enviar e-mail pelo serviço:", error);
       if (typeof error === "object" && error !== null && "response" in error) {
-        const err = error as { response?: { body?: any } };
-        console.error(err.response?.body);
+        const err = error as { response?: { body?: unknown } };
+        logger.error(err.response?.body);
       }
-      // Tentar fallback via Lambda
+      // Tentar fallback via Azure Function
       try {
-        const fallbackResult = await sendViaLambda({ to, subject, html });
+        const fallbackResult = await sendViaAzureFunction({
+          to,
+          subject,
+          html,
+        });
         if (fallbackResult) {
-          console.info("E-mail enviado via Lambda fallback");
+          logger.info("E-mail enviado via Azure Function fallback");
           return true;
         }
       } catch (err) {
-        console.error("Erro no fallback via Lambda:", err);
+        logError("Erro no fallback via Azure Function:", err);
       }
       return false;
     }

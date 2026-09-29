@@ -9,6 +9,7 @@ import type {
 import type { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
 
+import type { AppointmentWithRelations } from "../../appointment/appointment.types";
 export class InicioState implements BotStateNode {
   public async handle(
     userMessage: string,
@@ -130,7 +131,7 @@ export class InicioState implements BotStateNode {
             finalize: true,
           };
         }
-        const upcoming = await AppointmentModel.findAll({
+        const upcoming = (await AppointmentModel.findAll({
           where: {
             client_id: clientRecord.id,
             status: { [Op.in]: ["pending", "confirmed"] },
@@ -139,7 +140,7 @@ export class InicioState implements BotStateNode {
           include: [{ model: ServiceModel, as: "Service" }],
           order: [["start_time", "ASC"]],
           limit: 5,
-        });
+        })) as AppointmentWithRelations[];
         if (upcoming.length === 0) {
           return {
             reply: "Você não possui agendamentos futuros. Deseja agendar um serviço?",
@@ -151,7 +152,7 @@ export class InicioState implements BotStateNode {
             },
           };
         }
-        const lines = upcoming.map((a: any, i: number) => {
+        const lines = upcoming.map((a, i) => {
           const d = new Date(a.start_time);
           const dateStr = d.toLocaleDateString("pt-BR");
           const timeStr = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
