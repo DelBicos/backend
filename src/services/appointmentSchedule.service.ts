@@ -1,5 +1,6 @@
 import { Op, Transaction } from "sequelize";
 import { sequelize } from "../config/database";
+import { HttpError } from "../errors/HttpError";
 import { ProfessionalModel } from "../models/Professional";
 import { AppointmentModel, IAppointment } from "../models/Appointment";
 import { ProfessionalAvailabilityLockModel } from "../models/ProfessionalAvailabilityLock";
@@ -7,8 +8,13 @@ import { ServiceModel } from "../models/Service";
 import { appointmentOverlapWhere } from "./availability.service";
 import { enqueueAppointmentRefund } from "./appointmentRefund.service";
 
-export class ScheduleConflictError extends Error {
-  readonly status = 409;
+/** Conflito de agenda (409), tratado pelo errorHandler como qualquer HttpError. */
+export class ScheduleConflictError extends HttpError {
+  constructor(message: string) {
+    super(409, message);
+    this.name = "ScheduleConflictError";
+    this.code = "SCHEDULE_CONFLICT";
+  }
 }
 
 /** Todos os escritores da agenda devem adquirir o profissional antes da reserva.
@@ -26,7 +32,7 @@ export async function withProfessionalScheduleLock<T>(
         transaction,
         lock: transaction.LOCK.UPDATE,
       });
-      if (!professional) throw new Error("Profissional não encontrado");
+      if (!professional) throw HttpError.notFound("Profissional não encontrado");
       return work(transaction);
     },
   );

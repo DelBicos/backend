@@ -4,6 +4,11 @@ import { ProfessionalModel } from "../models/Professional";
 import { UserModel } from "../models/User";
 import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 
+import { logError } from "../utils/logger";
+type FavoriteWithProfessional = FavoriteModel & {
+  Professional?: { User?: { name: string; avatar_uri?: string | null } };
+};
+
 export const getFavorites = async (req: Request, res: Response) => {
   const authReq = req as AuthenticatedRequest;
 
@@ -14,7 +19,7 @@ export const getFavorites = async (req: Request, res: Response) => {
       return res.status(401).json({ error: "Usuário não autenticado" });
     }
 
-    const favorites = await FavoriteModel.findAll({
+    const favorites = (await FavoriteModel.findAll({
       where: { user_id: userId },
       include: [
         {
@@ -30,9 +35,9 @@ export const getFavorites = async (req: Request, res: Response) => {
         },
       ],
       order: [["created_at", "DESC"]],
-    });
+    })) as FavoriteWithProfessional[];
 
-    const favoritesData = favorites.map((fav: any) => ({
+    const favoritesData = favorites.map((fav) => ({
       id: fav.id,
       professionalId: fav.professional_id,
       professionalName: fav.Professional?.User?.name || "Nome não disponível",
@@ -41,8 +46,8 @@ export const getFavorites = async (req: Request, res: Response) => {
     }));
 
     return res.status(200).json({ favorites: favoritesData });
-  } catch (error: any) {
-    console.error("Erro ao buscar favoritos:", error);
+  } catch (error) {
+    logError("Erro ao buscar favoritos:", error);
     return res.status(500).json({ error: "Erro ao buscar favoritos" });
   }
 };
@@ -92,8 +97,8 @@ export const addFavorite = async (req: Request, res: Response) => {
       professionalId: favorite.professional_id,
       createdAt: favorite.createdAt,
     });
-  } catch (error: any) {
-    console.error("Erro ao adicionar favorito:", error);
+  } catch (error) {
+    logError("Erro ao adicionar favorito:", error);
     return res.status(500).json({ error: "Erro ao adicionar favorito" });
   }
 };
@@ -121,8 +126,8 @@ export const removeFavorite = async (req: Request, res: Response) => {
     }
 
     return res.status(200).json({ message: "Favorito removido com sucesso" });
-  } catch (error: any) {
-    console.error("Erro ao remover favorito:", error);
+  } catch (error) {
+    logError("Erro ao remover favorito:", error);
     return res.status(500).json({ error: "Erro ao remover favorito" });
   }
 };
@@ -146,8 +151,8 @@ export const checkFavorite = async (req: Request, res: Response) => {
     });
 
     return res.status(200).json({ isFavorite: !!favorite });
-  } catch (error: any) {
-    console.error("Erro ao verificar favorito:", error);
+  } catch (error) {
+    logError("Erro ao verificar favorito:", error);
     return res.status(500).json({ error: "Erro ao verificar favorito" });
   }
 };

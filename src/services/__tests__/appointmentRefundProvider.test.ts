@@ -1,8 +1,9 @@
 const mockRetrieve = jest.fn();
 const mockList = jest.fn();
 const mockCreate = jest.fn();
+const mockCancel = jest.fn();
 jest.mock("stripe", () => jest.fn().mockImplementation(() => ({
-  paymentIntents: { retrieve: mockRetrieve }, refunds: { list: mockList, create: mockCreate },
+  paymentIntents: { retrieve: mockRetrieve, cancel: mockCancel }, refunds: { list: mockList, create: mockCreate },
 })));
 import { ensureAppointmentRefund } from "../appointmentRefundProvider.service";
 
@@ -16,6 +17,7 @@ beforeEach(() => {
   mockRetrieve.mockReset();
   mockList.mockReset();
   mockCreate.mockReset();
+  mockCancel.mockReset();
   mockRetrieve.mockResolvedValue({ status: "succeeded", amount_received: 15000 });
   mockList.mockReturnValue([]);
   mockCreate.mockResolvedValue({ id: "re_1", status: "succeeded", amount: 15000 });
@@ -62,4 +64,16 @@ it("não inicia outro estorno se a reconciliação falhar", async () => {
   mockList.mockImplementation(() => { throw new Error("offline"); });
   await expect(ensureAppointmentRefund("pi_paid")).rejects.toThrow("offline");
   expect(mockCreate).not.toHaveBeenCalled();
+});
+
+it("libera a reserva (requires_capture) em vez de estornar", async () => {
+  mockRetrieve.mockResolvedValue({ status: "requires_capture", amount_received: 0 });
+  expect(await ensureAppointmentRefund("pi_hold")).toBe(true);
+  expect(mockCancel).toHaveBeenCalledWith("pi_hold");
+  expect(mockCreate).not.toHaveBeenCalled();
+});
+it("considera concluída a reserva já liberada", async () => {
+  mockRetrieve.mockResolvedValue({ status: "canceled", amount_received: 0 });
+  expect(await ensureAppointmentRefund("pi_hold")).toBe(true);
+  expect(mockCancel).not.toHaveBeenCalled();
 });

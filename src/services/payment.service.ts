@@ -1,375 +1,501 @@
+/**
+ * Pagamentos via Stripe e criacao do agendamento pago.
+ *
+ * Regras de seguranca:
+ * - o valor cobrado e sempre calculado no servidor a partir do servico;
+ * - o PaymentIntent carrega o id do usuario que o criou, e so esse usuario
+ *   pode confirma-lo;
+ * - a confirmacao e idempotente: o mesmo PaymentIntent nunca gera dois
+ *   agendamentos.
+ *
+ * Ciclo do dinheiro (autorizar agora, cobrar so quando o profissional aceita):
+ * 1. o cliente confirma o cartao -> Stripe "requires_capture" (valor reservado);
+ * 2. profissional aceita -> capturePayment() cobra de fato;
+ * 3. profissional recusa / pedido expira -> settleUnusedPayment() libera a
+ *    reserva (nada e cobrado, sem taxa de estorno).
+ * Se o valor ja tiver sido capturado, settleUnusedPayment() faz o estorno.
+ */
 import Stripe from "stripe";
-import * as dotenv from "dotenv";
-import { AppointmentModel, IAppointment } from "../models/Appointment";
-import { UserModel } from "../models/User";
+import { AppointmentModel } from "../models/Appointment";
 import { ClientModel } from "../models/Client";
-import { NotificationModel } from "../models/Notification";
 import { ServiceModel } from "../models/Service";
+import { AddressModel } from "../models/Address";
+import { UserModel } from "../models/User";
+import { getStripe } from "../config/stripe";
+import { HttpError } from "../errors/HttpError";
 import { ensureChatRoomForAppointment } from "../utils/chatRoom";
-import { customAlphabet } from "nanoid";
+import logger from "../utils/logger";
 import { syncBotSessionsForAppointmentStatus } from "./botAppointmentStatus.service";
-import { assertNoAppointmentOverlap, ScheduleConflictError, withProfessionalScheduleLock } from "./appointmentSchedule.service";
 import { AppointmentRefundModel } from "../models/AppointmentRefund";
-import { enqueuePaymentRefund } from "./appointmentRefund.service";
+import { enqueuePaymentRefund, settleQueuedPayment } from "./appointmentRefund.service";
+import {
+  assertNoAppointmentOverlap,
+  ScheduleConflictError,
+  withProfessionalScheduleLock,
+} from "./appointmentSchedule.service";
 
-dotenv.config();
+import { errorMessage } from "../utils/errors.util";
+import { PaymentSettlementOperations } from "./payment/settlement";
+export type { PaymentSettlement, PaymentSplit } from "./payment/settlement";
+import type { PaymentSplit } from "./payment/settlement";
+const CURRENCY = "brl";
 
-const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-if (!stripeSecretKey || !stripeSecretKey.startsWith("sk_")) {
-  const errorMsg = "FATAL ERROR: STRIPE_SECRET_KEY não definida corretamente.";
-  console.error(errorMsg);
-  throw new Error(errorMsg);
-}
 
-const stripe = new Stripe(stripeSecretKey, { typescript: true });
-
-const alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const generateShortId = customAlphabet(alphabet, 6);
-
-const generateUniqueShortId = async (
-  model: typeof AppointmentModel,
-  transaction?: any,
-  maxAttempts: number = 10,
-): Promise<string> => {
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    const shortId = generateShortId();
-    const existing = await model.findOne({
-      where: { short_id: shortId },
-      transaction,
-    });
-    if (!existing) {
-      return shortId;
-    }
-  }
-  throw new Error(
-    `Não foi possível gerar um short_id único após ${maxAttempts} tentativas.`,
-  );
-};
-
-// Erro de validação de negócio (ownership/status/valor), com code+status estáveis
-// para o cliente HTTP, sem depender de casamento de texto da mensagem.
-export class PaymentValidationError extends Error {
-  code: string;
-  status: number;
-
-  constructor(message: string, code: string, status: number) {
-    super(message);
-    this.name = "PaymentValidationError";
-    this.code = code;
-    this.status = status;
-  }
-}
-
-// ============================================================
-// Interfaces
-// ============================================================
 interface PaymentIntentParams {
   amount: number;
   currency: string;
   metadata?: { [key: string]: string | number | null };
 }
 
-// ============================================================
-// Serviço de Pagamento
-// ============================================================
+export interface BookingPaymentInput {
+  professionalId: unknown;
+  serviceId: unknown;
+  selectedTime: unknown;
+  addressId: unknown;
+  appointmentId?: unknown;
+}
+
+/** Preco do servico em centavos (inteiro). */
+export function servicePriceInCents(service: {
+  price?: number | string | null;
+  price_cents?: number | null;
+}): number {
+  if (service.price_cents && service.price_cents > 0) {
+    return Math.round(service.price_cents);
+  }
+  const cents = Math.round(Number(service.price) * 100);
+  if (!Number.isFinite(cents) || cents <= 0) {
+    throw HttpError.badRequest("Serviço sem preço válido para pagamento");
+  }
+  return cents;
+}
+
+async function requireOwnedAddress(userId: number, addressId: unknown) {
+  const id = Number(addressId);
+  const address = Number.isInteger(id) ? await AddressModel.findByPk(id) : null;
+  if (!address || address.user_id !== userId) {
+    throw HttpError.notFound("Endereço do cliente não encontrado");
+  }
+  return address;
+}
+
+async function requireClient(userId: number) {
+  const client = await ClientModel.findOne({ where: { user_id: userId } });
+  if (!client) throw HttpError.forbidden("Cliente não encontrado para o usuário.");
+  return client;
+}
+
+/**
+ * Agendamento pre-existente (criado pelo chatbot) que o usuario vai pagar.
+ * Precisa ser do proprio cliente, estar pendente e ainda nao pago.
+ */
+/**
+ * Agendamento ja existente (ex.: pre-criado pelo chatbot) que o cliente vai
+ * pagar. Aceita o identificador publico do app (short_id) ou a chave numerica.
+ */
+async function requirePayableAppointment(userId: number, appointmentId: unknown) {
+  const client = await requireClient(userId);
+  const raw = String(appointmentId ?? "").trim();
+  const appointment =
+    (raw ? await AppointmentModel.findOne({ where: { short_id: raw.toUpperCase() } }) : null) ??
+    (/^\d+$/.test(raw) ? await AppointmentModel.findByPk(Number(raw)) : null);
+  if (!appointment || appointment.client_id !== client.id) {
+    throw HttpError.notFound("Agendamento não encontrado");
+  }
+  if (appointment.status !== "pending") {
+    throw HttpError.badRequest(
+      `Não é possível pagar um agendamento com status '${appointment.status}'`,
+    );
+  }
+  if (appointment.payment_intent_id) {
+    throw HttpError.conflict("Este agendamento já foi pago");
+  }
+  return appointment;
+}
+
+/** Resultado da confirmacao calculado dentro da trava (erros saem depois do commit). */
+type ConfirmOutcome =
+  | { appointment: AppointmentModel; created: boolean; changed: boolean; title?: string }
+  | { error: HttpError; compensated: boolean };
+
+function rejected(error: HttpError): ConfirmOutcome {
+  return { error, compensated: false };
+}
+
+async function notifyPaymentConfirmation(
+  userId: number,
+  appointment: AppointmentModel,
+  serviceTitle: string,
+  isNewAppointment: boolean,
+) {
+  // Import tardio: evita ciclo payment.service <-> appointment.service.
+  const notifications = await import("./appointment/appointment.notifications");
+  if (!isNewAppointment) {
+    await notifications.notifyPaymentConfirmed(
+      userId,
+      appointment.id,
+      serviceTitle,
+      appointment.start_time,
+    );
+    return;
+  }
+  const { ProfessionalModel } = await import("../models/Professional");
+  const [professional, user] = await Promise.all([
+    ProfessionalModel.findByPk(appointment.professional_id, { attributes: ["user_id"] }),
+    UserModel.findByPk(userId, { attributes: ["id", "name"] }),
+  ]);
+  await notifications.notifyAppointmentCreated({
+    appointmentId: appointment.id,
+    startTime: appointment.start_time,
+    serviceTitle,
+    clientUserId: userId,
+    clientName: user?.name,
+    professionalUserId: professional?.user_id,
+  });
+}
+
 export const PaymentService = {
-  /**
-   * Cria um PaymentIntent no Stripe e retorna o client_secret.
-   */
+  ...PaymentSettlementOperations,
+
+  /** Cria um PaymentIntent no Stripe e retorna o client_secret. */
   createPaymentIntent: async ({
     amount,
     currency,
     metadata,
   }: PaymentIntentParams): Promise<string> => {
     try {
-      // amount deve ser em centavos (inteiro)
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: Math.round(amount), // garante inteiro
-        currency: currency,
-        automatic_payment_methods: {
-          enabled: true,
-        },
-        metadata: metadata,
+      const paymentIntent = await getStripe().paymentIntents.create({
+        amount: Math.round(amount),
+        currency,
+        automatic_payment_methods: { enabled: true },
+        // Reserva o valor no cartao; a cobranca so ocorre na aceitacao.
+        capture_method: "manual",
+        metadata: metadata as Stripe.MetadataParam,
       });
 
       if (!paymentIntent.client_secret) {
-        console.error(
-          "[PaymentService] Erro crítico: PaymentIntent criado sem client_secret.",
-          paymentIntent,
-        );
-        throw new Error(
-          "Falha ao obter o identificador de pagamento do provedor.",
-        );
+        throw new Error("Falha ao obter o identificador de pagamento do provedor.");
       }
-
       return paymentIntent.client_secret;
-    } catch (error: any) {
-      console.error(
-        "[PaymentService] Erro na API do Stripe ao criar Payment Intent:",
-        error,
-      );
+    } catch (error) {
+      logger.error("[PaymentService] Erro na API do Stripe ao criar Payment Intent", {
+        reason: errorMessage(error),
+      });
       throw new Error(
         `Erro ao iniciar o processo de pagamento: ${
-          error.message || "Erro desconhecido do provedor de pagamento."
+          errorMessage(error, "Erro desconhecido do provedor de pagamento.")
         }`,
       );
     }
   },
 
   /**
-   * Confirma o pagamento, valida o status e cria o agendamento.
-   * Gera short_id automaticamente em UPPERCASE.
+   * Inicia o pagamento de um agendamento. O valor vem do preco do servico
+   * (nunca do cliente) e o PaymentIntent fica vinculado ao usuario.
+   */
+  createBookingPaymentIntent: async (
+    userId: number,
+    input: BookingPaymentInput,
+  ): Promise<string> => {
+    const { validateBookingRequest } = await import("./appointment/appointment.service");
+
+    let service: ServiceModel;
+    let professionalId: number;
+    let startIso: string;
+    let payable: AppointmentModel | null = null;
+
+    if (input.appointmentId) {
+      const appointment = await requirePayableAppointment(userId, input.appointmentId);
+      payable = appointment;
+      await requireOwnedAddress(userId, input.addressId);
+      const found = await ServiceModel.findByPk(appointment.service_id);
+      if (!found) throw HttpError.notFound("Serviço não encontrado");
+      service = found;
+      professionalId = appointment.professional_id;
+      startIso = appointment.start_time.toISOString();
+    } else {
+      if (!input.professionalId || !input.selectedTime || !input.serviceId || !input.addressId) {
+        throw HttpError.badRequest(
+          "Dados do agendamento (professionalId, selectedTime, serviceId, addressId) são obrigatórios.",
+        );
+      }
+      const start = new Date(String(input.selectedTime));
+      const validated = await validateBookingRequest({
+        userId,
+        professionalId: Number(input.professionalId),
+        serviceId: Number(input.serviceId),
+        addressId: Number(input.addressId),
+        start,
+      });
+      service = validated.service;
+      professionalId = validated.professional.id;
+      startIso = start.toISOString();
+    }
+
+    // Reserva existente cobra o preco combinado nela (o mesmo conferido na confirmacao).
+    const amount =
+      payable?.final_price != null
+        ? Math.round(Number(payable.final_price) * 100)
+        : servicePriceInCents(service);
+
+    return PaymentService.createPaymentIntent({
+      amount,
+      currency: CURRENCY,
+      metadata: {
+        userId: String(userId),
+        professionalId: String(professionalId),
+        serviceId: String(service.id),
+        selectedTime: startIso,
+        addressId: String(Number(input.addressId)),
+        ...(payable ? { appointmentId: String(payable.id) } : {}),
+      },
+    });
+  },
+
+  /**
+   * Confirma o pagamento e cria (ou vincula) o agendamento.
+   * Idempotente: repetir a chamada devolve o mesmo agendamento.
+   *
+   * Tudo roda sob a trava da agenda do profissional. Se a reserva nao puder ser
+   * gravada (horario ocupado, valor divergente, agendamento cancelado...), o
+   * pagamento entra na fila de devolucao no mesmo commit e o erro so e
+   * devolvido depois dele; em seguida tentamos liberar o valor na hora.
    */
   confirmAndCreateAppointment: async (
     paymentIntentId: string,
     authenticatedUserId: number,
-  ): Promise<IAppointment> => {
+  ): Promise<AppointmentModel> => {
+    if (typeof paymentIntentId !== "string" || !paymentIntentId.startsWith("pi_")) {
+      throw HttpError.badRequest("O ID do pagamento (paymentIntentId) é inválido.");
+    }
+
     let paymentIntent: Stripe.PaymentIntent;
     try {
-      paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-    } catch (error: any) {
-      console.error(
-        "[PaymentService] Erro ao buscar PaymentIntent no Stripe:",
-        error.message,
-      );
-      throw new Error(`Erro ao verificar pagamento: ${error.message}`);
+      paymentIntent = await getStripe().paymentIntents.retrieve(paymentIntentId);
+    } catch (error) {
+      throw HttpError.badRequest(`Erro ao verificar pagamento: ${errorMessage(error)}`);
     }
 
-    if (paymentIntent.status !== "succeeded") {
-      console.warn(
-        `[PaymentService] Tentativa de confirmação de pagamento não sucedido (Status: ${paymentIntent.status})`,
-      );
-      throw new Error("O pagamento não foi concluído com sucesso.");
-    }
-
-    const metadata = paymentIntent.metadata;
-    const professionalId = metadata.professionalId;
-    const serviceId = metadata.serviceId;
-    const selectedTime = metadata.selectedTime;
-    const addressId = metadata.addressId;
-
-    if (!professionalId || !serviceId || !selectedTime || !addressId) {
-      throw new Error(
-        "Dados do agendamento ausentes nos metadados do pagamento.",
+    const metadata = paymentIntent.metadata || {};
+    if (Number(metadata.userId) !== authenticatedUserId) {
+      throw HttpError.forbidden("Este pagamento não pertence ao usuário autenticado.").withCode(
+        "PAYMENT_NOT_OWNED",
       );
     }
 
-    // Valida cliente
-    const user = await UserModel.findByPk(authenticatedUserId);
-    if (!user) {
-      throw new Error("Cliente (usuário) não encontrado.");
+    const professionalId = Number(metadata.professionalId);
+    const serviceId = Number(metadata.serviceId);
+    const addressId = Number(metadata.addressId);
+    const startTime = new Date(String(metadata.selectedTime));
+    if (
+      ![professionalId, serviceId, addressId].every((id) => Number.isSafeInteger(id) && id > 0) ||
+      Number.isNaN(startTime.getTime())
+    ) {
+      throw new HttpError(422, "Dados do agendamento ausentes nos metadados do pagamento.").withCode(
+        "INVALID_METADATA",
+      );
     }
-    const client = await ClientModel.findOne({
-      where: { user_id: authenticatedUserId },
-    });
-    if (!client) {
-      throw new Error("Cliente não encontrado para o usuário.");
-    }
-    const clientId = client.id;
 
-    const professionalIdNumber = Number(professionalId);
-    const serviceIdNumber = Number(serviceId);
-    const addressIdNumber = Number(addressId);
-    if (![professionalIdNumber, serviceIdNumber, addressIdNumber].every(
-      (id) => Number.isSafeInteger(id) && id > 0,
-    )) throw new PaymentValidationError("Metadados do pagamento inválidos.", "INVALID_METADATA", 422);
+    const client = await requireClient(authenticatedUserId);
+    // "requires_capture" = valor reservado; "succeeded" cobre pagamentos antigos.
+    const authorized = ["requires_capture", "succeeded"].includes(paymentIntent.status);
 
-    type Outcome =
-      | { appointment: AppointmentModel; changed: boolean; created: boolean; title?: string }
-      | { error: PaymentValidationError };
-
-    const outcome = await withProfessionalScheduleLock<Outcome>(
-      professionalIdNumber,
+    const outcome = await withProfessionalScheduleLock<ConfirmOutcome>(
+      professionalId,
       async (transaction) => {
-        // Repetições são reconhecidas antes do catálogo e do estado atual da reserva.
-        // A remarcação pode ter alterado o horário; o pagamento continua sendo o mesmo.
+        // Repeticoes sao reconhecidas antes do estado atual da reserva.
         const linked = await AppointmentModel.findOne({
           where: { payment_intent_id: paymentIntentId },
           transaction,
           lock: transaction.LOCK.UPDATE,
         });
         if (linked) {
-          if (linked.client_id !== clientId)
-            throw new PaymentValidationError("Pagamento pertence a outro cliente.", "PAYMENT_NOT_OWNED", 403);
-          return { appointment: linked, changed: false, created: false };
+          if (linked.client_id !== client.id) {
+            return rejected(
+              HttpError.forbidden("Pagamento pertence a outro cliente.").withCode("PAYMENT_NOT_OWNED"),
+            );
+          }
+          return { appointment: linked, created: false, changed: false };
+        }
+        if (!authorized) {
+          return rejected(HttpError.badRequest("O pagamento não foi autorizado."));
         }
 
-        // Um pagamento destinado a estorno não pode voltar a financiar uma reserva.
+        // Um pagamento destinado a devolucao nao pode voltar a financiar uma reserva.
         const refund = await AppointmentRefundModel.findOne({
-          where: { payment_intent_id: paymentIntentId }, transaction,
+          where: { payment_intent_id: paymentIntentId },
+          transaction,
         });
-        if (refund)
-          throw new PaymentValidationError("Este pagamento está em processo de estorno ou já foi estornado.", "PAYMENT_REFUND_PENDING", 409);
-
-        let existing: AppointmentModel | null = null;
-        if (metadata.appointmentId) {
-          existing = await AppointmentModel.findOne({
-            where: { id: Number(metadata.appointmentId), client_id: clientId },
-            transaction, lock: transaction.LOCK.UPDATE,
-          });
-          if (!existing)
-            throw new PaymentValidationError("Agendamento não encontrado ou não pertence a este usuário.", "APPOINTMENT_NOT_OWNED", 404);
-          if (existing.professional_id !== professionalIdNumber || existing.service_id !== serviceIdNumber)
-            throw new PaymentValidationError("Pagamento não corresponde ao serviço e profissional da reserva.", "APPOINTMENT_MISMATCH", 409);
+        if (refund) {
+          return rejected(
+            HttpError.conflict(
+              "Este pagamento está em processo de devolução ou já foi devolvido.",
+            ).withCode("PAYMENT_REFUND_PENDING"),
+          );
         }
 
-        // Retorna o erro somente DEPOIS do commit, para preservar a compensação.
-        const compensate = async (message: string, code: string, status: number): Promise<Outcome> => {
+        const existing = metadata.appointmentId
+          ? await AppointmentModel.findOne({
+              where: { id: Number(metadata.appointmentId), client_id: client.id },
+              transaction,
+              lock: transaction.LOCK.UPDATE,
+            })
+          : null;
+
+        const compensate = async (error: HttpError): Promise<ConfirmOutcome> => {
           await enqueuePaymentRefund(paymentIntentId, existing?.id ?? null, transaction);
-          return { error: new PaymentValidationError(message, code, status) };
+          return { error, compensated: true };
         };
-        if (existing?.payment_intent_id)
-          return compensate("Este agendamento já possui outro pagamento registrado.", "APPOINTMENT_ALREADY_PAID", 409);
-        if (existing && (existing.status === "completed" || existing.status === "canceled"))
-          return compensate("Este agendamento não pode mais receber pagamento. O estorno será processado.", "APPOINTMENT_NOT_PAYABLE", 409);
 
-        const service = await ServiceModel.findByPk(serviceIdNumber, { transaction });
-        if (!service?.active || service.professional_id !== professionalIdNumber)
-          return compensate("Serviço indisponível para receber pagamento.", "SERVICE_UNAVAILABLE", 409);
+        if (metadata.appointmentId) {
+          if (!existing) {
+            return compensate(
+              HttpError.notFound(
+                "Agendamento não encontrado ou não pertence a este usuário.",
+              ).withCode("APPOINTMENT_NOT_OWNED"),
+            );
+          }
+          if (existing.professional_id !== professionalId || existing.service_id !== serviceId) {
+            return compensate(
+              HttpError.conflict(
+                "Pagamento não corresponde ao serviço e profissional da reserva.",
+              ).withCode("APPOINTMENT_MISMATCH"),
+            );
+          }
+          if (existing.payment_intent_id) {
+            return compensate(
+              HttpError.conflict("Este agendamento já possui outro pagamento registrado.").withCode(
+                "APPOINTMENT_ALREADY_PAID",
+              ),
+            );
+          }
+          if (existing.status !== "pending") {
+            return compensate(
+              HttpError.conflict("Este agendamento não pode mais receber pagamento.").withCode(
+                "APPOINTMENT_NOT_PAYABLE",
+              ),
+            );
+          }
+        }
 
-        const expectedAmountCents = existing?.final_price != null
-          ? Math.round(Number(existing.final_price) * 100)
-          : service.price_cents ?? Math.round(Number(service.price) * 100);
-        const chargedAmountCents = paymentIntent.amount_received;
-        if (!Number.isSafeInteger(expectedAmountCents) || expectedAmountCents <= 0 || chargedAmountCents !== expectedAmountCents)
-          return compensate("O valor cobrado não corresponde ao valor do serviço contratado.", "AMOUNT_MISMATCH", 422);
+        const service = await ServiceModel.findByPk(serviceId, { transaction });
+        if (!service?.active || service.professional_id !== professionalId) {
+          return compensate(
+            HttpError.conflict("Serviço indisponível para receber pagamento.").withCode(
+              "SERVICE_UNAVAILABLE",
+            ),
+          );
+        }
+        const expectedCents =
+          existing?.final_price != null
+            ? Math.round(Number(existing.final_price) * 100)
+            : servicePriceInCents(service);
+        if (paymentIntent.amount !== expectedCents) {
+          return compensate(
+            new HttpError(
+              422,
+              "O valor do pagamento não corresponde ao valor do serviço contratado.",
+            ).withCode("AMOUNT_MISMATCH"),
+          );
+        }
 
         if (existing) {
           existing.payment_intent_id = paymentIntentId;
-          existing.final_price ??= chargedAmountCents / 100;
-          if (!existing.short_id) existing.short_id = await generateUniqueShortId(AppointmentModel, transaction);
+          existing.address_id = addressId;
+          existing.final_price ??= expectedCents / 100;
           await existing.save({ transaction });
-          return { appointment: existing, changed: true, created: false, title: service.title };
+          return { appointment: existing, created: false, changed: true, title: service.title };
         }
 
-        const startTime = new Date(selectedTime);
-        const duration = service.duration || 60;
-        const endTime = new Date(startTime.getTime() + duration * 60000);
+        const endTime = new Date(startTime.getTime() + (service.duration || 60) * 60_000);
         try {
-          await assertNoAppointmentOverlap(professionalIdNumber, startTime, endTime, transaction);
+          await assertNoAppointmentOverlap(professionalId, startTime, endTime, transaction);
         } catch (error) {
-          if (error instanceof ScheduleConflictError)
-            return compensate(error.message, "SCHEDULE_CONFLICT", 409);
+          if (error instanceof ScheduleConflictError) {
+            return compensate(
+              new ScheduleConflictError(`${error.message} Nenhum valor foi cobrado.`),
+            );
+          }
           throw error;
         }
-        const appointment = await AppointmentModel.create({
-          professional_id: professionalIdNumber, client_id: clientId,
-          service_id: serviceIdNumber, address_id: addressIdNumber,
-          start_time: startTime, end_time: endTime, status: "pending",
-          payment_intent_id: paymentIntentId, final_price: chargedAmountCents / 100,
-          short_id: await generateUniqueShortId(AppointmentModel, transaction),
-        }, { transaction });
-        return { appointment, changed: true, created: true, title: service.title };
+        const appointment = await AppointmentModel.create(
+          {
+            professional_id: professionalId,
+            client_id: client.id,
+            service_id: serviceId,
+            address_id: addressId,
+            start_time: startTime,
+            end_time: endTime,
+            status: "pending",
+            payment_intent_id: paymentIntentId,
+            final_price: expectedCents / 100,
+          },
+          { transaction },
+        );
+        return { appointment, created: true, changed: true, title: service.title };
       },
     );
 
-    if ("error" in outcome) throw outcome.error;
-    const { appointment, changed, created, title } = outcome;
+    if ("error" in outcome) {
+      // Depois do commit: tenta liberar a reserva agora; se falhar, o cron repete.
+      if (outcome.compensated) await settleQueuedPayment(paymentIntentId);
+      throw outcome.error;
+    }
+    const { appointment, created, changed, title } = outcome;
     if (!changed) return appointment;
 
-    // Efeitos posteriores ao commit nunca provocam estorno do pagamento persistido.
-    // Uma falha de banco/commit acima também não autoriza estorno às cegas:
-    // repetir a confirmação consulta o vínculo ou a compensação já persistida.
+    // Efeitos posteriores ao commit nunca desfazem o pagamento ja vinculado.
     if (created) {
       try {
         await ensureChatRoomForAppointment(appointment);
       } catch (error) {
-        console.error("[PaymentService] Falha ao criar chat após confirmação:", error);
+        logger.warn("[PaymentService] Falha ao criar chat após confirmação", {
+          reason: errorMessage(error),
+        });
       }
     }
     try {
-      await NotificationModel.create({
-        user_id: authenticatedUserId,
-        title: created ? "Agendamento Criado com Sucesso" : "Pagamento Confirmado",
-        message: `O pagamento para o serviço '${title}' foi confirmado. Acompanhe o status do agendamento.`,
-        notification_type: "appointment", related_entity_id: appointment.id, is_read: false,
-      });
+      await notifyPaymentConfirmation(authenticatedUserId, appointment, title ?? "", created);
     } catch (error) {
-      console.error("[PaymentService] Falha ao notificar pagamento confirmado:", error);
+      logger.warn("[PaymentService] Falha ao notificar pagamento confirmado", {
+        reason: errorMessage(error),
+      });
     }
     try {
       await syncBotSessionsForAppointmentStatus(appointment);
-    } catch (error) {
-      console.error("[PaymentService] Falha ao sincronizar pagamento confirmado:", error);
+    } catch (syncError) {
+      logger.warn("[PaymentService] Falha ao sincronizar status no chatbot", {
+        reason: errorMessage(syncError),
+      });
     }
     return appointment;
   },
 
-  /**
-   * Busca o recibo (receipt_url) do pagamento via Stripe.
-   */
+  /** Busca o recibo (receipt_url) do pagamento via Stripe. */
   getAppointmentReceipt: async (
     appointmentId: number,
     authenticatedUserId: number,
   ): Promise<string> => {
-    const client = await ClientModel.findOne({
-      where: { user_id: authenticatedUserId },
-    });
-    if (!client) {
-      throw new Error("Cliente não encontrado.");
-    }
-
+    const client = await requireClient(authenticatedUserId);
     const appointment = await AppointmentModel.findOne({
-      where: {
-        id: appointmentId,
-        client_id: client.id,
-      },
+      where: { id: appointmentId, client_id: client.id },
     });
-
     if (!appointment) {
-      throw new Error(
-        "Agendamento não encontrado ou não pertence a este usuário.",
-      );
+      throw HttpError.notFound("Agendamento não encontrado ou não pertence a este usuário.");
+    }
+    if (!appointment.payment_intent_id) {
+      throw HttpError.notFound("Este agendamento não possui um recibo de pagamento online.");
     }
 
-    const paymentIntentId = appointment.payment_intent_id;
-    if (!paymentIntentId) {
-      throw new Error(
-        "Este agendamento não possui um recibo de pagamento online.",
-      );
+    const paymentIntent = await getStripe().paymentIntents.retrieve(
+      appointment.payment_intent_id,
+      { expand: ["latest_charge"] },
+    );
+    const receiptUrl = (paymentIntent.latest_charge as Stripe.Charge | null)?.receipt_url;
+    if (!receiptUrl) {
+      throw HttpError.notFound("O recibo para este pagamento não está disponível.");
     }
-
-    try {
-      const paymentIntent = await stripe.paymentIntents.retrieve(
-        paymentIntentId,
-        {
-          expand: ["latest_charge"],
-        },
-      );
-
-      const latestCharge = paymentIntent.latest_charge as Stripe.Charge;
-      const receiptUrl = latestCharge?.receipt_url;
-
-      if (!receiptUrl) {
-        console.warn(
-          `[PaymentService] Não foi encontrado receipt_url. Status do PI: ${paymentIntent.status}, Status da Cobrança: ${latestCharge?.status}`,
-        );
-        throw new Error("O recibo para este pagamento não está disponível.");
-      }
-
-      return receiptUrl;
-    } catch (error: any) {
-      console.error(
-        "[PaymentService] Erro ao buscar recibo no Stripe:",
-        error.message,
-      );
-      throw new Error(`Erro ao buscar recibo: ${error.message}`);
-    }
+    return receiptUrl;
   },
 
-  refundPaymentIntent: async (paymentIntentId: string): Promise<boolean> => {
-    try {
-      await stripe.refunds.create({ payment_intent: paymentIntentId });
-      console.log(
-        `[PaymentService] Reembolso acionado com sucesso no Stripe para PI: ${paymentIntentId}`,
-      );
-      return true;
-    } catch (error: any) {
-      console.error(
-        `[PaymentService] Erro ao processar reembolso no Stripe para PI: ${paymentIntentId}`,
-        error.message,
-      );
-      return false;
-    }
-  },
 };

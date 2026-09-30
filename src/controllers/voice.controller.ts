@@ -16,6 +16,7 @@ import {
   voiceCommandIdempotencyStore,
 } from "../services/voiceCommandIdempotency.service";
 
+import { errorMessage } from "../utils/errors.util";
 export const MAX_VOICE_AUDIO_BYTES = 10 * 1024 * 1024;
 
 function requestMimeType(req: AuthenticatedRequest): string {
@@ -251,7 +252,7 @@ export const processVoiceCommand = async (
       logger.info("Voz: resposta idempotente reutilizada", { userId: req.user.id });
     }
     return res.json(execution.result);
-  } catch (error: any) {
+  } catch (error) {
     const expectedResponse = transcriptionErrorResponse(error, res);
     if (expectedResponse) return expectedResponse;
 
@@ -259,8 +260,8 @@ export const processVoiceCommand = async (
       userId: req.user.id,
       sessionId: metadata.sessionId,
     });
-    if (error?.message?.includes("Sessão não encontrada")) {
-      return res.status(404).json({ error: error.message });
+    if (errorMessage(error).includes("Sessão não encontrada")) {
+      return res.status(404).json({ error: errorMessage(error) });
     }
     return res.status(500).json({ error: "Erro interno ao processar comando de voz" });
   } finally {

@@ -1,17 +1,21 @@
 import { ClientModel } from "../../../models/Client";
 import { ProfessionalModel } from "../../../models/Professional";
 import { ServiceModel } from "../../../models/Service";
+import { AddressModel } from "../../../models/Address";
 import { AppointmentModel } from "../../../models/Appointment";
 import { UserModel } from "../../../models/User";
 import { NotificationModel } from "../../../models/Notification";
 import { BotSessionContext } from "../../../models/BotChatSession";
 import {
+  DEFAULT_BOT_TIME_ZONE,
   isValidBookingDate,
   parseLocalAppointmentStart,
 } from "../../../utils/date.util";
 import { getAvailableSlots } from "../../availability.service";
 import { withProfessionalScheduleLock } from "../../appointmentSchedule.service";
 import { ensureChatRoomForAppointment } from "../../../utils/chatRoom";
+import { cancelAppointment, requestReschedule } from "../../appointment/appointment.lifecycle";
+import { MIN_ADVANCE_HOURS } from "../../../constants/booking";
 import logger from "../../../utils/logger";
 
 export function resolveBotAppointmentStart(
@@ -21,7 +25,7 @@ export function resolveBotAppointmentStart(
 ): Date {
   if (!isValidBookingDate(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) {
     throw new Error(
-      "Data ou horário inválido. Escolha uma data com pelo menos dois dias de antecedência.",
+      `Data ou horário inválido. Escolha um horário com pelo menos ${MIN_ADVANCE_HOURS} horas de antecedência.`,
     );
   }
   const start = parseLocalAppointmentStart(date, time);
@@ -81,7 +85,12 @@ export async function createBotAppointment(
   );
   const endTime = new Date(startTime.getTime() + service.duration * 60000);
 
-  const addressId = clientRecord.main_address_id ?? 1; // fallback
+  // Endereco provisorio: o principal do cliente ou, na falta, o primeiro
+  // cadastrado. O endereco definitivo e escolhido na tela de pagamento.
+  const addressId =
+    clientRecord.main_address_id ??
+    (await AddressModel.findOne({ where: { user_id: userId }, attributes: ["id"] }))?.id;
+  if (!addressId) throw new Error("Cadastre um endereço no seu perfil antes de agendar.");
   const appointment = await withProfessionalScheduleLock(
     professionalId,
     async (transaction) => {
@@ -134,7 +143,7 @@ export async function createBotAppointment(
     const clientUser = await UserModel.findByPk(clientRecord.user_id);
     const profUser = await UserModel.findByPk(professional.user_id);
     const dateStr = startTime.toLocaleDateString("pt-BR", {
-      timeZone: "America/Sao_Paulo",
+      timeZone: DEFAULT_BOT_TIME_ZONE,
     });
     const timeStr = normalizedTime;
 
@@ -171,7 +180,13 @@ export async function createBotAppointment(
   return appointment;
 }
 
-/** Altera a reserva existente: identidade, endereço, preço e pagamento são preservados. */
+/**
+ * Remarca pelo chatbot.
+ * - Reserva ainda nao paga (pre-criada pelo bot): muda o horario na hora, sob a
+ *   trava da agenda; identidade e endereco sao preservados.
+ * - Reserva paga ou confirmada: segue o mesmo ciclo do app, virando um pedido
+ *   de reagendamento que o profissional precisa aceitar (o dinheiro nao muda).
+ */
 export async function rescheduleBotAppointment(
   userId: number,
   ctx: BotSessionContext,
@@ -184,10 +199,24 @@ export async function rescheduleBotAppointment(
     : null;
   if (!original || original.client_id !== client.id)
     throw new Error("Agendamento não encontrado");
+  if (
+    (ctx.professionalId && ctx.professionalId !== original.professional_id) ||
+    (ctx.serviceId && ctx.serviceId !== original.service_id)
+  ) {
+    throw new Error("A remarcação deve manter o serviço e o profissional originais");
+  }
   const date = ctx.newDate ?? ctx.date;
   const time = (ctx.newTime ?? ctx.time)?.trim();
   if (!date || !time) throw new Error("Informe a nova data e horário");
   const start = resolveBotAppointmentStart(date, time, selectedTimeIso);
+
+  if (original.payment_intent_id || original.status === "confirmed") {
+    await requestReschedule(userId, String(original.id), start.toISOString());
+    const updated = await AppointmentModel.findByPk(original.id);
+    if (!updated) throw new Error("Agendamento não encontrado");
+    return updated;
+  }
+
   let changed = false;
   const appointment = await withProfessionalScheduleLock(
     original.professional_id,
@@ -198,115 +227,57 @@ export async function rescheduleBotAppointment(
       });
       if (!current || current.client_id !== client.id)
         throw new Error("Agendamento não encontrado");
-      if (current.status !== "pending" && current.status !== "confirmed")
-        throw new Error("Este agendamento não pode ser remarcado");
-      if (
-        current.professional_id !== original.professional_id ||
-        (ctx.professionalId &&
-          ctx.professionalId !== current.professional_id) ||
-        (ctx.serviceId && ctx.serviceId !== current.service_id)
-      ) {
-        throw new Error(
-          "A remarcação deve manter o serviço e o profissional originais",
-        );
-      }
-      const service = await ServiceModel.findByPk(current.service_id, {
-        transaction,
-      });
-      if (
-        !service?.active ||
-        service.professional_id !== current.professional_id
-      )
-        throw new Error("Serviço inativo ou inválido");
+      if (current.status !== "pending" || current.payment_intent_id)
+        throw new Error("Este agendamento não pode ser remarcado por aqui");
       // A duração contratada também pertence à reserva, não ao catálogo atual.
       const duration =
-        (new Date(current.end_time).getTime() -
-          new Date(current.start_time).getTime()) /
-        60000;
+        (new Date(current.end_time).getTime() - new Date(current.start_time).getTime()) / 60000;
       if (!Number.isFinite(duration) || duration <= 0)
         throw new Error("Duração do agendamento inválida");
-      if (new Date(current.start_time).getTime() === start.getTime())
-        return current;
+      if (new Date(current.start_time).getTime() === start.getTime()) return current;
       const slots = await getAvailableSlots(
         current.professional_id,
         date,
         duration,
         current.service_id,
-        {
-          transaction,
-          excludeAppointmentId: current.id,
-        },
+        { transaction, excludeAppointmentId: current.id },
       );
       if (!slots.includes(time))
-        throw new Error(
-          "Horário não está mais disponível. Por favor, escolha outro horário.",
-        );
+        throw new Error("Horário não está mais disponível. Por favor, escolha outro horário.");
       current.start_time = start;
       current.end_time = new Date(start.getTime() + duration * 60000);
-      current.status = "pending"; // Nova data requer novo aceite; pagamento permanece vinculado.
       await current.save({ transaction });
       changed = true;
       return current;
     },
   );
   if (changed) {
-    try {
-      const professional = await ProfessionalModel.findByPk(
-        appointment.professional_id,
-      );
-      const recipients = [userId, professional?.user_id].filter(
-        (id): id is number => id !== undefined,
-      );
-      await NotificationModel.bulkCreate(
-        recipients.map((id) => ({
-          user_id: id,
-          title: "Agendamento Remarcado",
-          message: `Agendamento ${appointment.short_id || appointment.id} remarcado para ${date} às ${time}. Aguardando aceite do profissional.`,
-          notification_type: "appointment",
-          related_entity_id: appointment.id,
-          is_read: false,
-        })),
-      );
-    } catch {
-      logger.warn("Bot: falha ao notificar remarcação", {
-        appointmentId: appointment.id,
-      });
-    }
+    logger.info("Bot: reserva não paga remarcada via chatbot", {
+      appointmentId: appointment.id,
+      userId,
+    });
   }
   return appointment;
 }
 
+/**
+ * Cancela pelo chatbot com a mesma regra do app: aplica a politica de
+ * cancelamento e devolve (ou libera) o valor do pagamento.
+ */
 export async function cancelBotAppointment(
   userId: number,
   appointmentId: number,
 ): Promise<void> {
-  const clientRecord = await ClientModel.findOne({
-    where: { user_id: userId },
-  });
+  const clientRecord = await ClientModel.findOne({ where: { user_id: userId } });
   if (!clientRecord) throw new Error("Usuário não possui perfil de cliente");
-
-  const original = await AppointmentModel.findByPk(appointmentId);
-  if (!original || original.client_id !== clientRecord.id)
+  const appointment = await AppointmentModel.findByPk(appointmentId);
+  if (!appointment || appointment.client_id !== clientRecord.id)
     throw new Error("Agendamento não encontrado");
-  await withProfessionalScheduleLock(
-    original.professional_id,
-    async (transaction) => {
-      const appointment = await AppointmentModel.findByPk(appointmentId, {
-        transaction,
-        lock: transaction.LOCK.UPDATE,
-      });
-      if (!appointment || appointment.client_id !== clientRecord.id)
-        throw new Error("Agendamento não encontrado");
-      if (appointment.status === "completed")
-        throw new Error("Não é possível cancelar um agendamento já concluído");
-      if (appointment.status === "canceled")
-        throw new Error("Este agendamento já está cancelado");
-      appointment.status = "canceled";
-      await appointment.save({ transaction });
-    },
-  );
-  logger.info("Bot: agendamento cancelado via chatbot", {
-    appointmentId,
-    userId,
-  });
+  if (appointment.status === "completed")
+    throw new Error("Não é possível cancelar um agendamento já concluído");
+  if (appointment.status === "canceled")
+    throw new Error("Este agendamento já está cancelado");
+
+  await cancelAppointment(userId, String(appointment.id), "Cancelado pelo assistente virtual");
+  logger.info("Bot: agendamento cancelado via chatbot", { appointmentId, userId });
 }
