@@ -52,9 +52,13 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex("notifications", ["user_id", "is_read"], {
-      name: "idx_notifications_user_read",
-    });
+    try {
+      await queryInterface.addIndex("notifications", ["user_id", "is_read"], {
+        name: "idx_notifications_user_read",
+      });
+    } catch (err) {
+      console.log("Índice idx_notifications_user_read já existe, ignorando...");
+    }
   },
   down: async (queryInterface, Sequelize) => {
     await queryInterface.dropTable("notifications");

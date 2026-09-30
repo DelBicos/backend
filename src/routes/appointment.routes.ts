@@ -6,10 +6,12 @@ import {
   getAppointmentInvoice,
   updateAppointmentStatus,
   createAppointment,
+  cancelClientAppointment,
 } from "../controllers/appointment.controller";
 import authMiddleware from "../middlewares/auth.middleware";
 
 const router = Router();
+router.post("/:id/cancel", authMiddleware, cancelClientAppointment);
 
 /**
  * @swagger
@@ -379,7 +381,7 @@ router.get("/user/:id", getAllAppointments);
  *       500:
  *         description: Erro interno do servidor
  */
-router.post("/:id/confirm", confirmAppointment);
+router.post("/:id/confirm", authMiddleware, confirmAppointment);
 
 /**
  * @swagger

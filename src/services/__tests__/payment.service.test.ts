@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+jest.mock("../botAppointmentStatus.service", () => ({ syncBotSessionsForAppointmentStatus: jest.fn() }));
 
 jest.mock("../../config/database", () => {
   const { Sequelize } = require("sequelize");

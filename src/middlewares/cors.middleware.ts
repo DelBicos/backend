@@ -33,7 +33,21 @@ export const corsOptions: CorsOptions = {
   },
   credentials: true,
   methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "Cache-Control", "Pragma", "Expires", "X-Requested-With"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "Cache-Control",
+    "Pragma",
+    "Expires",
+    "X-Requested-With",
+    "X-Voice-Language",
+    "X-Voice-Session-Id",
+    "X-Voice-Channel",
+    "X-Voice-Selected-Time",
+    "X-Voice-Timezone",
+    "Idempotency-Key",
+  ],
+  exposedHeaders: ["Idempotency-Replayed", "RateLimit-Limit", "RateLimit-Remaining", "RateLimit-Reset"],
   maxAge: 86400,
 };
 

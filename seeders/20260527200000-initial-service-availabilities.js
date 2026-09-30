@@ -1,95 +1,223 @@
 "use strict";
 
 /**
- * Popula service_availability para os serviços já criados pelo seeder 007.
- * Cada serviço recebe disponibilidades em dias úteis (seg–sex) com dois turnos.
+ * Disponibilidades dos serviços iniciais do seeder 007.
+ *
+ * Os serviços são localizados pela chave estável e-mail + título. Isso evita
+ * associar horários ao serviço errado quando os IDs mudam ou outros registros
+ * são inseridos antes deles. A execução é idempotente.
  */
+const INITIAL_SERVICE_SCHEDULES = [
+  {
+    email: "fernando@delbicos.com.br",
+    title: "Abertura de Fechaduras",
+    slots: [
+      { day: 1, start: "08:00:00", end: "12:00:00" },
+      { day: 3, start: "08:00:00", end: "12:00:00" },
+      { day: 5, start: "08:00:00", end: "12:00:00" },
+    ],
+  },
+  {
+    email: "isabel@delbicos.com.br",
+    title: "Instalação de Tomadas",
+    slots: [
+      { day: 2, start: "13:00:00", end: "18:00:00" },
+      { day: 4, start: "13:00:00", end: "18:00:00" },
+    ],
+  },
+  {
+    email: "douglas@delbicos.com.br",
+    title: "Desentupimento de Pia",
+    slots: [1, 2, 3, 4, 5].map((day) => ({
+      day,
+      start: "09:00:00",
+      end: "17:00:00",
+    })),
+  },
+  {
+    email: "gustavo@delbicos.com.br",
+    title: "Instalação de Aquecedor a Gás",
+    slots: [{ day: 6, start: "08:00:00", end: "16:00:00" }],
+  },
+  {
+    email: "eduardo@delbicos.com.br",
+    title: "Limpeza Completa pós Reforma",
+    slots: [
+      { day: 1, start: "07:00:00", end: "11:00:00" },
+      { day: 1, start: "14:00:00", end: "18:00:00" },
+      { day: 3, start: "07:00:00", end: "11:00:00" },
+      { day: 3, start: "14:00:00", end: "18:00:00" },
+    ],
+  },
+  {
+    email: "iago@delbicos.com.br",
+    title: "Montagem de Móveis",
+    slots: [1, 2, 3, 4, 5, 6].map((day) => ({
+      day,
+      start: "08:00:00",
+      end: "19:00:00",
+    })),
+  },
+  {
+    email: "lucas@delbicos.com.br",
+    title: "Móveis sob Medida",
+    slots: [0, 6].map((day) => ({
+      day,
+      start: "10:00:00",
+      end: "15:00:00",
+    })),
+  },
+];
+
+function normalizeTime(value) {
+  if (value == null) return "";
+  const text = String(value);
+  return /^\d{2}:\d{2}$/.test(text) ? `${text}:00` : text;
+}
+
+function availabilityKey(serviceId, slot) {
+  return (
+    `${serviceId}|${slot.day}|` +
+    `${normalizeTime(slot.start)}|${normalizeTime(slot.end)}`
+  );
+}
+
+async function selectRows(
+  queryInterface,
+  Sequelize,
+  sql,
+  replacements,
+  transaction,
+) {
+  return queryInterface.sequelize.query(sql, {
+    replacements,
+    type: Sequelize.QueryTypes.SELECT,
+    transaction,
+  });
+}
+
 module.exports = {
   async up(queryInterface, Sequelize) {
-    // Buscar os primeiros 7 serviços (os criados pelo seeder 007)
-    const services = await queryInterface.sequelize.query(
-      `SELECT id FROM service ORDER BY id LIMIT 7`,
-      { type: Sequelize.QueryTypes.SELECT },
-    );
+    await queryInterface.sequelize.transaction(async (transaction) => {
+      const emails = INITIAL_SERVICE_SCHEDULES.map((item) => item.email);
+      const services = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT s.id AS service_id, s.title, u.email
+         FROM service s
+         INNER JOIN professional p ON p.id = s.professional_id
+         INNER JOIN users u ON u.id = p.user_id
+         WHERE u.email IN (:emails)`,
+        { emails },
+        transaction,
+      );
+      const serviceByPair = new Map(
+        services.map((service) => [
+          `${service.email}|${service.title}`,
+          Number(service.service_id),
+        ]),
+      );
+      const serviceIds = [...serviceByPair.values()];
+      if (serviceIds.length === 0) {
+        console.warn("Nenhum serviço inicial foi encontrado para criar horários.");
+        return;
+      }
 
-    if (services.length === 0) return;
+      const existing = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT service_id, day_of_week, start_time, end_time
+         FROM service_availability
+         WHERE service_id IN (:serviceIds)`,
+        { serviceIds },
+        transaction,
+      );
+      const existingKeys = new Set(
+        existing.map((row) =>
+          availabilityKey(Number(row.service_id), {
+            day: Number(row.day_of_week),
+            start: row.start_time,
+            end: row.end_time,
+          }),
+        ),
+      );
+      const now = new Date();
+      const rows = INITIAL_SERVICE_SCHEDULES.flatMap((schedule) => {
+        const serviceId = serviceByPair.get(
+          `${schedule.email}|${schedule.title}`,
+        );
+        if (!serviceId) {
+          console.warn(
+            `Serviço "${schedule.title}" de ${schedule.email} não encontrado.`,
+          );
+          return [];
+        }
 
-    const now = new Date();
-
-    // Padrões de disponibilidade variados para tornar os dados de dev realistas
-    const patterns = [
-      // seg, qua, sex — manhã
-      [
-        { day: 1, start: "08:00", end: "12:00" },
-        { day: 3, start: "08:00", end: "12:00" },
-        { day: 5, start: "08:00", end: "12:00" },
-      ],
-      // ter, qui — tarde
-      [
-        { day: 2, start: "13:00", end: "18:00" },
-        { day: 4, start: "13:00", end: "18:00" },
-      ],
-      // seg–sex — período integral
-      [
-        { day: 1, start: "09:00", end: "17:00" },
-        { day: 2, start: "09:00", end: "17:00" },
-        { day: 3, start: "09:00", end: "17:00" },
-        { day: 4, start: "09:00", end: "17:00" },
-        { day: 5, start: "09:00", end: "17:00" },
-      ],
-      // sab — dia inteiro
-      [{ day: 6, start: "08:00", end: "16:00" }],
-      // seg, qua — manhã e tarde
-      [
-        { day: 1, start: "07:00", end: "11:00" },
-        { day: 1, start: "14:00", end: "18:00" },
-        { day: 3, start: "07:00", end: "11:00" },
-        { day: 3, start: "14:00", end: "18:00" },
-      ],
-      // ter, qui, sab — manhã
-      [
-        { day: 2, start: "08:00", end: "13:00" },
-        { day: 4, start: "08:00", end: "13:00" },
-        { day: 6, start: "08:00", end: "13:00" },
-      ],
-      // dom, sab — fim de semana
-      [
-        { day: 0, start: "10:00", end: "15:00" },
-        { day: 6, start: "10:00", end: "15:00" },
-      ],
-    ];
-
-    const rows = [];
-    services.forEach((svc, index) => {
-      const pattern = patterns[index % patterns.length];
-      pattern.forEach(({ day, start, end }) => {
-        rows.push({
-          service_id: svc.id,
-          day_of_week: day,
-          start_time: start,
-          end_time: end,
-          created_at: now,
-          updated_at: now,
+        return schedule.slots.flatMap((slot) => {
+          const key = availabilityKey(serviceId, slot);
+          if (existingKeys.has(key)) return [];
+          existingKeys.add(key);
+          return [
+            {
+              service_id: serviceId,
+              day_of_week: slot.day,
+              start_time: slot.start,
+              end_time: slot.end,
+              created_at: now,
+              updated_at: now,
+            },
+          ];
         });
       });
-    });
 
-    await queryInterface.bulkInsert("service_availability", rows);
+      if (rows.length > 0) {
+        await queryInterface.bulkInsert("service_availability", rows, {
+          transaction,
+        });
+      }
+      console.log(`Horários dos serviços iniciais criados: ${rows.length}.`);
+    });
   },
 
   async down(queryInterface, Sequelize) {
-    const services = await queryInterface.sequelize.query(
-      `SELECT id FROM service ORDER BY id LIMIT 7`,
-      { type: Sequelize.QueryTypes.SELECT },
-    );
+    await queryInterface.sequelize.transaction(async (transaction) => {
+      const emails = INITIAL_SERVICE_SCHEDULES.map((item) => item.email);
+      const services = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT s.id AS service_id, s.title, u.email
+         FROM service s
+         INNER JOIN professional p ON p.id = s.professional_id
+         INNER JOIN users u ON u.id = p.user_id
+         WHERE u.email IN (:emails)`,
+        { emails },
+        transaction,
+      );
+      const serviceByPair = new Map(
+        services.map((service) => [
+          `${service.email}|${service.title}`,
+          Number(service.service_id),
+        ]),
+      );
 
-    if (services.length === 0) return;
-
-    const ids = services.map((s) => s.id);
-    await queryInterface.bulkDelete(
-      "service_availability",
-      { service_id: ids },
-      {},
-    );
+      for (const schedule of INITIAL_SERVICE_SCHEDULES) {
+        const serviceId = serviceByPair.get(
+          `${schedule.email}|${schedule.title}`,
+        );
+        if (!serviceId) continue;
+        for (const slot of schedule.slots) {
+          await queryInterface.bulkDelete(
+            "service_availability",
+            {
+              service_id: serviceId,
+              day_of_week: slot.day,
+              start_time: slot.start,
+              end_time: slot.end,
+            },
+            { transaction },
+          );
+        }
+      }
+    });
   },
 };
