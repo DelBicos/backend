@@ -1,4 +1,5 @@
 import { levenshteinDistance } from "../../utils/nlp.util";
+import { PORTUGUESE_DAY_WORDS } from "../../utils/date.util";
 import type { NluIntent } from "./types";
 
 export const RESTART_COMMAND_PATTERN =
@@ -50,10 +51,17 @@ export const STANDALONE_NEXT_WEEK_PATTERN =
   /^(?:proxima\s+semana|semana\s+(?:que|q)\s+vem)(?:\s+(?:na|de))?\s+(?:domingo|dom|segunda|seg|terca|ter|quarta|qua|quinta|qui|sexta|sex|sabad+o+|sab)(?:\s+feira)?$/;
 export const STANDALONE_RELATIVE_DATE_PATTERN =
   /^(?:hoje|hj|amanha|amanh|amnh|(?:depois|dps)\s+(?:de|d)\s+(?:amanha|amanh|amnh))$/;
-export const STANDALONE_DAY_PATTERN =
-  /^dia\s+(?:\d{1,2}|primeiro|um|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta)$/;
-export const STANDALONE_WRITTEN_DATE_PATTERN =
-  /^(?:dia\s+)?(?:\d{1,2}|primeiro|um|dois|duas|tres|quatro|cinco|seis|sete|oito|nove|dez|onze|doze|treze|quatorze|catorze|quinze|dezesseis|dezessete|dezoito|dezenove|vinte|trinta)\s+(?:de|do|da)\s+(?:janeiro|jan|fevereiro|fev|marco|mar|abril|abr|maio|mai|junho|jun|julho|jul|agosto|ago|setembro|set|outubro|out|novembro|nov|dezembro|dez|\d{1,2})(?:\s+(?:de|do)\s+\d{2,4})?$/;
+// Reaproveita a mesma lista de números por extenso do parser de datas (inclui
+// compostos como "vinte e oito"), evitando duas listas divergentes.
+const DAY_WORD_ALTERNATION = PORTUGUESE_DAY_WORDS.map((word) =>
+  word.replace(/ /g, String.raw`\s+`),
+).join("|");
+export const STANDALONE_DAY_PATTERN = new RegExp(
+  String.raw`^dia\s+(?:\d{1,2}|${DAY_WORD_ALTERNATION})$`,
+);
+export const STANDALONE_WRITTEN_DATE_PATTERN = new RegExp(
+  String.raw`^(?:dia\s+)?(?:\d{1,2}|${DAY_WORD_ALTERNATION})\s+(?:de|do|da)\s+(?:janeiro|jan|fevereiro|fev|marco|mar|abril|abr|maio|mai|junho|jun|julho|jul|agosto|ago|setembro|set|outubro|out|novembro|nov|dezembro|dez|\d{1,2})(?:\s+(?:de|do)\s+\d{2,4})?$`,
+);
 export const STANDALONE_TIME_PERIOD_PATTERN =
   /^(?:(?:de|da|pela|na|a)\s+)?(?:manha|matutino|matutina|cedo|manhazinha|tarde|vespertino|vespertina|noite|noturno|noturna|anoitecer)$/;
 export const STANDALONE_EXPLICIT_TIME_PATTERN =

@@ -5,3 +5,4 @@
 export * from "./date/calendar";
 export * from "./date/timeParsing";
 export * from "./date/dateParsing";
+export { PORTUGUESE_DAY_WORDS } from "./date/portugueseText";

@@ -1,6 +1,8 @@
 import { HttpError } from "../../../errors/HttpError";
 
 jest.mock("../../../config/database");
+jest.mock("../../appointmentSchedule.service");
+jest.mock("../../appointmentRefund.service");
 jest.mock("../../../models/Service");
 jest.mock("../../../models/ServiceAvailability");
 jest.mock("../../../models/Professional");
@@ -216,7 +218,7 @@ describe("updateForUser / deactivateForUser", () => {
 
     expect(service.update).toHaveBeenCalledWith(
       { title: "Novo", price: 20, price_cents: 2000 },
-      { transaction: { id: "tx" } },
+      { transaction: expect.anything() },
     );
     expect(ServiceAvailabilityModel.destroy).toHaveBeenCalled();
     expect(ServiceAvailabilityModel.bulkCreate).not.toHaveBeenCalled();

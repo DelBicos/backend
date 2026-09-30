@@ -5,6 +5,7 @@ import { ProfessionalAvailabilityLockModel } from "../../models/ProfessionalAvai
 import { ProfessionalModel } from "../../models/Professional";
 import { HttpError } from "../../errors/HttpError";
 import { parsePositiveId } from "../catalog/catalog.rules";
+import { withProfessionalScheduleLock } from "../appointmentSchedule.service";
 
 async function assertOwner(professionalId: number, userId: number) {
   const professional = await ProfessionalModel.findByPk(professionalId);
@@ -35,18 +36,25 @@ export async function create(
     throw HttpError.badRequest("start_time e end_time devem ser datas válidas, com fim após o início");
   }
 
-  return ProfessionalAvailabilityLockModel.create({
-    professional_id: professionalId,
-    start_time: start,
-    end_time: end,
-    reason: body.reason ? String(body.reason) : undefined,
-    created_by: userId,
-  });
+  return withProfessionalScheduleLock(professionalId, (transaction) =>
+    ProfessionalAvailabilityLockModel.create(
+      {
+        professional_id: professionalId,
+        start_time: start,
+        end_time: end,
+        reason: body.reason ? String(body.reason) : undefined,
+        created_by: userId,
+      },
+      { transaction },
+    ),
+  );
 }
 
 export async function remove(userId: number, rawId: unknown) {
   const lock = await ProfessionalAvailabilityLockModel.findByPk(parsePositiveId(rawId));
   if (!lock) throw HttpError.notFound("Bloqueio não encontrado");
   await assertOwner(lock.professional_id, userId);
-  await lock.destroy();
+  await withProfessionalScheduleLock(lock.professional_id, (transaction) =>
+    lock.destroy({ transaction }),
+  );
 }

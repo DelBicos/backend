@@ -1,6 +1,6 @@
 import { parsePortugueseDate, parseTimeFromText, parseTimePeriodFromText } from "../../utils/date.util";
 import type { NluEntities, NluIntent } from "./types";
-import { isSimpleAgendarVariant, normalizeForRules } from "./rules";
+import { isSimpleAgendarVariant, isStandaloneDateInput, normalizeForRules } from "./rules";
 
 export function extractDate(message: string, timeZone?: string): string | undefined {
   return parsePortugueseDate(message, { timeZone }) ?? undefined;
@@ -38,7 +38,7 @@ export function extractServiceCandidate(message: string): string | undefined {
   let candidate = raw
     .replace(/^(?:um|uma|o|a)\s+/i, "")
     .replace(
-      /(?:^|\s+)(?:(?:para|no|na|em)\s+)?(?:hoje|hj|amanh[ãa]|amnh|depois\s+de\s+amanh[ãa]|dps\s+de\s+amanh[ãa]|pr[oó]x(?:ima)?\s+)?(?:segunda|seg|ter[cç]a|ter|quarta|qua|quinta|qui|sexta|sex|s[aá]bad+o+|sab|domingo|dom)(?:-?feira)?(?:\s+(?:que|q)\s+vem)?.*$/i,
+      /\s+(?:(?:para|no|na|em)\s+)?(?:hoje|hj|amanh[ãa]|amnh|depois\s+de\s+amanh[ãa]|dps\s+de\s+amanh[ãa]|pr[oó]x(?:ima)?\s+)?(?:segunda|seg|ter[cç]a|ter|quarta|qua|quinta|qui|sexta|sex|s[aá]bad+o+|sab|domingo|dom)(?:-?feira)?(?:\s+(?:que|q)\s+vem)?.*$/i,
       "",
     )
     .replace(
@@ -166,7 +166,12 @@ export function extractServiceCandidate(message: string): string | undefined {
     "contratar",
     "chamar",
   ]);
-  if (genericTerms.has(normalizeForRules(candidate))) return undefined;
+  // Depois de remover "quero/agendar", o candidato pode ser somente a data.
+  // A regra ancorada preserva nomes como "segunda via" e "segunda opinião".
+  if (
+    genericTerms.has(normalizeForRules(candidate)) ||
+    isStandaloneDateInput(candidate)
+  ) return undefined;
   if (
     parsePortugueseDate(candidate) ||
     parsePortugueseDate(message) ||

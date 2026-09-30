@@ -1,6 +1,8 @@
 import { HttpError } from "../../../errors/HttpError";
 
 jest.mock("../../../config/database");
+jest.mock("../../appointmentSchedule.service");
+jest.mock("../../appointmentRefund.service");
 jest.mock("../../../models/ProfessionalAvailability");
 jest.mock("../../../models/ProfessionalAvailabilityLock");
 jest.mock("../../../models/Professional");
@@ -117,7 +119,10 @@ describe("create / update / disable", () => {
 
     await availability.update(9, "5", { end_time: "13:00", professional_id: 1 });
 
-    expect(current.update).toHaveBeenCalledWith({ end_time: "13:00" });
+    expect(current.update).toHaveBeenCalledWith(
+      { end_time: "13:00" },
+      { transaction: expect.anything() },
+    );
   });
 
   it("rota aninhada restringe ao professionalId informado", async () => {

@@ -1,95 +1,171 @@
-jest.mock("../../config/database");
-jest.mock("../../models/ProfessionalAvailability");
-jest.mock("../../models/ServiceAvailability");
-jest.mock("../../models/Service");
-jest.mock("../../models/Appointment");
+jest.mock("../../models/ProfessionalAvailability", () => ({
+  ProfessionalAvailabilityModel: { findAll: jest.fn() },
+}));
+jest.mock("../../models/ProfessionalAvailabilityLock", () => ({
+  ProfessionalAvailabilityLockModel: { findAll: jest.fn() },
+}));
+jest.mock("../../models/ServiceAvailability", () => ({
+  ServiceAvailabilityModel: { findAll: jest.fn() },
+}));
+jest.mock("../../models/Service", () => ({
+  ServiceModel: { findAll: jest.fn() },
+}));
+jest.mock("../../models/Appointment", () => ({
+  AppointmentModel: { findAll: jest.fn() },
+}));
 
-import { ProfessionalAvailabilityModel } from "../../models/ProfessionalAvailability";
-import { ServiceAvailabilityModel } from "../../models/ServiceAvailability";
-import { AppointmentModel } from "../../models/Appointment";
-import { ServiceModel } from "../../models/Service";
-import { assertSlotInAgenda, getAvailableSlots } from "../availability.service";
+import { Op } from "sequelize";
+import {
+  assertSlotInAgenda,
+  getAvailableSlots,
+  ruleAppliesOnDate,
+} from "../availability.service";
+import { ProfessionalAvailabilityModel as Rules } from "../../models/ProfessionalAvailability";
+import { ProfessionalAvailabilityLockModel as Locks } from "../../models/ProfessionalAvailabilityLock";
+import { ServiceAvailabilityModel as ServiceRules } from "../../models/ServiceAvailability";
+import { AppointmentModel as Appointments } from "../../models/Appointment";
 
-const mocked = (fn: unknown) => fn as jest.Mock;
-
-/** 2030-02-04 e uma segunda-feira. */
-const MONDAY = "2030-02-04";
+const date = "2030-01-07"; // segunda
+const rule = {
+  is_available: true,
+  recurrence_pattern: "weekly",
+  days_of_week: "0100000",
+  start_time: "09:00:00",
+  end_time: "14:00:00",
+};
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mocked(ProfessionalAvailabilityModel.findAll).mockResolvedValue([]);
-  mocked(ServiceAvailabilityModel.findAll).mockResolvedValue([]);
-  mocked(AppointmentModel.findAll).mockResolvedValue([]);
-  mocked(ServiceModel.findAll).mockResolvedValue([]);
+  (Rules.findAll as jest.Mock).mockResolvedValue([rule]);
+  (Locks.findAll as jest.Mock).mockResolvedValue([]);
+  (ServiceRules.findAll as jest.Mock).mockResolvedValue([]);
+  (Appointments.findAll as jest.Mock).mockResolvedValue([]);
 });
 
-describe("getAvailableSlots", () => {
-  it("gera horarios de 30 em 30 min dentro da regra, respeitando a duracao", async () => {
-    mocked(ServiceAvailabilityModel.findAll).mockResolvedValue([
-      { start_time: "09:00", end_time: "11:00" },
-    ]);
-    expect(await getAvailableSlots(20, MONDAY, 60, 40)).toEqual(["09:00", "09:30", "10:00"]);
-  });
-
-  it("nao oferece horario ocupado por outro agendamento", async () => {
-    mocked(ServiceAvailabilityModel.findAll).mockResolvedValue([
-      { start_time: "09:00", end_time: "12:00" },
-    ]);
-    mocked(AppointmentModel.findAll).mockResolvedValue([
-      { start_time: new Date(`${MONDAY}T10:00:00Z`), end_time: new Date(`${MONDAY}T11:00:00Z`) },
-    ]);
-    expect(await getAvailableSlots(20, MONDAY, 60, 40)).toEqual(["09:00", "11:00"]);
-  });
-
-  it("ignora o proprio agendamento ao reagendar", async () => {
-    mocked(ServiceAvailabilityModel.findAll).mockResolvedValue([
-      { start_time: "09:00", end_time: "11:00" },
-    ]);
-    await getAvailableSlots(20, MONDAY, 60, 40, 77);
-    const where = mocked(AppointmentModel.findAll).mock.calls[0][0].where;
-    expect(Object.getOwnPropertySymbols(where.id ?? {}).length).toBe(1);
-  });
+it("bloqueia 09h e 09h30 locais para uma reserva 12h–13h UTC, liberando 12h local", async () => {
+  (Appointments.findAll as jest.Mock).mockResolvedValue([
+    { start_time: "2030-01-07T12:00:00Z", end_time: "2030-01-07T13:00:00Z" },
+  ]);
+  const slots = await getAvailableSlots(1, date, 30, 2);
+  expect(slots).not.toContain("09:00");
+  expect(slots).not.toContain("09:30");
+  expect(slots).toEqual(expect.arrayContaining(["10:00", "12:00"]));
 });
 
-describe("assertSlotInAgenda", () => {
-  beforeEach(() => {
-    mocked(ServiceAvailabilityModel.findAll).mockResolvedValue([
-      { start_time: "09:00", end_time: "12:00" },
-    ]);
-  });
+it("consulta interseções no dia de São Paulo, incluindo reservas iniciadas no dia anterior", async () => {
+  (Rules.findAll as jest.Mock).mockResolvedValue([
+    { ...rule, start_time: "00:00", end_time: "02:00" },
+  ]);
+  (Appointments.findAll as jest.Mock).mockResolvedValue([
+    { start_time: "2030-01-07T02:00:00Z", end_time: "2030-01-07T03:30:00Z" },
+  ]);
+  expect(
+    await getAvailableSlots(1, date, 30, 2, { excludeAppointmentId: 8 }),
+  ).toEqual(["00:30", "01:00", "01:30"]);
+  const query = (Appointments.findAll as jest.Mock).mock.calls[0][0];
+  expect(query.where.start_time[Op.lt].toISOString()).toBe(
+    "2030-01-08T03:00:00.000Z",
+  );
+  expect(query.where.end_time[Op.gt].toISOString()).toBe(
+    "2030-01-07T03:00:00.000Z",
+  );
+  expect(query.where.id[Op.ne]).toBe(8);
+});
 
-  it("aceita um horario da agenda", async () => {
+it("combina bloqueios recorrentes, pontuais e explícitos e respeita a duração", async () => {
+  (Rules.findAll as jest.Mock).mockResolvedValue([
+    rule,
+    {
+      ...rule,
+      is_available: false,
+      recurrence_pattern: "daily",
+      start_time: "10:00",
+      end_time: "11:00",
+    },
+    {
+      ...rule,
+      is_available: false,
+      recurrence_pattern: "none",
+      start_day: new Date("2030-01-07T00:00Z"),
+      end_day: new Date("2030-01-07T00:00Z"),
+      start_time: "12:00",
+      end_time: "13:00",
+    },
+  ]);
+  (Locks.findAll as jest.Mock).mockResolvedValue([
+    { start_time: "2030-01-07T16:00Z", end_time: "2030-01-07T17:00Z" },
+  ]);
+  expect(await getAvailableSlots(1, date, 60, 2)).toEqual(["09:00", "11:00"]);
+});
+
+it.each([
+  [{ recurrence_pattern: "daily" }, true],
+  [{ recurrence_pattern: "weekly", days_of_week: "0010000" }, false],
+  [
+    {
+      recurrence_pattern: "monthly",
+      start_day_of_month: 7,
+      end_day_of_month: 7,
+    },
+    true,
+  ],
+  [
+    {
+      recurrence_pattern: "monthly",
+      start_day_of_month: 8,
+      end_day_of_month: 15,
+    },
+    false,
+  ],
+  [{ recurrence_pattern: "daily", end_day: "2030-01-06" }, false],
+  [{ recurrence_pattern: "daily", start_day: "2030-01-08" }, false],
+])("aplica recorrência e limites de calendário: %j", (override, expected) => {
+  expect(ruleAppliesOnDate({ ...rule, ...override } as any, date)).toBe(
+    expected,
+  );
+});
+
+it("une horários profissionais e do serviço sem duplicar ou exceder o fim", async () => {
+  (ServiceRules.findAll as jest.Mock).mockResolvedValue([
+    { start_time: "09:00", end_time: "10:00" },
+  ]);
+  const slots = await getAvailableSlots(1, date, 60, 2);
+  expect(slots.filter((slot) => slot === "09:00")).toHaveLength(1);
+  expect(slots).not.toContain("13:30");
+});
+
+it.each([
+  ["2030-02-30", 30],
+  [date, 0],
+  [date, -30],
+])("rejeita calendário/duração inválidos: %s %s", async (day, duration) => {
+  expect(await getAvailableSlots(1, day, duration, 2)).toEqual([]);
+});
+
+describe("assertSlotInAgenda (agenda no fuso de São Paulo)", () => {
+  const base = { professionalId: 20, durationMinutes: 60, serviceId: 40 };
+
+  it("aceita um horario da agenda (10:00 em SP = 13:00 UTC)", async () => {
     await expect(
-      assertSlotInAgenda({
-        professionalId: 20,
-        start: new Date(`${MONDAY}T10:00:00Z`),
-        durationMinutes: 60,
-        serviceId: 40,
-      }),
+      assertSlotInAgenda({ ...base, start: new Date(`${date}T13:00:00Z`) }),
     ).resolves.toBeUndefined();
   });
 
-  it("recusa (409) horario fora da agenda, sem trocar de dia nem de regra", async () => {
-    for (const start of [`${MONDAY}T08:00:00Z`, `${MONDAY}T11:30:00Z`, `${MONDAY}T10:15:00Z`]) {
+  it("recusa (409) horario fora da agenda ou fora da grade de 30 min", async () => {
+    for (const start of [`${date}T11:00:00Z`, `${date}T16:30:00Z`, `${date}T13:15:00Z`]) {
       await expect(
-        assertSlotInAgenda({
-          professionalId: 20,
-          start: new Date(start),
-          durationMinutes: 60,
-          serviceId: 40,
-        }),
+        assertSlotInAgenda({ ...base, start: new Date(start) }),
       ).rejects.toMatchObject({ status: 409 });
     }
   });
 
-  it("recusa quando o profissional nao publicou nenhuma agenda", async () => {
-    mocked(ServiceAvailabilityModel.findAll).mockResolvedValue([]);
-    await expect(
-      assertSlotInAgenda({
-        professionalId: 20,
-        start: new Date(`${MONDAY}T10:00:00Z`),
-        durationMinutes: 60,
-      }),
-    ).rejects.toMatchObject({ status: 409 });
+  it("repassa o agendamento a ignorar (reagendamento)", async () => {
+    await assertSlotInAgenda({
+      ...base,
+      start: new Date(`${date}T13:00:00Z`),
+      excludeAppointmentId: 77,
+    });
+    const where = (Appointments.findAll as jest.Mock).mock.calls[0][0].where;
+    expect(where.id).toEqual({ [Op.ne]: 77 });
   });
 });

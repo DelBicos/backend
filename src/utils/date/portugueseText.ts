@@ -38,6 +38,12 @@ export const NUMBER_WORDS: ReadonlyArray<readonly [string, number]> = [
   ["zero", 0],
 ];
 
+// Palavras de dia por extenso, na ordem em que aparecem em NUMBER_WORDS, para
+// reuso em padrões que reconhecem uma data isolada (ex.: STANDALONE_DAY_PATTERN).
+export const PORTUGUESE_DAY_WORDS: readonly string[] = NUMBER_WORDS.map(
+  ([word]) => word,
+);
+
 export const MONTHS: Record<string, number> = {
   janeiro: 1,
   jan: 1,

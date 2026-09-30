@@ -19,6 +19,12 @@ import {
 } from "../../utils/chatRoom";
 import { syncBotSessionsForAppointmentStatus } from "../botAppointmentStatus.service";
 import { PaymentService } from "../payment.service";
+import { enqueuePaymentRefund } from "../appointmentRefund.service";
+import {
+  assertNoAppointmentOverlap,
+  ScheduleConflictError,
+  withProfessionalScheduleLock,
+} from "../appointmentSchedule.service";
 import {
   assertCanComplete,
   assertMinimumAdvance,
@@ -226,16 +232,21 @@ export async function createAppointment(userId: number, input: CreateAppointment
     addressId: Number(input.address_id),
     start,
   });
-  await assertProfessionalIsFree(professional.id, start, end);
-
-  const appointment = await AppointmentModel.create({
-    professional_id: professional.id,
-    client_id: client.id,
-    service_id: service.id,
-    address_id: address.id,
-    start_time: start,
-    end_time: end,
-    status: "pending",
+  // Trava a agenda do profissional: duas reservas simultaneas nao ocupam o mesmo horario.
+  const appointment = await withProfessionalScheduleLock(professional.id, async (transaction) => {
+    await assertNoAppointmentOverlap(professional.id, start, end, transaction);
+    return AppointmentModel.create(
+      {
+        professional_id: professional.id,
+        client_id: client.id,
+        service_id: service.id,
+        address_id: address.id,
+        start_time: start,
+        end_time: end,
+        status: "pending",
+      },
+      { transaction },
+    );
   });
 
   await ensureChatRoomForAppointment(appointment);
@@ -314,11 +325,50 @@ export async function listAppointmentsForUser(
  * resultado para a notificacao ("processing" = nao foi possivel confirmar).
  */
 export async function returnPaymentFor(appointment: {
+  id?: number;
   payment_intent_id?: string | null;
 }): Promise<"none" | "released" | "refunded" | "processing"> {
   if (!appointment.payment_intent_id) return "none";
   const settlement = await PaymentService.settleUnusedPayment(appointment.payment_intent_id);
-  return settlement === "failed" ? "processing" : settlement;
+  if (settlement !== "failed") return settlement;
+  // Stripe indisponivel: guarda na fila de devolucao para o cron tentar de novo.
+  try {
+    await enqueuePaymentRefund(appointment.payment_intent_id, appointment.id ?? null);
+  } catch (error) {
+    logger.error("Falha ao enfileirar devolução de pagamento", {
+      appointmentId: appointment.id,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return "processing";
+}
+
+/**
+ * Executa `work` sob a trava da agenda, com o agendamento relido do banco.
+ * Falha (409) se ele deixou de estar pendente ou mudou de horario enquanto o
+ * profissional respondia (ex.: o pedido expirou ou foi reagendado).
+ */
+async function withPendingAppointment(
+  appointment: AppointmentModel,
+  work: (current: AppointmentModel, transaction: Transaction) => Promise<void>,
+): Promise<void> {
+  await withProfessionalScheduleLock(appointment.professional_id, async (transaction) => {
+    const current = await AppointmentModel.findByPk(appointment.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (
+      !current ||
+      current.status !== "pending" ||
+      new Date(current.start_time).getTime() !== new Date(appointment.start_time).getTime()
+    ) {
+      throw new ScheduleConflictError(
+        "O agendamento foi alterado. Atualize a agenda antes de responder.",
+      );
+    }
+    await work(current, transaction);
+    await current.save({ transaction });
+  });
 }
 
 /** Profissional aceita um agendamento pendente (cobra o valor reservado). */
@@ -328,12 +378,13 @@ export async function confirmAppointment(userId: number, publicId: string) {
   assertStatus(appointment.status, "pending", "aceitar");
 
   // Cobra antes de confirmar: se a reserva expirou, o pedido segue pendente.
-  if (appointment.payment_intent_id) {
-    await PaymentService.capturePayment(appointment.payment_intent_id);
-  }
-
+  await withPendingAppointment(appointment, async (current) => {
+    if (current.payment_intent_id) {
+      await PaymentService.capturePayment(current.payment_intent_id);
+    }
+    current.status = "confirmed";
+  });
   appointment.status = "confirmed";
-  await appointment.save();
   await syncBotSessionsForAppointmentStatus(appointment);
 
   const client = await ClientModel.findByPk(appointment.client_id);
@@ -358,18 +409,19 @@ export async function respondToAppointment(userId: number, publicId: string, sta
   await requireResponsibleProfessional(appointment, userId, "alterar");
   assertStatus(appointment.status, "pending", "alterar");
 
-  if (response === "confirmed" && appointment.payment_intent_id) {
-    await PaymentService.capturePayment(appointment.payment_intent_id);
-  }
-
+  await withPendingAppointment(appointment, async (current) => {
+    if (response === "confirmed" && current.payment_intent_id) {
+      await PaymentService.capturePayment(current.payment_intent_id);
+    }
+    current.status = response;
+    if (response === "canceled") {
+      current.canceled_by = "professional";
+      current.canceled_at = new Date();
+      current.cancellation_reason = "Pedido recusado pelo profissional";
+      current.retained_cents = 0;
+    }
+  });
   appointment.status = response;
-  if (response === "canceled") {
-    appointment.canceled_by = "professional";
-    appointment.canceled_at = new Date();
-    appointment.cancellation_reason = "Pedido recusado pelo profissional";
-    appointment.retained_cents = 0;
-  }
-  await appointment.save();
   await syncChatRoomStatusForAppointment(appointment.id, response);
 
   const clientUserId: number | undefined = (appointment as AppointmentWithRelations).Client?.user_id;

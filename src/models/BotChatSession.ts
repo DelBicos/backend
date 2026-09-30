@@ -114,6 +114,7 @@ export interface BotSessionContext {
     time: string;
   }>;
   suggestedDates?: string[];
+  userAppointmentList?: Array<{ index: number; id: number; shortId?: string }>;
 }
 
 export interface IBotChatSession {

@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import mongoose from "mongoose";
 import { Sequelize } from "sequelize";
 import pg from "pg"; // Importação essencial da POC
+import { connectMongoWithRetry } from "../utils/mongoConnectionRetry";
 
 // override: false — variáveis do Docker Compose têm prioridade sobre o .env copiado
 dotenv.config({ override: false });
@@ -159,7 +160,7 @@ export async function connectMongo() {
       );
 
     const uri = normalizeMongoUriForRuntime(rawUri);
-    await mongoose.connect(uri);
+    await connectMongoWithRetry(() => mongoose.connect(uri), "MongoDB (logs)");
     logger.info("Conectado ao MongoDB.");
   } catch (error) {
     logError("Erro MongoDB:", error);
@@ -206,15 +207,25 @@ logger.info(
   `MongoDB chat: ${chatMongoUri.replace(/\/\/([^@]+@)?/, "//")}`,
 );
 
-export const chatMongoConnection = mongoose.createConnection(chatMongoUri);
+// Mantém o mesmo objeto para os models durante todas as tentativas iniciais.
+export const chatMongoConnection = mongoose.createConnection();
+let chatConnectedOnce = false;
 
 chatMongoConnection.on("connected", () => {
+  chatConnectedOnce = true;
   logger.info("Conectado ao MongoDB (chat).");
 });
 
 chatMongoConnection.on("error", (error) => {
-  logError("Erro MongoDB (chat):", error);
+  // A rejeição inicial é registrada pelo loop; depois do primeiro sucesso,
+  // o driver administra a reconexão e os erros continuam sendo observados.
+  if (chatConnectedOnce) logError("Erro MongoDB (chat):", error);
 });
+
+void connectMongoWithRetry(
+  () => chatMongoConnection.openUri(chatMongoUri),
+  "MongoDB (chat)",
+);
 
 /** Indica se a conexão dedicada do chat está pronta para operações. */
 export function isChatMongoReady(): boolean {

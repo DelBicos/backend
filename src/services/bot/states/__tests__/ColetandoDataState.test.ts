@@ -8,6 +8,7 @@ jest.mock("../../../availability.service", () => ({
 }));
 
 import type { BotChatSessionModel } from "../../../../models/BotChatSession";
+import { Op } from "sequelize";
 import { ServiceModel } from "../../../../models/Service";
 import type { NluResult } from "../../../nlu.service";
 import { getAvailableSlots } from "../../../availability.service";
@@ -52,6 +53,20 @@ function session(matchedServiceIds: number[]): BotChatSessionModel {
 
 describe("ColetandoDataState", () => {
   beforeEach(() => jest.clearAllMocks());
+
+  it("exclui a reserva original também ao sugerir outras datas e usa a duração contratada", async () => {
+    const date = futureDate();
+    (ServiceModel.findAll as jest.Mock).mockResolvedValue([serviceFixture(10, 100, "Ana", 90)]);
+    (getAvailableSlots as jest.Mock).mockImplementation(async (_professionalId, day) => day === date ? [] : ["09:00"]);
+    const originalSession = session([10, 11]);
+    originalSession.context = { ...originalSession.context, pendingAction: "RESCHEDULE", serviceId: 10, professionalId: 100, appointmentId: 77, serviceDuration: 60 };
+    await new ColetandoDataState().handle(date, { intent: "AGENDAR", entities: { date }, confidence: 1 }, originalSession, 1);
+    const calls = (getAvailableSlots as jest.Mock).mock.calls;
+    expect(calls.length).toBeGreaterThan(1);
+    for (const call of calls) expect(call).toEqual([100, expect.any(String), 60, 10, { excludeAppointmentId: 77 }]);
+    const query = (ServiceModel.findAll as jest.Mock).mock.calls[0][0];
+    expect(query.where.id[Op.in]).toEqual([10]);
+  });
 
   it("lista somente profissionais com slots no dia e então pergunta o horário", async () => {
     const date = futureDate();

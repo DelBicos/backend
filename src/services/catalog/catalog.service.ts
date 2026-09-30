@@ -28,6 +28,7 @@ import {
   semanticDocument,
   toAvailabilityRows,
 } from "./catalog.rules";
+import { withProfessionalScheduleLock } from "../appointmentSchedule.service";
 
 /** Parametros de consulta (?a=b) ainda nao validados. */
 type QueryParams = Record<string, unknown>;
@@ -398,7 +399,8 @@ export async function updateForUser(userId: number, rawId: unknown, input: Servi
     changes.category_id = subcategory.category_id;
   }
 
-  await sequelize.transaction(async (transaction) => {
+  // Trava a agenda: a troca de horarios do servico nao concorre com reservas.
+  await withProfessionalScheduleLock(service.professional_id, async (transaction) => {
     await service.update(changes, { transaction });
     if (Array.isArray(input.availabilities)) {
       await ServiceAvailabilityModel.destroy({ where: { service_id: id }, transaction });
@@ -435,5 +437,7 @@ export async function listForUser(userId: number, query: QueryParams) {
 export async function deactivateForUser(userId: number, rawId: unknown) {
   const service = await requireOwnedService(parsePositiveId(rawId), userId);
   service.active = false;
-  await service.save();
+  await withProfessionalScheduleLock(service.professional_id, (transaction) =>
+    service.save({ transaction }),
+  );
 }

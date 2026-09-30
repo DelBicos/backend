@@ -11,6 +11,7 @@ import { ProfessionalAvailabilityModel } from "../../models/ProfessionalAvailabi
 import { ProfessionalModel } from "../../models/Professional";
 import { HttpError } from "../../errors/HttpError";
 import { parsePositiveId } from "../catalog/catalog.rules";
+import { withProfessionalScheduleLock } from "../appointmentSchedule.service";
 
 const UPDATABLE_FIELDS = [
   "days_of_week",
@@ -123,7 +124,13 @@ export async function create(userId: number, rawProfessionalId: unknown, body: B
   };
 
   if (await hasOverlap(professionalId, payload)) throw HttpError.conflict(CONFLICT_MESSAGE);
-  return ProfessionalAvailabilityModel.create(payload as unknown as CreationAttributes<ProfessionalAvailabilityModel>);
+  // A trava da agenda serializa esta escrita com as reservas do profissional.
+  return withProfessionalScheduleLock(professionalId, (transaction) =>
+    ProfessionalAvailabilityModel.create(
+      payload as unknown as CreationAttributes<ProfessionalAvailabilityModel>,
+      { transaction },
+    ),
+  );
 }
 
 /** Atualiza campos permitidos; a janela resultante tambem nao pode sobrepor outra. */
@@ -149,7 +156,9 @@ export async function update(
     throw HttpError.conflict(CONFLICT_MESSAGE);
   }
 
-  await availability.update(changes);
+  await withProfessionalScheduleLock(availability.professional_id, (transaction) =>
+    availability.update(changes, { transaction }),
+  );
   return availability;
 }
 
@@ -158,5 +167,7 @@ export async function disable(userId: number, rawId: unknown, rawProfessionalId?
   const availability = await findScoped(rawId, rawProfessionalId);
   await assertOwner(availability.professional_id, userId);
   availability.is_available = false;
-  await availability.save();
+  await withProfessionalScheduleLock(availability.professional_id, (transaction) =>
+    availability.save({ transaction }),
+  );
 }

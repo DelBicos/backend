@@ -1,6 +1,8 @@
 import { HttpError } from "../../../errors/HttpError";
 
 jest.mock("../../../config/database");
+jest.mock("../../appointmentSchedule.service");
+jest.mock("../../appointmentRefund.service");
 jest.mock("../../../models/Appointment");
 jest.mock("../../../models/Client");
 jest.mock("../../../models/Professional");

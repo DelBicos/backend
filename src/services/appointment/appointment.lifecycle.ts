@@ -32,6 +32,10 @@ import {
 } from "./cancellation.policy";
 import { assertSlotInAgenda, getAvailableSlots } from "../availability.service";
 import {
+  assertNoAppointmentOverlap,
+  withProfessionalScheduleLock,
+} from "../appointmentSchedule.service";
+import {
   assertProfessionalIsFree,
   findAppointmentByPublicId,
   toPublicAppointment,
@@ -321,13 +325,28 @@ export async function respondToReschedule(
   }
 
   if (accept) {
-    const newEnd = await assertNewSlotAvailable(appointment, new Date(requestedStart), now);
-    appointment.start_time = new Date(requestedStart);
-    appointment.end_time = newEnd;
+    const newStart = new Date(requestedStart);
+    const newEnd = await assertNewSlotAvailable(appointment, newStart, now);
+    // Revalida sob a trava da agenda: outro pedido pode ter ocupado o horario.
+    await withProfessionalScheduleLock(appointment.professional_id, async (transaction) => {
+      await assertNoAppointmentOverlap(
+        appointment.professional_id,
+        newStart,
+        newEnd,
+        transaction,
+        appointment.id,
+      );
+      appointment.start_time = newStart;
+      appointment.end_time = newEnd;
+      appointment.reschedule_requested_start = null;
+      appointment.reschedule_requested_by = null;
+      await appointment.save({ transaction });
+    });
+  } else {
+    appointment.reschedule_requested_start = null;
+    appointment.reschedule_requested_by = null;
+    await appointment.save();
   }
-  appointment.reschedule_requested_start = null;
-  appointment.reschedule_requested_by = null;
-  await appointment.save();
 
   await notifyRescheduleAnswered(
     otherPartyUserId(appointment, actor),
@@ -361,7 +380,7 @@ export async function listRescheduleSlots(userId: number, publicId: string, date
     date,
     duration,
     appointment.Service?.id,
-    appointment.id,
+    { excludeAppointmentId: appointment.id },
   );
   return { date, slots };
 }

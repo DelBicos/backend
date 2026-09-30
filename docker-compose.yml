@@ -18,6 +18,12 @@ services:
     container_name: mongo-delbicos
     ports:
       - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "quit(db.adminCommand({ ping: 1 }).ok === 1 ? 0 : 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     restart: unless-stopped
   # Emulador do Azure Blob Storage para desenvolvimento. Opcional:
   #   docker compose --profile storage up -d azurite
@@ -123,7 +129,7 @@ services:
       postgres:
         condition: service_started
       mongo:
-        condition: service_started
+        condition: service_healthy
       nlu-service:
         condition: service_healthy
     restart: unless-stopped

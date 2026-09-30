@@ -1,6 +1,8 @@
 import { HttpError } from "../../../errors/HttpError";
 
 jest.mock("../../../config/database");
+jest.mock("../../appointmentSchedule.service");
+jest.mock("../../appointmentRefund.service");
 jest.mock("../../../models/Appointment");
 jest.mock("../../../models/User");
 jest.mock("../../../models/Client");
@@ -49,6 +51,7 @@ import { UserModel } from "../../../models/User";
 import { PaymentService } from "../../payment.service";
 import * as notifications from "../appointment.notifications";
 import * as service from "../appointment.service";
+import * as scheduleLock from "../../appointmentSchedule.service";
 
 const mocked = (fn: unknown) => fn as jest.Mock;
 
@@ -95,6 +98,7 @@ describe("findAppointmentByPublicId", () => {
   it("busca pelo short_id em maiusculas", async () => {
     const appt = makeAppointment();
     mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(AppointmentModel.findByPk).mockResolvedValue(appt);
     await expect(service.findAppointmentByPublicId("abc123")).resolves.toBe(appt);
     expect(mocked(AppointmentModel.findOne).mock.calls[0][0].where).toEqual({
       short_id: "ABC123",
@@ -161,6 +165,7 @@ describe("respondToAppointment", () => {
       Service: { title: "Limpeza" },
     });
     mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(AppointmentModel.findByPk).mockResolvedValue(appt);
     mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
 
     await service.respondToAppointment(1, "ABC123", "confirmed");
@@ -172,6 +177,7 @@ describe("respondToAppointment", () => {
   it("se a captura falhar, o pedido continua pendente", async () => {
     const appt = makeAppointment({ payment_intent_id: "pi_1" });
     mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(AppointmentModel.findByPk).mockResolvedValue(appt);
     mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
     mocked(PaymentService.capturePayment).mockRejectedValue(HttpError.conflict("expirou"));
 
@@ -187,6 +193,7 @@ describe("respondToAppointment", () => {
       Service: { title: "Limpeza" },
     });
     mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(AppointmentModel.findByPk).mockResolvedValue(appt);
     mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
     mocked(PaymentService.settleUnusedPayment).mockResolvedValue("released");
 
@@ -217,6 +224,7 @@ describe("confirmAppointment", () => {
   it("confirma e notifica o cliente", async () => {
     const appt = makeAppointment();
     mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(AppointmentModel.findByPk).mockResolvedValue(appt);
     mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
     mocked(ClientModel.findByPk).mockResolvedValue({ user_id: 5 });
     mocked(ServiceModel.findByPk).mockResolvedValue({ title: "Limpeza" });
@@ -244,6 +252,7 @@ describe("completeAppointment", () => {
       Service: { title: "Pintura" },
     });
     mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(AppointmentModel.findByPk).mockResolvedValue(appt);
     mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
     const now = new Date();
 
@@ -294,6 +303,7 @@ describe("reviewAppointment", () => {
   it("registra avaliacao e notifica o profissional na primeira vez", async () => {
     const appt = makeAppointment({ status: "completed", Client: { user_id: 1 } });
     mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(AppointmentModel.findByPk).mockResolvedValue(appt);
     mocked(ProfessionalModel.findByPk).mockResolvedValue({ user_id: 2 });
     mocked(ServiceModel.findByPk).mockResolvedValue({ title: "Pintura" });
 
@@ -392,8 +402,12 @@ describe("createAppointment", () => {
 
   it("recusa horario ja ocupado", async () => {
     arrangeValidBooking();
-    mocked(AppointmentModel.findOne).mockResolvedValue(makeAppointment());
+    // O conflito e verificado sob a trava da agenda.
+    mocked(scheduleLock.assertNoAppointmentOverlap).mockRejectedValueOnce(
+      new scheduleLock.ScheduleConflictError("Horário ocupado."),
+    );
     await expectHttpError(service.createAppointment(1, input()), 409);
+    expect(AppointmentModel.create).not.toHaveBeenCalled();
   });
 
   it("cria com termino calculado pela duracao do servico", async () => {
@@ -409,5 +423,19 @@ describe("createAppointment", () => {
     expect(created.end_time).toEqual(expectedEnd);
     expect(created.client_id).toBe(30);
     expect(notifications.notifyAppointmentCreated).toHaveBeenCalled();
+  });
+});
+
+describe("trava da agenda ao responder", () => {
+  it("recusa (409) se o pedido deixou de estar pendente enquanto o profissional respondia", async () => {
+    const appt = makeAppointment({ payment_intent_id: "pi_1" });
+    mocked(AppointmentModel.findOne).mockResolvedValue(appt);
+    mocked(AppointmentModel.findByPk).mockResolvedValue(
+      makeAppointment({ status: "canceled", payment_intent_id: "pi_1" }),
+    );
+    mocked(ProfessionalModel.findByPk).mockResolvedValue({ id: 20, user_id: 1 });
+
+    await expectHttpError(service.respondToAppointment(1, "ABC123", "confirmed"), 409);
+    expect(PaymentService.capturePayment).not.toHaveBeenCalled();
   });
 });

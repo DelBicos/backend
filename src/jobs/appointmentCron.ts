@@ -8,7 +8,9 @@ import { UserModel } from "../models/User";
 import { ServiceModel } from "../models/Service";
 import logger, { logError } from "../utils/logger";
 import { archiveChatRoomForAppointment } from "../utils/chatRoom";
-import { PaymentService } from "../services/payment.service";
+import { returnPaymentFor } from "../services/appointment/appointment.service";
+import { withProfessionalScheduleLock } from "../services/appointmentSchedule.service";
+import { processAppointmentRefunds } from "../services/appointmentRefund.service";
 import { syncBotSessionsForAppointmentStatus } from "../services/botAppointmentStatus.service";
 import type { AppointmentWithRelations } from "../services/appointment/appointment.types";
 
@@ -22,7 +24,7 @@ function paymentNoteFor(settlement: string): string {
     return " A reserva no seu cartão foi liberada e nenhum valor foi cobrado.";
   }
   if (settlement === "refunded") return " O valor pago foi estornado.";
-  if (settlement === "failed") return " O estorno está sendo processado.";
+  if (settlement === "processing") return " A devolução do valor está sendo processada.";
   return "";
 }
 
@@ -37,19 +39,39 @@ async function notify(userId: number, message: string, appointmentId: number) {
   });
 }
 
-/** Cancela um pedido sem resposta, libera a reserva do cartao e avisa as duas partes. */
-async function expireAppointment(appointment: AppointmentWithRelations) {
+/**
+ * Cancela um pedido sem resposta, libera a reserva do cartao e avisa as duas
+ * partes. Relê o agendamento sob a trava da agenda: se o profissional aceitou
+ * (ou houve reagendamento) enquanto o cron rodava, nada e feito.
+ */
+async function expireAppointment(appointment: AppointmentWithRelations, cutoff: Date): Promise<boolean> {
+  const expired = await withProfessionalScheduleLock(appointment.professional_id, async (transaction) => {
+    const current = await AppointmentModel.findByPk(appointment.id, {
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+    if (
+      !current ||
+      current.status !== "pending" ||
+      new Date(current.createdAt ?? 0) > cutoff ||
+      new Date(current.start_time).getTime() !== new Date(appointment.start_time).getTime()
+    ) {
+      return false;
+    }
+    current.status = "canceled";
+    current.canceled_by = "system";
+    current.canceled_at = new Date();
+    current.cancellation_reason = EXPIRY_REASON;
+    current.retained_cents = 0;
+    await current.save({ transaction });
+    return true;
+  });
+  if (!expired) return false;
   appointment.status = "canceled";
-  appointment.canceled_by = "system";
-  appointment.canceled_at = new Date();
-  appointment.cancellation_reason = EXPIRY_REASON;
-  appointment.retained_cents = 0;
-  await appointment.save();
 
   // Ninguem foi cobrado (o profissional nao aceitou): libera a reserva no cartao.
-  const settlement = appointment.payment_intent_id
-    ? await PaymentService.settleUnusedPayment(appointment.payment_intent_id)
-    : "none";
+  // Se o Stripe falhar, o pagamento entra na fila de devolucao.
+  const settlement = await returnPaymentFor(appointment);
 
   await archiveChatRoomForAppointment(appointment.id);
 
@@ -71,6 +93,7 @@ async function expireAppointment(appointment: AppointmentWithRelations) {
     );
   }
   await syncBotSessionsForAppointmentStatus(appointment);
+  return true;
 }
 
 /**
@@ -94,8 +117,7 @@ export async function expirePendingAppointments(now: Date = new Date()): Promise
   let expired = 0;
   for (const appointment of pending) {
     try {
-      await expireAppointment(appointment);
-      expired += 1;
+      if (await expireAppointment(appointment, cutoff)) expired += 1;
     } catch (error) {
       logError("Falha ao expirar agendamento", error, { appointmentId: appointment.id });
     }
@@ -110,6 +132,12 @@ export const startAppointmentCron = () => {
       await expirePendingAppointments();
     } catch (error) {
       logError("Erro ao executar cron job de agendamentos expirados", error);
+    }
+    try {
+      // Retenta devolucoes de pagamento que falharam no Stripe.
+      await processAppointmentRefunds();
+    } catch (error) {
+      logError("Erro ao processar a fila de devolução de pagamentos", error);
     }
   });
 };

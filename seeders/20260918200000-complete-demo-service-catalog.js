@@ -707,7 +707,44 @@ const CATALOG = {
   ],
 };
 
-const DEMO_EMAILS = PROVIDERS.map((provider) => provider.email);
+const DEMO_CLIENTS = [
+  {
+    name: "Juliana Santos (Demo)",
+    email: "catalogo.cliente.juliana@demo.delbicos.local",
+    phone: "5511988200001",
+    cpf: "92000000001",
+    address: [
+      "Rua Doutor Braguinha",
+      "350",
+      "Centro",
+      "Sorocaba",
+      "SP",
+      "18010010",
+      -23.5005,
+      -47.4580,
+    ],
+  },
+  {
+    name: "Marcelo Oliveira (Demo)",
+    email: "catalogo.cliente.marcelo@demo.delbicos.local",
+    phone: "5511988200002",
+    cpf: "92000000002",
+    address: [
+      "Avenida Afonso Vergueiro",
+      "1500",
+      "Centro",
+      "Sorocaba",
+      "SP",
+      "18040000",
+      -23.4980,
+      -47.4620,
+    ],
+  },
+];
+
+const DEMO_USERS = [...PROVIDERS, ...DEMO_CLIENTS];
+const DEMO_EMAILS = DEMO_USERS.map((u) => u.email);
+const DEMO_CLIENT_EMAILS = DEMO_CLIENTS.map((c) => c.email);
 const REQUIRED_CATEGORY_TITLES = Object.keys(CATALOG);
 const REVIEW_TEMPLATES = [
   {
@@ -860,29 +897,78 @@ module.exports = {
       const existingUserByEmail = new Map(
         existingUsers.map((row) => [row.email, row]),
       );
-      for (const provider of PROVIDERS) {
-        const existing = existingUserByEmail.get(provider.email);
+      for (const demoUser of DEMO_USERS) {
+        const existing = existingUserByEmail.get(demoUser.email);
         if (
           existing &&
-          (existing.name !== provider.name || existing.phone !== provider.phone)
+          (existing.name !== demoUser.name || existing.phone !== demoUser.phone)
         ) {
           throw new Error(
-            `O e-mail técnico ${provider.email} já pertence a outro usuário; o catálogo demo não pode reutilizá-lo.`,
+            `O e-mail técnico ${demoUser.email} já pertence a outro usuário; o catálogo demo não pode reutilizá-lo.`,
           );
         }
       }
 
-      const missingProviders = PROVIDERS.filter(
-        (provider) => !existingUserByEmail.has(provider.email),
+      // 🛡️ B07 VERIFICAÇÃO DE COLISÃO DE TELEFONE E CPF
+      const phoneCollisions = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT id, name, email, phone FROM users WHERE phone IN (:phones) AND email NOT IN (:emails)`,
+        {
+          phones: DEMO_USERS.map((u) => u.phone),
+          emails: DEMO_EMAILS,
+        },
+        transaction,
       );
-      if (missingProviders.length > 0) {
+      if (phoneCollisions.length > 0) {
+        throw new Error(
+          `Colisão de telefone detectada: o(s) telefone(s) ${phoneCollisions.map((u) => u.phone).join(", ")} já pertence(m) a outro(s) usuário(s).`,
+        );
+      }
+
+      const allDemoCpfs = DEMO_USERS.map((u) => u.cpf).filter(Boolean);
+
+      const profCpfCollisions = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT p.id, p.cpf, u.email FROM professional p
+         INNER JOIN users u ON u.id = p.user_id
+         WHERE p.cpf IN (:cpfs) AND u.email NOT IN (:emails)`,
+        { cpfs: allDemoCpfs, emails: DEMO_EMAILS },
+        transaction,
+      );
+      if (profCpfCollisions.length > 0) {
+        throw new Error(
+          `Colisão de CPF profissional detectada: o(s) CPF(s) ${profCpfCollisions.map((p) => p.cpf).join(", ")} já está(ão) em uso por outro profissional.`,
+        );
+      }
+
+      const clientCpfCollisions = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT c.id, c.cpf, u.email FROM client c
+         INNER JOIN users u ON u.id = c.user_id
+         WHERE c.cpf IN (:cpfs) AND u.email NOT IN (:emails)`,
+        { cpfs: allDemoCpfs, emails: DEMO_EMAILS },
+        transaction,
+      );
+      if (clientCpfCollisions.length > 0) {
+        throw new Error(
+          `Colisão de CPF de cliente detectada: o(s) CPF(s) ${clientCpfCollisions.map((c) => c.cpf).join(", ")} já está(ão) em uso por outro cliente.`,
+        );
+      }
+
+      const missingDemoUsers = DEMO_USERS.filter(
+        (demoUser) => !existingUserByEmail.has(demoUser.email),
+      );
+      if (missingDemoUsers.length > 0) {
         const password = await bcrypt.hash(DEMO_PASSWORD, 10);
         await queryInterface.bulkInsert(
           "users",
-          missingProviders.map((provider, index) => ({
-            name: provider.name,
-            email: provider.email,
-            phone: provider.phone,
+          missingDemoUsers.map((demoUser, index) => ({
+            name: demoUser.name,
+            email: demoUser.email,
+            phone: demoUser.phone,
             password,
             active: true,
             avatar_uri: `https://i.pravatar.cc/300?img=${index + 21}`,
@@ -922,9 +1008,9 @@ module.exports = {
         transaction,
       );
       const addressByEmail = new Map();
-      for (const provider of PROVIDERS) {
-        const userId = userByEmail.get(provider.email);
-        const [street, number, , , , postalCode] = provider.address;
+      for (const demoUser of DEMO_USERS) {
+        const userId = userByEmail.get(demoUser.email);
+        const [street, number, , , , postalCode] = demoUser.address;
         const matches = addresses.filter(
           (row) =>
             Number(row.user_id) === userId &&
@@ -933,19 +1019,19 @@ module.exports = {
             row.postal_code === postalCode,
         );
         if (matches.length > 1) {
-          throw new Error(`Endereço demo duplicado para ${provider.email}.`);
+          throw new Error(`Endereço demo duplicado para ${demoUser.email}.`);
         }
         if (matches.length === 1)
-          addressByEmail.set(provider.email, Number(matches[0].id));
+          addressByEmail.set(demoUser.email, Number(matches[0].id));
       }
 
-      const providersWithoutAddress = PROVIDERS.filter(
-        (provider) => !addressByEmail.has(provider.email),
+      const usersWithoutAddress = DEMO_USERS.filter(
+        (demoUser) => !addressByEmail.has(demoUser.email),
       );
-      if (providersWithoutAddress.length > 0) {
+      if (usersWithoutAddress.length > 0) {
         await queryInterface.bulkInsert(
           "address",
-          providersWithoutAddress.map((provider) => {
+          usersWithoutAddress.map((demoUser) => {
             const [
               street,
               number,
@@ -955,9 +1041,9 @@ module.exports = {
               postalCode,
               lat,
               lng,
-            ] = provider.address;
+            ] = demoUser.address;
             return {
-              user_id: userByEmail.get(provider.email),
+              user_id: userByEmail.get(demoUser.email),
               lat,
               lng,
               street,
@@ -984,9 +1070,9 @@ module.exports = {
         { userIds },
         transaction,
       );
-      for (const provider of PROVIDERS) {
-        const userId = userByEmail.get(provider.email);
-        const [street, number, , , , postalCode] = provider.address;
+      for (const demoUser of DEMO_USERS) {
+        const userId = userByEmail.get(demoUser.email);
+        const [street, number, , , , postalCode] = demoUser.address;
         const matches = allAddresses.filter(
           (row) =>
             Number(row.user_id) === userId &&
@@ -996,10 +1082,10 @@ module.exports = {
         );
         if (matches.length !== 1) {
           throw new Error(
-            `Esperado um endereço demo para ${provider.email}; encontrados ${matches.length}.`,
+            `Esperado um endereço demo para ${demoUser.email}; encontrados ${matches.length}.`,
           );
         }
-        addressByEmail.set(provider.email, Number(matches[0].id));
+        addressByEmail.set(demoUser.email, Number(matches[0].id));
       }
 
       const existingProfessionals = await selectRows(
@@ -1257,17 +1343,68 @@ module.exports = {
         { transaction },
       );
 
+      const clientUserIds = DEMO_CLIENTS.map((c) => userByEmail.get(c.email));
+      const existingDemoClients = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT id, user_id, main_address_id, cpf FROM client WHERE user_id IN (:clientUserIds)`,
+        { clientUserIds },
+        transaction,
+      );
+      const clientByUserId = new Map(
+        existingDemoClients.map((row) => [Number(row.user_id), row]),
+      );
+
+      for (const c of DEMO_CLIENTS) {
+        const userId = userByEmail.get(c.email);
+        const addressId = addressByEmail.get(c.email);
+        const existing = clientByUserId.get(userId);
+        if (existing) {
+          if (existing.cpf !== c.cpf) {
+            throw new Error(
+              `O cliente demo ${c.email} já possui cadastro com outro CPF.`,
+            );
+          }
+          if (Number(existing.main_address_id) !== addressId) {
+            await queryInterface.bulkUpdate(
+              "client",
+              { main_address_id: addressId, updated_at: now },
+              { id: Number(existing.id) },
+              { transaction },
+            );
+          }
+        }
+      }
+
+      const clientsToInsert = DEMO_CLIENTS.filter(
+        (c) => !clientByUserId.has(userByEmail.get(c.email)),
+      );
+      if (clientsToInsert.length > 0) {
+        await queryInterface.bulkInsert(
+          "client",
+          clientsToInsert.map((c) => ({
+            user_id: userByEmail.get(c.email),
+            main_address_id: addressByEmail.get(c.email),
+            cpf: c.cpf,
+            created_at: now,
+            updated_at: now,
+          })),
+          { transaction },
+        );
+      }
+
       const reviewClients = await selectRows(
         queryInterface,
         Sequelize,
-        `SELECT id, main_address_id
-         FROM client
-         WHERE main_address_id IS NOT NULL
-         ORDER BY id
-         LIMIT 2`,
-        {},
+        `SELECT c.id, c.main_address_id
+         FROM client c
+         INNER JOIN users u ON u.id = c.user_id
+         WHERE u.email IN (:demoClientEmails) AND c.main_address_id IS NOT NULL
+         ORDER BY c.id`,
+        { demoClientEmails: DEMO_CLIENT_EMAILS },
         transaction,
       );
+
       let reviewRows = [];
       if (reviewClients.length > 0) {
         await queryInterface.bulkDelete(
@@ -1329,7 +1466,7 @@ module.exports = {
         });
       } else {
         console.warn(
-          "Nenhum cliente com endereço foi encontrado; avaliações demo não foram criadas.",
+          "Nenhum cliente demo com endereço foi encontrado; avaliações demo não foram criadas.",
         );
       }
 
@@ -1342,20 +1479,211 @@ module.exports = {
 
   async down(queryInterface, Sequelize) {
     await queryInterface.sequelize.transaction(async (transaction) => {
-      await queryInterface.bulkDelete(
-        "appointment",
-        {
-          payment_intent_id: {
-            [Sequelize.Op.in]: DEMO_REVIEW_PAYMENT_IDS,
+      // 1. Localiza IDs dos usuários demo cadastrados por este seeder
+      const demoUsers = await selectRows(
+        queryInterface,
+        Sequelize,
+        `SELECT id FROM users WHERE email IN (:emails)`,
+        { emails: DEMO_EMAILS },
+        transaction,
+      );
+      const userIds = demoUsers.map((u) => Number(u.id));
+
+      if (userIds.length > 0) {
+        // 2. Localiza prestadores e clientes demo
+        const demoProfessionals = await selectRows(
+          queryInterface,
+          Sequelize,
+          `SELECT id FROM professional WHERE user_id IN (:userIds)`,
+          { userIds },
+          transaction,
+        );
+        const professionalIds = demoProfessionals.map((p) => Number(p.id));
+
+        const demoClients = await selectRows(
+          queryInterface,
+          Sequelize,
+          `SELECT id FROM client WHERE user_id IN (:userIds)`,
+          { userIds },
+          transaction,
+        );
+        const clientIds = demoClients.map((c) => Number(c.id));
+
+        const profIdsOrZero =
+          professionalIds.length > 0 ? professionalIds : [0];
+        const clientIdsOrZero = clientIds.length > 0 ? clientIds : [0];
+
+        // 🛡️ GUARD DE SEGURANÇA B08:
+        // 1. Checa se existem agendamentos REAIS vinculados aos prestadores/clientes demo.
+        if (professionalIds.length > 0 || clientIds.length > 0) {
+          const realAppointments = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT id FROM appointment 
+             WHERE (professional_id IN (:professionalIds) OR client_id IN (:clientIds))
+               AND (payment_intent_id IS NULL OR payment_intent_id NOT IN (:demoPaymentIds))`,
+            {
+              professionalIds: profIdsOrZero,
+              clientIds: clientIdsOrZero,
+              demoPaymentIds: DEMO_REVIEW_PAYMENT_IDS,
+            },
+            transaction,
+          );
+
+          if (realAppointments.length > 0) {
+            throw new Error(
+              `Rollback do catálogo demo abortado: existem ${realAppointments.length} agendamento(s) real(is) ` +
+                `vinculados aos prestadores/clientes demo. Remova esses agendamentos antes de desfazer o catálogo.`,
+            );
+          }
+        }
+
+        if (professionalIds.length > 0) {
+          // 2. Trava de quantidade e integridade exata dos 58 serviços do catálogo
+          const expectedCatalogPairs = new Set();
+          for (const [category, services] of Object.entries(CATALOG)) {
+            const categoryProviders = PROVIDERS.filter(
+              (p) => p.category === category,
+            );
+            services.forEach(([subcategory, title], index) => {
+              const provider = categoryProviders[index % 2];
+              expectedCatalogPairs.add(`${provider.email}|${title}`);
+            });
+          }
+
+          const currentDemoServices = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT s.id, s.title, u.email 
+             FROM service s
+             INNER JOIN professional p ON p.id = s.professional_id
+             INNER JOIN users u ON u.id = p.user_id
+             WHERE u.email IN (:emails)`,
+            { emails: DEMO_EMAILS },
+            transaction,
+          );
+
+          if (currentDemoServices.length !== 58) {
+            throw new Error(
+              `Rollback do catálogo demo abortado: esperados exatamente 58 serviços estáticos, ` +
+                `mas foram encontrados ${currentDemoServices.length} serviço(s). Remova os serviços adicionais antes de desfazer o catálogo.`,
+            );
+          }
+
+          for (const serviceRow of currentDemoServices) {
+            const pairKey = `${serviceRow.email}|${serviceRow.title}`;
+            if (!expectedCatalogPairs.has(pairKey)) {
+              throw new Error(
+                `Rollback do catálogo demo abortado: o serviço "${serviceRow.title}" para ${serviceRow.email} ` +
+                  `não pertence ao catálogo estático original.`,
+              );
+            }
+          }
+
+          // 3. Checa se existem favoritos de terceiros para os profissionais demo
+          const existingFavorites = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT id FROM favorites WHERE professional_id IN (:professionalIds)`,
+            { professionalIds: profIdsOrZero },
+            transaction,
+          ).catch(() => []);
+
+          if (existingFavorites.length > 0) {
+            throw new Error(
+              `Rollback do catálogo demo abortado: existem ${existingFavorites.length} favorito(s) ` +
+                `cadastrado(s) para os prestadores demo.`,
+            );
+          }
+
+          // 4. Checa galeria ou comodidades adicionadas aos prestadores demo
+          const existingGallery = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT id FROM professional_gallery WHERE professional_id IN (:professionalIds)`,
+            { professionalIds: profIdsOrZero },
+            transaction,
+          ).catch(() => []);
+
+          if (existingGallery.length > 0) {
+            throw new Error(
+              `Rollback do catálogo demo abortado: existem ${existingGallery.length} imagem(ns) na galeria ` +
+                `dos prestadores demo.`,
+            );
+          }
+
+          const existingAmenities = await selectRows(
+            queryInterface,
+            Sequelize,
+            `SELECT id FROM professional_amenities WHERE professional_id IN (:professionalIds)`,
+            { professionalIds: profIdsOrZero },
+            transaction,
+          ).catch(() => []);
+
+          if (existingAmenities.length > 0) {
+            throw new Error(
+              `Rollback do catálogo demo abortado: existem ${existingAmenities.length} comodidade(s) ` +
+                `vinculada(s) aos prestadores demo.`,
+            );
+          }
+
+          // Se passou em todas as travas, guarda os IDs dos 58 serviços para deleção exata
+          var serviceIdsToDelete = currentDemoServices.map((s) => Number(s.id));
+        }
+
+        // Se passar em TODOS os guards: limpa os dados demo
+        await queryInterface.bulkDelete(
+          "appointment",
+          {
+            payment_intent_id: {
+              [Sequelize.Op.in]: DEMO_REVIEW_PAYMENT_IDS,
+            },
           },
-        },
-        { transaction },
-      );
-      await queryInterface.bulkDelete(
-        "users",
-        { email: { [Sequelize.Op.in]: DEMO_EMAILS } },
-        { transaction },
-      );
+          { transaction },
+        );
+
+        if (professionalIds.length > 0 && serviceIdsToDelete && serviceIdsToDelete.length > 0) {
+          await queryInterface.bulkDelete(
+            "service_availability",
+            { service_id: { [Sequelize.Op.in]: serviceIdsToDelete } },
+            { transaction },
+          );
+          await queryInterface.bulkDelete(
+            "service",
+            { id: { [Sequelize.Op.in]: serviceIdsToDelete } },
+            { transaction },
+          );
+
+          await queryInterface.bulkDelete(
+            "professional_availability",
+            { professional_id: { [Sequelize.Op.in]: professionalIds } },
+            { transaction },
+          );
+          await queryInterface.bulkDelete(
+            "professional",
+            { id: { [Sequelize.Op.in]: professionalIds } },
+            { transaction },
+          );
+        }
+
+        await queryInterface.bulkDelete(
+          "client",
+          { user_id: { [Sequelize.Op.in]: userIds } },
+          { transaction },
+        );
+
+        await queryInterface.bulkDelete(
+          "address",
+          { user_id: { [Sequelize.Op.in]: userIds } },
+          { transaction },
+        );
+
+        await queryInterface.bulkDelete(
+          "users",
+          { id: { [Sequelize.Op.in]: userIds } },
+          { transaction },
+        );
+      }
     });
   },
 };

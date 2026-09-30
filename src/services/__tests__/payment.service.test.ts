@@ -1,7 +1,10 @@
 import { HttpError } from "../../errors/HttpError";
 
 jest.mock("../../config/database");
+jest.mock("../appointmentSchedule.service");
+jest.mock("../appointmentRefund.service");
 jest.mock("../../models/Appointment");
+jest.mock("../../models/AppointmentRefund");
 jest.mock("../../models/Client");
 jest.mock("../../models/Service");
 jest.mock("../../models/Address");
@@ -48,6 +51,9 @@ import { ServiceModel } from "../../models/Service";
 import { AddressModel } from "../../models/Address";
 import * as appointmentService from "../appointment/appointment.service";
 import { PaymentService, servicePriceInCents } from "../payment.service";
+import * as scheduleLock from "../appointmentSchedule.service";
+import * as refundQueue from "../appointmentRefund.service";
+import { AppointmentRefundModel } from "../../models/AppointmentRefund";
 
 const mocked = (fn: unknown) => fn as jest.Mock;
 
@@ -211,13 +217,56 @@ describe("createBookingPaymentIntent", () => {
       professionalId: "20",
     });
   });
+
+  it("aceita o identificador publico do app (short_id) e grava a chave numerica", async () => {
+    mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
+    mocked(AppointmentModel.findOne).mockResolvedValueOnce({
+      id: 9,
+      client_id: 30,
+      status: "pending",
+      payment_intent_id: null,
+      service_id: 40,
+      professional_id: 20,
+      final_price: 120,
+      start_time: new Date("2030-01-10T13:00:00.000Z"),
+    });
+    mocked(AddressModel.findByPk).mockResolvedValue({ id: 50, user_id: 1 });
+    mocked(ServiceModel.findByPk).mockResolvedValue({ id: 40, price_cents: 9900 });
+    mockPaymentIntentsCreate.mockResolvedValueOnce({ client_secret: "secret" });
+
+    await PaymentService.createBookingPaymentIntent(1, {
+      professionalId: 20,
+      serviceId: 40,
+      addressId: 50,
+      selectedTime: "x",
+      appointmentId: "ab12cd",
+    });
+
+    expect(mocked(AppointmentModel.findOne).mock.calls[0][0]).toEqual({
+      where: { short_id: "AB12CD" },
+    });
+    const args = mockPaymentIntentsCreate.mock.calls[0][0];
+    // Reserva existente cobra o preco combinado nela.
+    expect(args.amount).toBe(12000);
+    expect(args.metadata.appointmentId).toBe("9");
+  });
 });
 
 describe("confirmAndCreateAppointment", () => {
   const succeededIntent = (metadata: Record<string, string>) => ({
     id: "pi_1",
     status: "requires_capture",
+    amount: 15000,
     metadata,
+  });
+  const activeService = (overrides: Record<string, unknown> = {}) => ({
+    id: 40,
+    professional_id: 20,
+    active: true,
+    duration: 90,
+    title: "Pintura",
+    price_cents: 15000,
+    ...overrides,
   });
 
   const baseMetadata = {
@@ -242,8 +291,9 @@ describe("confirmAndCreateAppointment", () => {
   });
 
   it("e idempotente: devolve o agendamento ja vinculado ao pagamento", async () => {
-    const existing = { id: 77 };
+    const existing = { id: 77, client_id: 30 };
     mocked(AppointmentModel.findOne).mockResolvedValue(existing);
+    mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
     mockPaymentIntentsRetrieve.mockResolvedValue(succeededIntent(baseMetadata));
 
     await expect(PaymentService.confirmAndCreateAppointment("pi_1", 1)).resolves.toBe(existing);
@@ -252,6 +302,7 @@ describe("confirmAndCreateAppointment", () => {
 
   it("recusa pagamento nao concluido", async () => {
     mocked(AppointmentModel.findOne).mockResolvedValue(null);
+    mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
     mockPaymentIntentsRetrieve.mockResolvedValue({
       ...succeededIntent(baseMetadata),
       status: "requires_payment_method",
@@ -263,7 +314,7 @@ describe("confirmAndCreateAppointment", () => {
     mocked(AppointmentModel.findOne).mockResolvedValue(null);
     mockPaymentIntentsRetrieve.mockResolvedValue(succeededIntent(baseMetadata));
     mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
-    mocked(ServiceModel.findByPk).mockResolvedValue({ id: 40, duration: 90, title: "Pintura" });
+    mocked(ServiceModel.findByPk).mockResolvedValue(activeService());
     mocked(AppointmentModel.create).mockImplementation(async (data: any) => ({
       id: 5,
       ...data,
@@ -274,21 +325,48 @@ describe("confirmAndCreateAppointment", () => {
     expect(appt.client_id).toBe(30);
     expect(appt.payment_intent_id).toBe("pi_1");
     expect(appt.end_time).toEqual(new Date("2030-01-10T14:30:00.000Z"));
+    expect(appt.final_price).toBe(150);
+    // A criacao acontece sob a trava da agenda do profissional.
+    expect(scheduleLock.withProfessionalScheduleLock).toHaveBeenCalledWith(20, expect.any(Function));
+  });
+
+  it("enfileira a devolucao quando o valor nao bate com o servico", async () => {
+    mocked(AppointmentModel.findOne).mockResolvedValue(null);
+    mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
+    mockPaymentIntentsRetrieve.mockResolvedValue({ ...succeededIntent(baseMetadata), amount: 100 });
+    mocked(ServiceModel.findByPk).mockResolvedValue(activeService());
+
+    await expectHttpError(PaymentService.confirmAndCreateAppointment("pi_1", 1), 422);
+    expect(refundQueue.enqueuePaymentRefund).toHaveBeenCalledWith("pi_1", null, expect.anything());
+    expect(refundQueue.settleQueuedPayment).toHaveBeenCalledWith("pi_1");
+    expect(AppointmentModel.create).not.toHaveBeenCalled();
+  });
+
+  it("nao reaproveita um pagamento que ja esta na fila de devolucao", async () => {
+    mocked(AppointmentModel.findOne).mockResolvedValue(null);
+    mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
+    mocked(AppointmentRefundModel.findOne).mockResolvedValueOnce({ id: 1 });
+    mockPaymentIntentsRetrieve.mockResolvedValue(succeededIntent(baseMetadata));
+
+    await expectHttpError(PaymentService.confirmAndCreateAppointment("pi_1", 1), 409);
+    expect(refundQueue.enqueuePaymentRefund).not.toHaveBeenCalled();
+    expect(AppointmentModel.create).not.toHaveBeenCalled();
   });
 
   it("libera a reserva quando o horario ficou ocupado antes da confirmacao", async () => {
     mocked(AppointmentModel.findOne).mockResolvedValue(null);
     mockPaymentIntentsRetrieve.mockResolvedValue(succeededIntent(baseMetadata));
     mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
-    mocked(ServiceModel.findByPk).mockResolvedValue({ id: 40, duration: 60 });
-    mocked(appointmentService.assertProfessionalIsFree).mockRejectedValue(
-      HttpError.conflict("Horário ocupado."),
+    mocked(ServiceModel.findByPk).mockResolvedValue(activeService({ duration: 60 }));
+    mocked(scheduleLock.assertNoAppointmentOverlap).mockRejectedValue(
+      new scheduleLock.ScheduleConflictError("Horário ocupado."),
     );
-    mockPaymentIntentsCancel.mockResolvedValue({});
 
     await expectHttpError(PaymentService.confirmAndCreateAppointment("pi_1", 1), 409);
-    expect(mockPaymentIntentsCancel).toHaveBeenCalledWith("pi_1");
-    expect(mockRefundsCreate).not.toHaveBeenCalled();
+    // A devolucao fica registrada no mesmo commit e e tentada logo em seguida.
+    expect(refundQueue.enqueuePaymentRefund).toHaveBeenCalledWith("pi_1", null, expect.anything());
+    expect(refundQueue.settleQueuedPayment).toHaveBeenCalledWith("pi_1");
+    expect(AppointmentModel.create).not.toHaveBeenCalled();
   });
 });
 

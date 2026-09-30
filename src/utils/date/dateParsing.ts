@@ -100,7 +100,10 @@ export function parsePortugueseDate(
       : null;
   }
 
-  const dayOnlyMatch = normalized.match(/\bdia\s+(\d{1,2})\b/);
+  // Aceita "dia 28" ou, quando a mensagem inteira é só o número (dígito ou por
+  // extenso, ex.: "vinte e oito"), o dia isolado sem a palavra "dia".
+  const dayOnlyMatch =
+    normalized.match(/\bdia\s+(\d{1,2})\b/) ?? normalized.match(/^(\d{1,2})$/);
   if (dayOnlyMatch) {
     const candidate = resolveDayOnly(Number(dayOnlyMatch[1]), today);
     return candidate ? formatIsoCalendarDate(candidate) : null;
