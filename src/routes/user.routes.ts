@@ -6,6 +6,9 @@ import {
   changePassword,
   getUserByToken,
   updateUserProfile,
+  updateLocationConsent,
+  revokeLocationConsent,
+  getLocationConsent,
 } from "../controllers/user.controller";
 
 const router = Router();
@@ -427,5 +430,12 @@ router.put("/me", authMiddleware, updateUserProfile);
  *         $ref: '#/components/responses/ServerError'
  */
 router.get("/:id", authMiddleware, getUserById);
+
+/**
+ * LGPD Location Consent endpoints
+ */
+router.get("/location-consent", authMiddleware, getLocationConsent);
+router.post("/location-consent", authMiddleware, updateLocationConsent);
+router.post("/revoke-location-consent", authMiddleware, revokeLocationConsent);
 
 export default router;
