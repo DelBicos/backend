@@ -184,8 +184,11 @@ export function initChatSocket(httpServer: HttpServer): Server {
       }
     });
 
+    // Set em memória para rastrear agendamentos que já receberam o alerta de 5 minutos
+    const notifiedProximityAppointments = new Set<number>();
+
     // Enviar atualização de localização do prestador em tempo real (Task 2 & 5)
-    socket.on("location:send", (payload: { appointment_id: number; client_user_id?: number; latitude: number; longitude: number; heading?: number; speed?: number }) => {
+    socket.on("location:send", (payload: { appointment_id: number; client_user_id?: number; dest_lat?: number; dest_lng?: number; latitude: number; longitude: number; heading?: number; speed?: number }) => {
       if (io && payload?.appointment_id) {
         const updatePayload = {
           appointment_id: payload.appointment_id,
@@ -198,6 +201,51 @@ export function initChatSocket(httpServer: HttpServer): Server {
         io.to(`appointment:${payload.appointment_id}`).emit("location:update", updatePayload);
         if (payload.client_user_id) {
           io.to(userChannel(payload.client_user_id)).emit("location:update", updatePayload);
+        }
+
+        // Checagem da Notificação de Proximidade (~5 minutos)
+        if (payload.dest_lat && payload.dest_lng && !notifiedProximityAppointments.has(payload.appointment_id)) {
+          const R = 6371000;
+          const radLat1 = (payload.latitude * Math.PI) / 180;
+          const radLat2 = (payload.dest_lat * Math.PI) / 180;
+          const dLat = ((payload.dest_lat - payload.latitude) * Math.PI) / 180;
+          const dLon = ((payload.dest_lng - payload.longitude) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(radLat1) * Math.cos(radLat2) *
+            Math.sin(dLon / 2) * Math.sin(dLon / 2);
+          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          const distMeters = Math.round(R * c);
+          const estMinutes = Math.max(1, Math.ceil(distMeters / 300));
+
+          if (estMinutes <= 5 || distMeters <= 2500) {
+            notifiedProximityAppointments.add(payload.appointment_id);
+            const proximityPayload = {
+              appointment_id: payload.appointment_id,
+              message: "🚘 O prestador está a cerca de 5 minutos da sua casa! Fique atento.",
+              estimated_minutes: estMinutes,
+              distance_meters: distMeters,
+            };
+            io.to(`appointment:${payload.appointment_id}`).emit("location:proximity_warning", proximityPayload);
+            if (payload.client_user_id) {
+              io.to(userChannel(payload.client_user_id)).emit("location:proximity_warning", proximityPayload);
+            }
+          }
+        }
+      }
+    });
+
+    // Enviar evento de encerramento do rastreamento (Cheguei no Local / Task 3)
+    socket.on("location:arrived", (payload: { appointment_id: number; client_user_id?: number }) => {
+      if (io && payload?.appointment_id) {
+        const arrivedPayload = {
+          appointment_id: payload.appointment_id,
+          message: "🎯 Prestador no local (Rastreamento encerrado)",
+          timestamp: new Date().toISOString(),
+        };
+        io.to(`appointment:${payload.appointment_id}`).emit("location:arrived", arrivedPayload);
+        if (payload.client_user_id) {
+          io.to(userChannel(payload.client_user_id)).emit("location:arrived", arrivedPayload);
         }
       }
     });

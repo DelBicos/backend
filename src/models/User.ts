@@ -24,11 +24,14 @@ export interface IUser {
   active?: boolean;
   avatar_uri?: string;
   banner_uri?: string;
+  location_consent_accepted?: boolean;
+  location_consent_at?: Date | null;
+  location_consent_revoked_at?: Date | null;
 }
 
 type UserCreationalAttributes = Optional<
   IUser,
-  "id" | "active" | "avatar_uri" | "banner_uri"
+  "id" | "active" | "avatar_uri" | "banner_uri" | "location_consent_accepted" | "location_consent_at" | "location_consent_revoked_at"
 >;
 
 export class UserModel extends Model<IUser, UserCreationalAttributes> {
@@ -40,6 +43,9 @@ export class UserModel extends Model<IUser, UserCreationalAttributes> {
   public active?: boolean;
   public avatar_uri?: string;
   public banner_uri?: string;
+  public location_consent_accepted?: boolean;
+  public location_consent_at?: Date | null;
+  public location_consent_revoked_at?: Date | null;
 
   // Timestamps
   public readonly createdAt!: Date;
@@ -82,6 +88,18 @@ UserModel.init(
     },
     banner_uri: {
       type: DataTypes.STRING(255),
+      allowNull: true,
+    },
+    location_consent_accepted: {
+      type: DataTypes.BOOLEAN,
+      defaultValue: false,
+    },
+    location_consent_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    location_consent_revoked_at: {
+      type: DataTypes.DATE,
       allowNull: true,
     },
   },
