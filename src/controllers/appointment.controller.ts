@@ -59,12 +59,15 @@ export const createAppointment = async (req: Request, res: Response) => {
       });
     }
 
-    // Regra de antecedência: no mínimo 48 horas (2 dias) - DESATIVADO TEMPORARIAMENTE PARA TESTES DA BRANCH DESLOCAMENTO_1
-    // if (startDate < minAdvanceDate) {
-    //   return res.status(400).json({
-    //     error: "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
-    //   });
-    // }
+    const startDate = new Date(start_time);
+    const minAdvanceDate = new Date(Date.now() + 48 * 60 * 60 * 1000);
+
+    // Regra de antecedência: no mínimo 48 horas (2 dias)
+    if (startDate < minAdvanceDate) {
+      return res.status(400).json({
+        error: "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
+      });
+    }
 
     const [professional, service] = await Promise.all([
       ProfessionalModel.findByPk(Number(professional_id), {
@@ -817,7 +820,7 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
       const distanceMeters = getDistanceInMeters(profLat, profLng, addrLat, addrLng);
       const MAX_DISTANCE_METERS = 300;
 
-      if (distanceMeters > MAX_DISTANCE_METERS && process.env.ENVIRONMENT === 'production') {
+      if (distanceMeters > MAX_DISTANCE_METERS) {
         const roundedDistance = Math.round(distanceMeters);
         return res.status(400).json({
           error: `Você está a ${roundedDistance}m do endereço do cliente. Aproxime-se (menos de ${MAX_DISTANCE_METERS}m) para confirmar a chegada.`,
