@@ -1,0 +1,18 @@
+---
+paths:
+  - "**/__tests__/**"
+  - "**/*.test.ts"
+  - "jest.config.js"
+---
+<!-- GENERATED from .agents/rules/03-tests.md by scripts/rules/sync.mjs. Do not edit. -->
+
+# Tests
+- Jest with `ts-jest`. Tests live in `__tests__/` next to the code they cover
+  and end in `.test.ts`.
+- Unit tests (`npm run test:unit`) never touch a real database or network;
+  mock models and external clients.
+- Integration tests live in `__tests__/integration/`, run with
+  `npm run test:integration` against a disposable PostgreSQL database
+  (`PR2_TEST_DATABASE_URL`) and are not part of CI.
+- Never delete, skip or loosen a test to make a change pass. If a test is
+  wrong, say why and ask.
