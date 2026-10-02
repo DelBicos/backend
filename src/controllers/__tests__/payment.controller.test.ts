@@ -10,6 +10,15 @@ jest.mock("../../services/payment.service", () => ({
     createPaymentIntent: jest.fn(),
     confirmAndCreateAppointment: jest.fn(),
   },
+  PaymentValidationError: class PaymentValidationError extends Error {
+    code: string;
+    status: number;
+    constructor(message: string, code: string, status: number) {
+      super(message);
+      this.code = code;
+      this.status = status;
+    }
+  },
 }));
 
 const buildResponse = () => {
@@ -172,7 +181,10 @@ describe("PaymentController - confirmPaymentController", () => {
     const { res, jsonMock, statusMock } = buildResponse();
 
     await confirmPaymentController(
-      { body: { paymentIntentId: "pi_test_123", userId: "1" } } as Request,
+      {
+        user: { id: 1 },
+        body: { paymentIntentId: "pi_test_123", userId: "999" },
+      } as unknown as Request,
       res as Response,
     );
 
@@ -202,17 +214,17 @@ describe("PaymentController - confirmPaymentController", () => {
     expect(PaymentService.confirmAndCreateAppointment).not.toHaveBeenCalled();
   });
 
-  it("deve retornar 401 quando userId estiver ausente", async () => {
+  it("deve retornar 401 quando o usuário não estiver autenticado", async () => {
     const { res, jsonMock, statusMock } = buildResponse();
 
     await confirmPaymentController(
-      { body: { paymentIntentId: "pi_test_123" } } as Request,
+      { body: { paymentIntentId: "pi_test_123", userId: 1 } } as Request,
       res as Response,
     );
 
     expect(statusMock).toHaveBeenCalledWith(401);
     expect(jsonMock).toHaveBeenCalledWith({
-      error: "ID do usuário (userId) é obrigatório no corpo da requisição.",
+      error: "Usuário não autenticado.",
     });
     expect(PaymentService.confirmAndCreateAppointment).not.toHaveBeenCalled();
   });
@@ -224,7 +236,10 @@ describe("PaymentController - confirmPaymentController", () => {
     const { res, jsonMock, statusMock } = buildResponse();
 
     await confirmPaymentController(
-      { body: { paymentIntentId: "pi_test_123", userId: 1 } } as Request,
+      {
+        user: { id: 1 },
+        body: { paymentIntentId: "pi_test_123" },
+      } as unknown as Request,
       res as Response,
     );
 

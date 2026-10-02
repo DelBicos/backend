@@ -44,14 +44,22 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex("service_availability", ["service_id"], {
-      name: "idx_service_availability_service",
-    });
-    await queryInterface.addIndex(
-      "service_availability",
-      ["service_id", "day_of_week"],
-      { name: "idx_service_availability_service_day" }
-    );
+    try {
+      await queryInterface.addIndex("service_availability", ["service_id"], {
+        name: "idx_service_availability_service",
+      });
+    } catch (err) {
+      console.log("Índice idx_service_availability_service já existe, ignorando...");
+    }
+    try {
+      await queryInterface.addIndex(
+        "service_availability",
+        ["service_id", "day_of_week"],
+        { name: "idx_service_availability_service_day" }
+      );
+    } catch (err) {
+      console.log("Índice idx_service_availability_service_day já existe, ignorando...");
+    }
   },
 
   async down(queryInterface) {

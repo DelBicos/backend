@@ -55,12 +55,9 @@ const paymentRouter = Router();
  *       type: object
  *       required:
  *         - paymentIntentId
- *         - userId
  *       properties:
  *         paymentIntentId:
  *           type: string
- *         userId:
- *           type: integer
  *     ConfirmPaymentResponse:
  *       type: object
  *       properties:

@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 import { ProfessionalAvailabilityLockModel } from "../models/ProfessionalAvailabilityLock";
 import { ProfessionalModel } from "../models/Professional";
+import { withProfessionalScheduleLock } from "../services/appointmentSchedule.service";
 
 async function assertLockOwnership(
   lock: InstanceType<typeof ProfessionalAvailabilityLockModel>,
@@ -61,13 +62,13 @@ export const createLock = async (req: AuthenticatedRequest, res: Response) => {
           error: "Sem permissão para alterar bloqueios deste profissional",
         });
 
-    const created = await ProfessionalAvailabilityLockModel.create({
+    const created = await withProfessionalScheduleLock(professionalId, transaction => ProfessionalAvailabilityLockModel.create({
       professional_id: professionalId,
       start_time: new Date(req.body.start_time),
       end_time: new Date(req.body.end_time),
       reason: req.body.reason ?? null,
-      created_by: req.user.id,
-    } as any);
+      created_by: req.user!.id,
+    } as any, { transaction }));
     return res.status(201).json(created);
   } catch (error: any) {
     console.error("Erro createLock:", error);
@@ -94,7 +95,7 @@ export const deleteLockById = async (
     const owned = await assertLockOwnership(lock, req.user.id, res);
     if (!owned) return;
 
-    await lock.destroy();
+    await withProfessionalScheduleLock(lock.professional_id, transaction => lock.destroy({ transaction }));
     return res.status(204).send();
   } catch (error: any) {
     console.error("Erro deleteLockById:", error);

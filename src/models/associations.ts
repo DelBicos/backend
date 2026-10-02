@@ -17,6 +17,8 @@ import { AdminServiceOrderModel } from "./AdminServiceOrder";
 import { UserTokenModel } from "./UserToken";
 import { FavoriteModel } from "./Favorite";
 import { ChatRoomModel } from "./ChatRoom";
+import { BotChatSessionModel } from "./BotChatSession";
+import { BotChatMessageModel } from "./BotChatMessage";
 
 export function initializeAssociations() {
   // User associations
@@ -308,5 +310,31 @@ export function initializeAssociations() {
   ChatRoomModel.belongsTo(ServiceModel, {
     foreignKey: "service_id",
     as: "Service",
+  });
+
+  // Bot Chatbot associations
+  UserModel.hasMany(BotChatSessionModel, {
+    foreignKey: "user_id",
+    as: "BotSessions",
+  });
+
+  BotChatSessionModel.belongsTo(UserModel, {
+    foreignKey: "user_id",
+    as: "User",
+  });
+
+  BotChatSessionModel.hasMany(BotChatMessageModel, {
+    foreignKey: "session_id",
+    as: "Messages",
+  });
+
+  BotChatMessageModel.belongsTo(BotChatSessionModel, {
+    foreignKey: "session_id",
+    as: "Session",
+  });
+
+  BotChatSessionModel.belongsTo(AppointmentModel, {
+    foreignKey: "appointment_id",
+    as: "Appointment",
   });
 }

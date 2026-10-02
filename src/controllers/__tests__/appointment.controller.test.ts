@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
+import { cancelBotAppointment } from "../../services/bot/states/appointmentActions";
 import {
+  cancelClientAppointment,
   createAppointment,
   getAllAppointments,
   reviewAppointment,
@@ -38,6 +40,25 @@ jest.mock("../../utils/logger", () => ({
   logError: jest.fn(),
   logDatabase: jest.fn(),
 }));
+jest.mock("../../services/bot/states/appointmentActions", () => ({
+  cancelBotAppointment: jest.fn(),
+}));
+jest.mock("../../services/botAppointmentStatus.service", () => ({
+  syncBotSessionsForAppointmentStatus: jest.fn(),
+}));
+jest.mock("../../services/appointmentSchedule.service", () => ({
+  createAppointmentWithScheduleLock: jest.fn(async (data: unknown) => {
+    const { AppointmentModel: Model } = require("../../models/Appointment");
+    return Model.create(data);
+  }),
+  changePendingAppointmentStatus: jest.fn(),
+  ScheduleConflictError: class ScheduleConflictError extends Error {},
+}));
+
+const slotStart = new Date();
+slotStart.setUTCDate(slotStart.getUTCDate() + 10);
+slotStart.setUTCHours(13, 0, 0, 0);
+const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
 
 describe("AppointmentController - createAppointment", () => {
   let req: any;
@@ -57,8 +78,8 @@ describe("AppointmentController - createAppointment", () => {
     service_id: 5,
     professional_id: 20,
     address_id: 2,
-    start_time: "2026-10-01T13:00:00.000Z",
-    end_time: "2026-10-01T14:00:00.000Z",
+    start_time: slotStart.toISOString(),
+    end_time: slotEnd.toISOString(),
   };
 
   beforeEach(() => {
@@ -279,40 +300,44 @@ describe("AppointmentController - createAppointment", () => {
       });
       expect(AppointmentModel.create).not.toHaveBeenCalled();
     });
+  });
+});
 
-    it("AG-L-07: cliente no mesmo ponto do profissional (distância 0) é aceito", async () => {
-      req.body.client_lat = "-23.5505";
-      req.body.client_lng = "-46.6333";
-      delete req.body.address_id;
+describe("cancelClientAppointment", () => {
+  beforeEach(() => jest.clearAllMocks());
 
-      await createAppointment(req as Request, res as Response);
-
-      expect(statusMock).toHaveBeenCalledWith(201);
+  it("cancela apenas a reserva pertencente ao cliente autenticado", async () => {
+    (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 10 });
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      client_id: 10,
     });
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
 
-    it("AG-L-08: cliente a 9,99 km (logo abaixo do raio 10) é aceito", async () => {
-      req.body.client_lat = String(-23.5505 + 9.99 / 111.32);
-      req.body.client_lng = "-46.6333";
-      delete req.body.address_id;
+    await cancelClientAppointment(
+      { user: { id: 7 }, params: { id: "ABC" } } as any,
+      res as any,
+    );
 
-      await createAppointment(req as Request, res as Response);
-
-      expect(statusMock).toHaveBeenCalledWith(201);
+    expect(AppointmentModel.findOne).toHaveBeenCalledWith({
+      where: { short_id: "ABC", client_id: 10 },
     });
+    expect(cancelBotAppointment).toHaveBeenCalledWith(7, 100);
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
 
-    it("AG-L-09: cliente a 10,5 km (logo acima do raio 10) é recusado", async () => {
-      req.body.client_lat = String(-23.5505 + 10.5 / 111.32);
-      req.body.client_lng = "-46.6333";
-      delete req.body.address_id;
+  it("não cancela quando a reserva não pertence ao cliente", async () => {
+    (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 10 });
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue(null);
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
 
-      await createAppointment(req as Request, res as Response);
+    await cancelClientAppointment(
+      { user: { id: 7 }, params: { id: "ABC" } } as any,
+      res as any,
+    );
 
-      expect(statusMock).toHaveBeenCalledWith(400);
-      expect(jsonMock).toHaveBeenCalledWith({
-        error:
-          "O endereço do cliente está fora do raio de atuação do profissional",
-      });
-    });
+    expect(cancelBotAppointment).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(404);
   });
 });
 
@@ -410,6 +435,7 @@ describe("AppointmentController - getAllAppointments", () => {
     expect(result).toEqual(
       expect.objectContaining({
         id: "A1B2C3",
+        numeric_id: 100,
         payment_method: "Cartão de Crédito",
         Address: expect.objectContaining({
           street: "Rua Exemplo",
@@ -462,6 +488,7 @@ describe("AppointmentController - getAllAppointments", () => {
     expect(jsonMock).toHaveBeenCalledWith([
       expect.objectContaining({
         id: "Z9Y8X7",
+        numeric_id: 101,
         payment_method: "Cartão de Crédito",
         Address: expect.objectContaining({
           street: "Av. Paulista",

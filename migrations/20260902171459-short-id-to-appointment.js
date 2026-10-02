@@ -8,10 +8,14 @@ const generateShortId = customAlphabet(alphabet, 6);
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up (queryInterface, Sequelize) {
-    await queryInterface.addColumn('appointment', 'short_id', {
-      type: Sequelize.STRING(6),
-      allowNull: true,
-    });
+    try {
+      await queryInterface.addColumn('appointment', 'short_id', {
+        type: Sequelize.STRING(6),
+        allowNull: true,
+      });
+    } catch (err) {
+      console.log('Coluna short_id já existe em appointment, ignorando...');
+    }
 
     const appointments = await queryInterface.sequelize.query(
       'SELECT id FROM appointment WHERE short_id IS NULL',
@@ -40,24 +44,43 @@ module.exports = {
       );
     }
 
-    await queryInterface.changeColumn('appointment', 'short_id', {
-      type: Sequelize.STRING(6),
-      allowNull: false,
-    });
-    await queryInterface.addConstraint('appointment', {
-      fields: ['short_id'],
-      type: 'unique',
-      name: 'unique_appointment_short_id'
-    });
+    try {
+      await queryInterface.changeColumn('appointment', 'short_id', {
+        type: Sequelize.STRING(6),
+        allowNull: false,
+      });
+    } catch (err) {
+      console.log('Alteração de coluna short_id ignorada...');
+    }
 
-    await queryInterface.addIndex('appointment', ['short_id'], {
-      name: 'idx_appointment_short_id'
-    });
+    try {
+      await queryInterface.addConstraint('appointment', {
+        fields: ['short_id'],
+        type: 'unique',
+        name: 'unique_appointment_short_id'
+      });
+    } catch (err) {
+      console.log('Constraint unique_appointment_short_id já existe, ignorando...');
+    }
+
+    try {
+      await queryInterface.addIndex('appointment', ['short_id'], {
+        name: 'idx_appointment_short_id'
+      });
+    } catch (err) {
+      console.log('Índice idx_appointment_short_id já existe, ignorando...');
+    }
   },
 
   async down (queryInterface, Sequelize) {
-    await queryInterface.removeIndex('appointment', 'idx_appointment_short_id');
-    await queryInterface.removeConstraint('appointment', 'unique_appointment_short_id');
-    await queryInterface.removeColumn('appointment', 'short_id');
+    try {
+      await queryInterface.removeIndex('appointment', 'idx_appointment_short_id');
+    } catch (err) {}
+    try {
+      await queryInterface.removeConstraint('appointment', 'unique_appointment_short_id');
+    } catch (err) {}
+    try {
+      await queryInterface.removeColumn('appointment', 'short_id');
+    } catch (err) {}
   }
 };

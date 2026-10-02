@@ -4,7 +4,27 @@ import { UserModel } from "../../models/User";
 import { ClientModel } from "../../models/Client";
 import { ServiceModel } from "../../models/Service";
 import { NotificationModel } from "../../models/Notification";
+import { AppointmentRefundModel } from "../../models/AppointmentRefund";
 import { ensureChatRoomForAppointment } from "../../utils/chatRoom";
+import { enqueuePaymentRefund } from "../appointmentRefund.service";
+
+jest.mock("../botAppointmentStatus.service", () => ({
+  syncBotSessionsForAppointmentStatus: jest.fn(),
+}));
+jest.mock("../appointmentRefund.service", () => ({
+  enqueuePaymentRefund: jest.fn(),
+}));
+jest.mock("../appointmentSchedule.service", () => ({
+  withProfessionalScheduleLock: jest.fn(
+    async (_professionalId: number, work: (transaction: unknown) => unknown) =>
+      work({ LOCK: { UPDATE: "UPDATE" } }),
+  ),
+  assertNoAppointmentOverlap: jest.fn(),
+  ScheduleConflictError: class ScheduleConflictError extends Error {},
+}));
+jest.mock("../../models/AppointmentRefund", () => ({
+  AppointmentRefundModel: { findOne: jest.fn(), findOrCreate: jest.fn() },
+}));
 
 jest.mock("../../config/database", () => {
   const { Sequelize } = require("sequelize");
@@ -131,15 +151,20 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
     mockPaymentIntentsRetrieve.mockResolvedValue({
       id: paymentIntentId,
       status: "succeeded",
+      amount_received: 15000,
       metadata: { ...metadata },
     });
     mockRefundsCreate.mockResolvedValue({ id: "re_1" });
+    (AppointmentRefundModel.findOne as jest.Mock).mockResolvedValue(null);
     (UserModel.findByPk as jest.Mock).mockResolvedValue({ id: 1 });
     (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 10, user_id: 1 });
     (ServiceModel.findByPk as jest.Mock).mockResolvedValue({
       id: 5,
       title: "Limpeza Residencial",
       duration: 90,
+      active: true,
+      professional_id: 20,
+      price_cents: 15000,
     });
     (AppointmentModel.findOne as jest.Mock).mockResolvedValue(null);
     (AppointmentModel.create as jest.Mock).mockImplementation(
@@ -156,17 +181,21 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
       );
 
       expect(mockPaymentIntentsRetrieve).toHaveBeenCalledWith(paymentIntentId);
-      expect(AppointmentModel.create).toHaveBeenCalledWith({
-        professional_id: 20,
-        client_id: 10,
-        service_id: 5,
-        address_id: 2,
-        start_time: new Date(selectedTime),
-        end_time: new Date("2026-10-01T14:30:00.000Z"),
-        status: "pending",
-        payment_intent_id: paymentIntentId,
-        short_id: expect.stringMatching(/^[0-9A-Z]{6}$/),
-      });
+      expect(AppointmentModel.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          professional_id: 20,
+          client_id: 10,
+          service_id: 5,
+          address_id: 2,
+          start_time: new Date(selectedTime),
+          end_time: new Date("2026-10-01T14:30:00.000Z"),
+          status: "pending",
+          payment_intent_id: paymentIntentId,
+          final_price: 150,
+          short_id: expect.stringMatching(/^[0-9A-Z]{6}$/),
+        }),
+        expect.objectContaining({ transaction: expect.anything() }),
+      );
       expect(appointment).toEqual(
         expect.objectContaining({ id: 100, status: "pending" }),
       );
@@ -177,6 +206,9 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
         id: 5,
         title: "Limpeza Residencial",
         duration: null,
+        active: true,
+        professional_id: 20,
+        price_cents: 15000,
       });
 
       await PaymentService.confirmAndCreateAppointment(paymentIntentId, 1);
@@ -185,6 +217,7 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
         expect.objectContaining({
           end_time: new Date("2026-10-01T14:00:00.000Z"),
         }),
+        expect.objectContaining({ transaction: expect.anything() }),
       );
     });
 
@@ -204,17 +237,16 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
       );
     });
 
-    it("deve solicitar reembolso quando o banco falhar ao salvar", async () => {
+    it("não estorna no Stripe quando o banco falhar ao salvar", async () => {
       (AppointmentModel.create as jest.Mock).mockRejectedValue(
         new Error("falha no banco"),
       );
 
       await expect(
         PaymentService.confirmAndCreateAppointment(paymentIntentId, 1),
-      ).rejects.toThrow("Erro ao salvar o agendamento no banco de dados.");
-      expect(mockRefundsCreate).toHaveBeenCalledWith({
-        payment_intent: paymentIntentId,
-      });
+      ).rejects.toThrow("falha no banco");
+      expect(mockRefundsCreate).not.toHaveBeenCalled();
+      expect(enqueuePaymentRefund).not.toHaveBeenCalled();
     });
   });
 
@@ -286,8 +318,13 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
 
       await expect(
         PaymentService.confirmAndCreateAppointment(paymentIntentId, 1),
-      ).rejects.toThrow("Serviço não encontrado.");
+      ).rejects.toThrow("Serviço indisponível para receber pagamento.");
       expect(AppointmentModel.create).not.toHaveBeenCalled();
+      expect(enqueuePaymentRefund).toHaveBeenCalledWith(
+        paymentIntentId,
+        null,
+        expect.anything(),
+      );
     });
   });
 });

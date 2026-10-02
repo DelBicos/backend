@@ -3,6 +3,7 @@ import { UserModel } from "../models/User";
 import { ClientModel } from "../models/Client";
 import { AddressModel } from "../models/Address";
 import { ITokenPayload } from "../interfaces/authentication.interface";
+import { randomUUID } from "crypto";
 
 /**
  * Gera um token JWT e o payload do usuário para a resposta do frontend.
@@ -19,6 +20,7 @@ export const generateTokenAndUserPayload = (
   const expiresIn = process.env.EXPIRES_IN || "1h";
   const options: jwt.SignOptions = {
     expiresIn: expiresIn as jwt.SignOptions["expiresIn"],
+    jwtid: randomUUID(),
   };
 
   const tokenPayload: ITokenPayload = {

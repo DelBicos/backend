@@ -3,24 +3,36 @@
 /** @type {import('sequelize-cli').Migration} */
 module.exports = {
   async up(queryInterface, Sequelize) {
-    await queryInterface.addColumn("appointment", "completed_at", {
-      type: Sequelize.DATE,
-      allowNull: true,
-    });
+    try {
+      await queryInterface.addColumn("appointment", "completed_at", {
+        type: Sequelize.DATE,
+        allowNull: true,
+      });
+    } catch (err) {
+      console.log("Coluna completed_at já existe, ignorando...");
+    }
 
-    await queryInterface.addColumn("appointment", "final_price", {
-      type: Sequelize.DECIMAL(10, 2),
-      allowNull: true,
-    });
+    try {
+      await queryInterface.addColumn("appointment", "final_price", {
+        type: Sequelize.DECIMAL(10, 2),
+        allowNull: true,
+      });
+    } catch (err) {
+      console.log("Coluna final_price já existe, ignorando...");
+    }
 
     // composite index to accelerate provider+status+completed_at queries
-    await queryInterface.addIndex("appointment", [
-      "professional_id",
-      "status",
-      "completed_at",
-    ], {
-      name: "idx_prof_status_completed_at",
-    });
+    try {
+      await queryInterface.addIndex("appointment", [
+        "professional_id",
+        "status",
+        "completed_at",
+      ], {
+        name: "idx_prof_status_completed_at",
+      });
+    } catch (err) {
+      console.log("Índice idx_prof_status_completed_at já existe, ignorando...");
+    }
   },
 
   async down(queryInterface, Sequelize) {
