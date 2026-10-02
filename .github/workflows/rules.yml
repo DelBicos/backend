@@ -1,0 +1,32 @@
+name: Rules
+
+# Agent rules: generated files must match .agents/rules/, and no pull request
+# may add instruction files outside the rules system, plan documents or logs.
+on:
+  pull_request:
+  push:
+    branches: [stag, stag-facul, main]
+
+concurrency:
+  group: rules-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rules:
+    name: Rules (sync + instruction files)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+
+      - name: Generated files match the source
+        run: node scripts/rules/sync.mjs --check
+
+      - name: No instruction files outside the rules system
+        if: github.event_name == 'pull_request'
+        run: node scripts/rules/sync.mjs --check-added "origin/${{ github.base_ref }}"

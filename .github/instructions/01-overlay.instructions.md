@@ -1,0 +1,34 @@
+---
+applyTo: "src/**"
+---
+<!-- GENERATED from .agents/rules/01-overlay.md by scripts/rules/sync.mjs. Do not edit. -->
+
+# Active overlays
+
+### Legacy code outside the rules - expires 2026-12-31 - owner: @isabelmaito
+- Goal: bring the files below into the rules gradually, only when a task
+  edits them. There is no migration task.
+- Temporary rules: the files exist and keep working. When a task edits one,
+  apply the core rule for edited files (that file and the direct imports the
+  fix needs; anything larger, stop and ask). Then tell the user the entry can
+  leave this list.
+- Do not: copy these files as a pattern, add new files next to them, or touch
+  listed files the task does not need.
+- Files directly in `src/services/` (new services go to
+  `src/services/<domain>/`): `appointmentRefund.service.ts`,
+  `appointmentRefundProvider.service.ts`, `appointmentSchedule.service.ts`,
+  `availability.service.ts`, `botAppointmentStatus.helpers.ts`,
+  `botAppointmentStatus.service.ts`, `botConversation.service.ts`,
+  `chat.service.ts`, `email.service.ts`, `loginLog.service.ts`,
+  `nlu.service.ts`, `payment.service.ts`, `s3Service.ts`,
+  `semanticSearch.service.ts`, `voiceCommandIdempotency.service.ts`,
+  `voiceTranscription.service.ts`.
+- Files without an allowed suffix (`.service.ts`, `.rules.ts`, `.types.ts`,
+  `.test.ts`): everything in `src/services/bot/` (state machine:
+  `BotMessageRouter`, `BotSessionManager`, `BotStateNode`, `states/*State.ts`,
+  `serviceChoice.helpers.ts` and the rest) and in `src/services/storage/`
+  (`StorageAdapter`, `StorageFactory`, `S3StorageAdapter`,
+  `ImgBBStorageAdapter`). Their adapter, manager and router names are not a
+  pattern for new code.
+- Existing `any` (about 40 files) and `console.*` (about 25 files) in `src/`.
+  New code uses real types and `src/utils/logger`.

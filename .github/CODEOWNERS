@@ -1,0 +1,13 @@
+# Agent rules and their enforcement. Changes need approval from the rules owner.
+/.agents/                           @isabelmaito
+/AGENTS.md                          @isabelmaito
+/CLAUDE.md                          @isabelmaito
+/.claude/                           @isabelmaito
+/.cursor/                           @isabelmaito
+/.github/copilot-instructions.md    @isabelmaito
+/.github/instructions/              @isabelmaito
+/.github/CODEOWNERS                 @isabelmaito
+/.github/workflows/rules.yml        @isabelmaito
+/.husky/                            @isabelmaito
+/scripts/rules/                     @isabelmaito
+/src/__tests__/codeQuality.test.ts  @isabelmaito
