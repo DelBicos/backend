@@ -658,3 +658,207 @@ export const getAppointmentInvoice = async (req: Request, res: Response) => {
       .json({ error: "Erro ao gerar invoice", details: error.message });
   }
 };
+
+function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const radLat1 = (lat1 * Math.PI) / 180;
+  const radLat2 = (lat2 * Math.PI) / 180;
+  const deltaLat = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLon = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(radLat1) * Math.cos(radLat2) *
+    Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
+export const markArrivedAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+  const { latitude, longitude } = req.body;
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User" }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User" }] },
+        { model: ServiceModel, as: "Service" },
+        { model: AddressModel, as: "Address" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const professional = (appointment as any).Professional;
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional responsável pode marcar chegada.",
+      });
+    }
+
+    const address = (appointment as any).Address;
+    if (latitude != null && longitude != null && address && address.lat != null && address.lng != null) {
+      const profLat = Number(latitude);
+      const profLng = Number(longitude);
+      const addrLat = Number(address.lat);
+      const addrLng = Number(address.lng);
+
+      const distanceMeters = getDistanceInMeters(profLat, profLng, addrLat, addrLng);
+      const MAX_DISTANCE_METERS = 300;
+
+      if (distanceMeters > MAX_DISTANCE_METERS) {
+        const roundedDistance = Math.round(distanceMeters);
+        return res.status(400).json({
+          error: `Você está a ${roundedDistance}m do endereço do cliente. Aproxime-se (menos de ${MAX_DISTANCE_METERS}m) para confirmar a chegada.`,
+          distance: roundedDistance,
+          maxDistance: MAX_DISTANCE_METERS,
+        });
+      }
+    }
+
+    let code = appointment.verification_code;
+    if (!code) {
+      code = Math.floor(1000 + Math.random() * 9000).toString();
+      appointment.verification_code = code;
+    }
+
+    appointment.status = "arrived";
+    appointment.arrived_at = new Date();
+    await appointment.save();
+
+    const apptData: any = appointment;
+    const clientUser = apptData.Client?.User;
+    const profUser = apptData.Professional?.User;
+    const service = apptData.Service;
+
+    if (clientUser) {
+      await NotificationModel.create({
+        user_id: clientUser.id,
+        title: "Profissional chegou no local! 🎯",
+        message: `O profissional ${profUser?.name || ""} chegou! Seu código para iniciar o serviço é: ${code}`,
+        notification_type: "appointment",
+        related_entity_id: appointment.id,
+        is_read: false,
+      });
+
+      emitAppointmentStatusUpdate(clientUser.id, {
+        appointment_id: appointment.id,
+        status: "arrived",
+        verification_code: code,
+        session_ids: [],
+        message: `Profissional ${profUser?.name || ""} chegou! Passe o código ${code} para ele.`,
+        payment_status: appointment.payment_intent_id ? "paid" : "pending",
+        payment_pending: !appointment.payment_intent_id,
+        paid: !!appointment.payment_intent_id,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    logger.info("Appointment marcado como chegou no local", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Chegada confirmada com sucesso! Peça o código de 4 dígitos ao cliente.",
+      appointment,
+      verification_code: code,
+    });
+  } catch (error: any) {
+    logError("Erro ao marcar chegada no local", error, { paramId });
+    res.status(500).json({ error: "Erro ao confirmar chegada no local" });
+  }
+};
+
+export const startServiceAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+  const { code } = req.body;
+
+  try {
+    if (!code || String(code).trim().length !== 4) {
+      return res.status(400).json({ error: "Informe o código de 4 dígitos." });
+    }
+
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User" }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User" }] },
+        { model: ServiceModel, as: "Service" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const professional = (appointment as any).Professional;
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional responsável pode iniciar o serviço.",
+      });
+    }
+
+    if (String(appointment.verification_code).trim() !== String(code).trim()) {
+      return res.status(400).json({
+        error: "Código de verificação incorreto. Peça novamente ao cliente.",
+      });
+    }
+
+    appointment.status = "in_progress";
+    appointment.started_at = new Date();
+    await appointment.save();
+
+    const apptData: any = appointment;
+    const clientUser = apptData.Client?.User;
+    const profUser = apptData.Professional?.User;
+    const service = apptData.Service;
+
+    if (clientUser) {
+      await NotificationModel.create({
+        user_id: clientUser.id,
+        title: "Serviço Iniciado! 🚀",
+        message: `O serviço '${service?.title || ""}' com ${profUser?.name || ""} foi iniciado com sucesso.`,
+        notification_type: "appointment",
+        related_entity_id: appointment.id,
+        is_read: false,
+      });
+
+      emitAppointmentStatusUpdate(clientUser.id, {
+        appointment_id: appointment.id,
+        status: "in_progress",
+        session_ids: [],
+        message: `Serviço iniciado por ${profUser?.name || ""}.`,
+        payment_status: appointment.payment_intent_id ? "paid" : "pending",
+        payment_pending: !appointment.payment_intent_id,
+        paid: !!appointment.payment_intent_id,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    logger.info("Appointment iniciado", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Serviço iniciado com sucesso!",
+      appointment,
+    });
+  } catch (error: any) {
+    logError("Erro ao iniciar serviço", error, { paramId });
+    res.status(500).json({ error: "Erro ao iniciar serviço" });
+  }
+};
+
