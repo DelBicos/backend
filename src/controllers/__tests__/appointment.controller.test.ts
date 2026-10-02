@@ -4,6 +4,7 @@ import {
   cancelClientAppointment,
   createAppointment,
   getAllAppointments,
+  reviewAppointment,
 } from "../appointment.controller";
 import { AppointmentModel } from "../../models/Appointment";
 import { UserModel } from "../../models/User";
@@ -530,5 +531,110 @@ describe("AppointmentController - getAllAppointments", () => {
 
     expect(statusMock).toHaveBeenCalledWith(500);
     expect(jsonMock).toHaveBeenCalledWith({ error: "Erro interno do servidor" });
+  });
+});
+
+describe("Caixa preta — avaliação do agendamento (reviewAppointment)", () => {
+  let req: any;
+  let res: Partial<Response>;
+  let jsonMock: jest.Mock;
+  let statusMock: jest.Mock;
+  let save: jest.Mock;
+
+  const completedAppointment = () => ({
+    id: 100,
+    short_id: "A1B2C3",
+    status: "completed",
+    professional_id: 20,
+    service_id: 5,
+    rating: null,
+    review: null,
+    Client: { User: { id: 1, name: "Cliente" } },
+    save,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    save = jest.fn();
+    jsonMock = jest.fn();
+    statusMock = jest.fn().mockReturnValue({ json: jsonMock });
+    req = {
+      user: { id: 1 },
+      params: { id: "A1B2C3" },
+      body: { rating: 5, review: "Ótimo" },
+    };
+    res = { status: statusMock, json: jsonMock };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue(
+      completedAppointment(),
+    );
+    (ProfessionalModel.findByPk as jest.Mock).mockResolvedValue({
+      id: 20,
+      user_id: 2,
+    });
+    (UserModel.findByPk as jest.Mock).mockResolvedValue({ id: 2 });
+    (ServiceModel.findByPk as jest.Mock).mockResolvedValue({
+      title: "Limpeza",
+    });
+    (NotificationModel.create as jest.Mock).mockResolvedValue({});
+  });
+
+  it("AG-L-10: rating=1 (mínimo válido) é aceito", async () => {
+    req.body.rating = 1;
+
+    await reviewAppointment(req as Request, res as Response);
+
+    expect(statusMock).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalled();
+  });
+
+  it("AG-L-11: rating=5 (máximo válido) é aceito", async () => {
+    req.body.rating = 5;
+
+    await reviewAppointment(req as Request, res as Response);
+
+    expect(save).toHaveBeenCalled();
+    expect(jsonMock).toHaveBeenCalled();
+  });
+
+  it("AG-L-12: rating=0 (abaixo do mínimo) é recusado", async () => {
+    req.body.rating = 0;
+
+    await reviewAppointment(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "O campo 'rating' é obrigatório",
+    });
+  });
+
+  it("AG-L-13: rating=6 (acima do máximo) é recusado", async () => {
+    req.body.rating = 6;
+
+    await reviewAppointment(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "A avaliação deve estar entre 1 e 5",
+    });
+  });
+
+  it("AG-L-14: comentário com 500 caracteres (máximo) é aceito", async () => {
+    req.body.review = "a".repeat(500);
+
+    await reviewAppointment(req as Request, res as Response);
+
+    expect(save).toHaveBeenCalled();
+  });
+
+  it("AG-L-15: comentário com 501 caracteres (acima do máximo) é recusado", async () => {
+    req.body.review = "a".repeat(501);
+
+    await reviewAppointment(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "O comentário deve ter no máximo 500 caracteres",
+    });
+    expect(save).not.toHaveBeenCalled();
   });
 });

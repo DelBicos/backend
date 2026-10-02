@@ -75,6 +75,21 @@ describe("PaymentController - createPaymentIntentController", () => {
     expect(jsonMock).toHaveBeenCalledWith({ clientSecret: "pi_123_secret_456" });
   });
 
+  it("AG-L-16: amount=0.01 (primeiro valor acima de zero) é aceito e convertido para 1 centavo", async () => {
+    const { res, jsonMock, statusMock } = buildResponse();
+
+    await createPaymentIntentController(
+      { body: { ...validBody, amount: 0.01 } } as Request,
+      res as Response,
+    );
+
+    expect(PaymentService.createPaymentIntent).toHaveBeenCalledWith(
+      expect.objectContaining({ amount: 1, currency: "brl" }),
+    );
+    expect(statusMock).toHaveBeenCalledWith(200);
+    expect(jsonMock).toHaveBeenCalledWith({ clientSecret: "pi_123_secret_456" });
+  });
+
   it.each([
     ["ausente", undefined],
     ["zero", 0],
