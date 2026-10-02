@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
+import { cancelBotAppointment } from "../../services/bot/states/appointmentActions";
 import {
+  cancelClientAppointment,
   createAppointment,
   getAllAppointments,
 } from "../appointment.controller";
@@ -37,6 +39,25 @@ jest.mock("../../utils/logger", () => ({
   logError: jest.fn(),
   logDatabase: jest.fn(),
 }));
+jest.mock("../../services/bot/states/appointmentActions", () => ({
+  cancelBotAppointment: jest.fn(),
+}));
+jest.mock("../../services/botAppointmentStatus.service", () => ({
+  syncBotSessionsForAppointmentStatus: jest.fn(),
+}));
+jest.mock("../../services/appointmentSchedule.service", () => ({
+  createAppointmentWithScheduleLock: jest.fn(async (data: unknown) => {
+    const { AppointmentModel: Model } = require("../../models/Appointment");
+    return Model.create(data);
+  }),
+  changePendingAppointmentStatus: jest.fn(),
+  ScheduleConflictError: class ScheduleConflictError extends Error {},
+}));
+
+const slotStart = new Date();
+slotStart.setUTCDate(slotStart.getUTCDate() + 10);
+slotStart.setUTCHours(13, 0, 0, 0);
+const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
 
 describe("AppointmentController - createAppointment", () => {
   let req: any;
@@ -56,8 +77,8 @@ describe("AppointmentController - createAppointment", () => {
     service_id: 5,
     professional_id: 20,
     address_id: 2,
-    start_time: "2026-10-01T13:00:00.000Z",
-    end_time: "2026-10-01T14:00:00.000Z",
+    start_time: slotStart.toISOString(),
+    end_time: slotEnd.toISOString(),
   };
 
   beforeEach(() => {
@@ -281,6 +302,44 @@ describe("AppointmentController - createAppointment", () => {
   });
 });
 
+describe("cancelClientAppointment", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("cancela apenas a reserva pertencente ao cliente autenticado", async () => {
+    (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 10 });
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      client_id: 10,
+    });
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+
+    await cancelClientAppointment(
+      { user: { id: 7 }, params: { id: "ABC" } } as any,
+      res as any,
+    );
+
+    expect(AppointmentModel.findOne).toHaveBeenCalledWith({
+      where: { short_id: "ABC", client_id: 10 },
+    });
+    expect(cancelBotAppointment).toHaveBeenCalledWith(7, 100);
+    expect(res.status).toHaveBeenCalledWith(200);
+  });
+
+  it("não cancela quando a reserva não pertence ao cliente", async () => {
+    (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 10 });
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue(null);
+    const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+
+    await cancelClientAppointment(
+      { user: { id: 7 }, params: { id: "ABC" } } as any,
+      res as any,
+    );
+
+    expect(cancelBotAppointment).not.toHaveBeenCalled();
+    expect(res.status).toHaveBeenCalledWith(404);
+  });
+});
+
 describe("AppointmentController - getAllAppointments", () => {
   let req: Partial<Request>;
   let res: Partial<Response>;
@@ -375,6 +434,7 @@ describe("AppointmentController - getAllAppointments", () => {
     expect(result).toEqual(
       expect.objectContaining({
         id: "A1B2C3",
+        numeric_id: 100,
         payment_method: "Cartão de Crédito",
         Address: expect.objectContaining({
           street: "Rua Exemplo",
@@ -427,6 +487,7 @@ describe("AppointmentController - getAllAppointments", () => {
     expect(jsonMock).toHaveBeenCalledWith([
       expect.objectContaining({
         id: "Z9Y8X7",
+        numeric_id: 101,
         payment_method: "Cartão de Crédito",
         Address: expect.objectContaining({
           street: "Av. Paulista",

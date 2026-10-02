@@ -7,6 +7,7 @@ import {
 } from "../professional.controller";
 import { ProfessionalModel } from "../../models/Professional";
 import { ProfessionalAvailabilityModel } from "../../models/ProfessionalAvailability";
+import { ProfessionalAvailabilityLockModel } from "../../models/ProfessionalAvailabilityLock";
 import { ServiceAvailabilityModel } from "../../models/ServiceAvailability";
 import { AppointmentModel } from "../../models/Appointment";
 
@@ -23,6 +24,7 @@ jest.mock("../../models/Service");
 jest.mock("../../models/Appointment");
 jest.mock("../../models/Client");
 jest.mock("../../models/ProfessionalAvailability");
+jest.mock("../../models/ProfessionalAvailabilityLock");
 jest.mock("../../models/ServiceAvailability");
 
 const buildResponse = () => {
@@ -135,8 +137,18 @@ describe("Caixa preta — busca de disponibilidade GET /api/professionals/search
     (ProfessionalAvailabilityModel.findAll as jest.Mock).mockImplementation(
       async (opts: any) => {
         if (opts?.where?.is_available === false) return [];
-        return [{ start_time: "09:00", end_time: "12:00" }];
+        return [
+          {
+            start_time: "09:00",
+            end_time: "12:00",
+            is_available: true,
+            recurrence_pattern: "daily",
+          },
+        ];
       },
+    );
+    (ProfessionalAvailabilityLockModel.findAll as jest.Mock).mockResolvedValue(
+      [],
     );
     (ServiceAvailabilityModel.findAll as jest.Mock).mockResolvedValue([]);
     (AppointmentModel.findAll as jest.Mock).mockResolvedValue([]);

@@ -1,3 +1,4 @@
+import { withProfessionalScheduleLock } from "../services/appointmentSchedule.service";
 import { Request, Response } from "express";
 import { Op } from "sequelize";
 import { AuthenticatedRequest } from "../interfaces/authentication.interface";
@@ -141,7 +142,7 @@ export const createAvailability = async (
           "Conflito de disponibilidade: já existe uma disponibilidade que se sobrepõe a este horário",
       });
 
-    const created = await ProfessionalAvailabilityModel.create(payload as any);
+    const created = await withProfessionalScheduleLock(professionalId, transaction => ProfessionalAvailabilityModel.create(payload as any, { transaction }));
     return res.status(201).json(created);
   } catch (error: any) {
     console.error("Erro createAvailability:", error);
@@ -197,7 +198,7 @@ export const updateAvailability = async (
       }
     }
 
-    await availability.save();
+    await withProfessionalScheduleLock(availability.professional_id, transaction => availability.save({ transaction }));
     return res.json(availability);
   } catch (error: any) {
     console.error("Erro updateAvailability:", error);
@@ -237,7 +238,7 @@ export const deleteAvailability = async (
 
     // Soft-disable availability
     availability.is_available = false;
-    await availability.save();
+    await withProfessionalScheduleLock(availability.professional_id, transaction => availability.save({ transaction }));
     return res.status(200).json({ message: "Disponibilidade desativada" });
   } catch (error: any) {
     console.error("Erro deleteAvailability:", error);
@@ -307,7 +308,7 @@ export const updateAvailabilityById = async (
       }
     }
 
-    await availability.save();
+    await withProfessionalScheduleLock(availability.professional_id, transaction => availability.save({ transaction }));
     return res.json(availability);
   } catch (error: any) {
     console.error("Erro updateAvailabilityById:", error);
@@ -340,7 +341,7 @@ export const deleteAvailabilityById = async (
         .json({ error: "Sem permissão para alterar esta disponibilidade" });
 
     availability.is_available = false;
-    await availability.save();
+    await withProfessionalScheduleLock(availability.professional_id, transaction => availability.save({ transaction }));
     return res.status(204).send();
   } catch (error: any) {
     console.error("Erro deleteAvailabilityById:", error);

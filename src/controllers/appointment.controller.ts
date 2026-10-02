@@ -1,10 +1,10 @@
 import { Request, Response } from "express";
+import { cancelBotAppointment } from "../services/bot/states/appointmentActions";
 import { AppointmentModel } from "../models/Appointment";
 import { UserModel } from "../models/User";
 import { ClientModel } from "../models/Client";
 import { ProfessionalModel } from "../models/Professional";
 import { ServiceModel } from "../models/Service";
-import { PaymentService } from "../services/payment.service";
 import { NotificationModel } from "../models/Notification";
 import { AddressModel } from "../models/Address";
 import { SubCategoryModel } from "../models/Subcategory";
@@ -14,6 +14,12 @@ import {
   ensureChatRoomForAppointment,
   syncChatRoomStatusForAppointment,
 } from "../utils/chatRoom";
+import { syncBotSessionsForAppointmentStatus } from "../services/botAppointmentStatus.service";
+import {
+  createAppointmentWithScheduleLock,
+  changePendingAppointmentStatus,
+  ScheduleConflictError,
+} from "../services/appointmentSchedule.service";
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -23,6 +29,36 @@ const formatTime = (dateStr: string | Date) =>
     hour: "2-digit",
     minute: "2-digit",
   });
+
+export const cancelClientAppointment = async (req: Request, res: Response) => {
+  const user = (req as AuthenticatedRequest).user;
+  if (!user) return res.status(401).json({ error: "Usuário não autenticado" });
+  try {
+    const client = await ClientModel.findOne({ where: { user_id: user.id } });
+    if (!client) return res.status(403).json({ error: "Perfil de cliente necessário" });
+    const appointment = await AppointmentModel.findOne({
+      where: { short_id: req.params.id, client_id: client.id },
+    });
+    if (!appointment) return res.status(404).json({ error: "Agendamento não encontrado" });
+    await cancelBotAppointment(user.id, appointment.id);
+    try {
+      await syncChatRoomStatusForAppointment(appointment.id, "canceled");
+      appointment.status = "canceled";
+      await syncBotSessionsForAppointmentStatus(appointment);
+    } catch (error) {
+      logError("Falha ao sincronizar cancelamento", error);
+    }
+    return res.status(200).json({ status: "canceled" });
+  } catch (error) {
+    if (error instanceof Error && [
+      "Não é possível cancelar um agendamento já concluído",
+      "Este agendamento já está cancelado",
+      "Agendamento não encontrado",
+    ].includes(error.message)) return res.status(409).json({ error: error.message });
+    logError("Erro ao cancelar agendamento", error);
+    return res.status(500).json({ error: "Não foi possível cancelar o agendamento" });
+  }
+};
 
 export const createAppointment = async (req: Request, res: Response) => {
   try {
@@ -54,6 +90,20 @@ export const createAppointment = async (req: Request, res: Response) => {
       return res.status(400).json({
         error:
           "Campos obrigatórios: service_id, professional_id, start_time, end_time (ou forneça address_id ou client_lat/client_lng)",
+      });
+    }
+
+    // Regra de antecedência: no mínimo 48 horas (2 dias)
+    const startDate = new Date(start_time);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const minAdvanceDate = new Date(today);
+    minAdvanceDate.setDate(minAdvanceDate.getDate() + 2);
+
+    if (startDate < minAdvanceDate) {
+      return res.status(400).json({
+        error:
+          "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
       });
     }
 
@@ -147,7 +197,7 @@ export const createAppointment = async (req: Request, res: Response) => {
       }
     }
 
-    const appointment = await AppointmentModel.create({
+    const appointment = await createAppointmentWithScheduleLock({
       professional_id: Number(professional_id),
       client_id: clientRecord.id,
       service_id: Number(service_id),
@@ -216,7 +266,7 @@ export const createAppointment = async (req: Request, res: Response) => {
     res.status(201).json(appointment);
   } catch (error: any) {
     logError("Erro ao criar appointment", error);
-    res.status(400).json({ error: error.message });
+    res.status(error instanceof ScheduleConflictError ? 409 : 400).json({ error: error.message });
   }
 };
 
@@ -244,7 +294,9 @@ export const getAllAppointments = async (req: Request, res: Response) => {
     }
 
     const client = await ClientModel.findOne({ where: { user_id: userId } });
-    const professional = await ProfessionalModel.findOne({ where: { user_id: userId } });
+    const professional = await ProfessionalModel.findOne({
+      where: { user_id: userId },
+    });
 
     let whereClause: any = {};
 
@@ -257,10 +309,10 @@ export const getAllAppointments = async (req: Request, res: Response) => {
     } else {
       if (client && professional) {
         whereClause = {
-          [require('sequelize').Op.or]: [
+          [require("sequelize").Op.or]: [
             { client_id: client.id },
-            { professional_id: professional.id }
-          ]
+            { professional_id: professional.id },
+          ],
         };
       } else if (client) {
         whereClause.client_id = client.id;
@@ -309,13 +361,19 @@ export const getAllAppointments = async (req: Request, res: Response) => {
       order: [["start_time", "ASC"]],
     });
 
-    const formattedAppointments = appointments.map((appointment: AppointmentModel) => {
-      const json = appointment.toJSON() as any;
-      json.id = json.short_id;
-      delete json.short_id;
-      json.payment_method = json.payment_intent_id ? "Cartão de Crédito" : "Cartão de Crédito";
-      return json;
-    });
+    const formattedAppointments = appointments.map(
+      (appointment: AppointmentModel) => {
+        const json = appointment.toJSON() as any;
+        // Preserva o id numérico (usado no fluxo de pagamento) antes de expor o short_id como "id" de exibição.
+        json.numeric_id = json.id;
+        json.id = json.short_id;
+        delete json.short_id;
+        json.payment_method = json.payment_intent_id
+          ? "Cartão de Crédito"
+          : "Cartão de Crédito";
+        return json;
+      },
+    );
 
     res.json(formattedAppointments);
   } catch (error: any) {
@@ -327,9 +385,13 @@ export const getAllAppointments = async (req: Request, res: Response) => {
 export const confirmAppointment = async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    const appointment = await AppointmentModel.findOne({
-      where: { short_id: req.params.id }
+    const authReq = req as AuthenticatedRequest;
+    let appointment = await AppointmentModel.findOne({
+      where: { short_id: id },
     });
+    if (!appointment && !isNaN(Number(id))) {
+      appointment = await AppointmentModel.findByPk(Number(id));
+    }
     if (!appointment) {
       return res.status(404).json({ error: "Agendamento não encontrado" });
     }
@@ -338,12 +400,23 @@ export const confirmAppointment = async (req: Request, res: Response) => {
         error: `Não é possível aceitar um agendamento com status '${appointment.status}'`,
       });
     }
-    appointment.status = "confirmed";
-    await appointment.save();
+    const professional = await ProfessionalModel.findByPk(
+      appointment.professional_id,
+    );
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error:
+          "Apenas o profissional respons\u00e1vel pode aceitar este agendamento",
+      });
+    }
+
+    await changePendingAppointmentStatus(appointment, "confirmed");
+    await syncBotSessionsForAppointmentStatus(appointment);
     logger.info("Appointment confirmado", { appointmentId: id });
     res.json(appointment);
   } catch (error: any) {
     logError("Erro ao confirmar agendamento", error, { appointmentId: id });
+    if (error instanceof ScheduleConflictError) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: "Erro ao confirmar agendamento" });
   }
 };
@@ -355,17 +428,26 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
 
   try {
     if (status !== "confirmed" && status !== "canceled") {
-      return res.status(400).json({ error: "Status inválido. Use 'confirmed' ou 'canceled'." });
+      return res
+        .status(400)
+        .json({ error: "Status inválido. Use 'confirmed' ou 'canceled'." });
     }
 
     const appointment = await AppointmentModel.findOne({
       where: {
         short_id: req.params.id,
-        client_id: req.params.clientId
       },
       include: [
-        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User" }] },
-        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User" }] },
+        {
+          model: ClientModel,
+          as: "Client",
+          include: [{ model: UserModel, as: "User" }],
+        },
+        {
+          model: ProfessionalModel,
+          as: "Professional",
+          include: [{ model: UserModel, as: "User" }],
+        },
         { model: ServiceModel, as: "Service" },
       ],
     });
@@ -374,14 +456,21 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Agendamento não encontrado" });
     }
 
+    const appointmentProfessional = (appointment as any).Professional;
+    if (!authReq.user || appointmentProfessional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error:
+          "Apenas o profissional respons\u00e1vel pode alterar este agendamento",
+      });
+    }
+
     if (appointment.status !== "pending") {
       return res.status(400).json({
         error: `Não é possível alterar um agendamento com status '${appointment.status}'`,
       });
     }
 
-    appointment.status = status;
-    await appointment.save();
+    await changePendingAppointmentStatus(appointment, status);
 
     // Arquiva a sala de chat caso o agendamento seja cancelado
     await syncChatRoomStatusForAppointment(appointment.id, status);
@@ -401,10 +490,14 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
           is_read: false,
         });
       } else if (status === "canceled") {
+        let refundMsg = "";
+        if (appointment.payment_intent_id) {
+          refundMsg = " O estorno do pagamento será processado automaticamente.";
+        }
         await NotificationModel.create({
           user_id: clientUser.id,
           title: "Agendamento Recusado",
-          message: `O profissional não pôde aceitar o serviço '${service?.title}'.`,
+          message: `O profissional não pôde aceitar o serviço '${service?.title}'.${refundMsg}`,
           notification_type: "appointment",
           related_entity_id: appointment.id,
           is_read: false,
@@ -412,14 +505,20 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       }
     }
 
-    logger.info(`Appointment status updated to ${status}`, { appointmentId: id });
+    await syncBotSessionsForAppointmentStatus(appointment);
+
+    logger.info(`Appointment status updated to ${status}`, {
+      appointmentId: id,
+    });
     res.json(appointment);
   } catch (error: any) {
-    logError("Erro ao atualizar status do agendamento", error, { appointmentId: id });
+    logError("Erro ao atualizar status do agendamento", error, {
+      appointmentId: id,
+    });
+    if (error instanceof ScheduleConflictError) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: "Erro ao atualizar status do agendamento" });
   }
 };
-
 
 export const reviewAppointment = async (req: Request, res: Response) => {
   const { id } = req.params;

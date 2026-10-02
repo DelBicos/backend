@@ -40,6 +40,7 @@ import uploadRoutes from "./src/routes/upload.routes";
 import proxyUploadRoutes from "./src/routes/proxyUpload.routes";
 import chatRoutes from "./src/routes/chat.routes";
 import emailRoutes from "./src/routes/email.routes";
+import voiceRoutes from "./src/routes/voice.routes";
 import { initChatSocket } from "./src/realtime/chatSocket";
 
 dotenv.config({ override: false });
@@ -113,6 +114,7 @@ app.use("/api/availability-locks", availabilityLockRoutes);
 app.use("/api/uploads", uploadRoutes);
 app.use("/api/proxy-upload", proxyUploadRoutes);
 app.use("/api/chat", chatRoutes);
+app.use("/api/voice", voiceRoutes);
 app.use("/api/utilities", emailRoutes);
 
 const isServerless = process.env.IS_SERVERLESS == "true";

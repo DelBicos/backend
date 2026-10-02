@@ -84,16 +84,24 @@ module.exports = {
         defaultValue: Sequelize.literal("CURRENT_TIMESTAMP"),
       },
     });
-    await queryInterface.addIndex(
-      "appointment",
-      ["professional_id", "start_time", "end_time"],
-      {
-        name: "idx_appointment_times",
-      }
-    );
-    await queryInterface.addIndex("appointment", ["status", "start_time"], {
-      name: "idx_appointment_status_check",
-    });
+    try {
+      await queryInterface.addIndex(
+        "appointment",
+        ["professional_id", "start_time", "end_time"],
+        {
+          name: "idx_appointment_times",
+        }
+      );
+    } catch (err) {
+      console.log("Índice idx_appointment_times já existe, ignorando...");
+    }
+    try {
+      await queryInterface.addIndex("appointment", ["status", "start_time"], {
+        name: "idx_appointment_status_check",
+      });
+    } catch (err) {
+      console.log("Índice idx_appointment_status_check já existe, ignorando...");
+    }
   },
   async down(queryInterface, Sequelize) {
     await queryInterface.dropTable("appointment");
