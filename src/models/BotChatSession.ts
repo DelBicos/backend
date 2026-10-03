@@ -67,6 +67,11 @@ export interface BotDayProfessionalOption {
 }
 
 export interface BotSessionContext {
+  appointmentQuery?: {
+    statuses: Array<"pending" | "confirmed" | "completed" | "canceled">;
+    offset: number;
+    hasMore: boolean;
+  };
   intent?: string;
   pendingAction?: BotPendingAction;
   pendingPrompt?: BotPendingPrompt;
