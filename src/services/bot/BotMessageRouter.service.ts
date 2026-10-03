@@ -2,7 +2,7 @@ import { BotState } from "../../constants/botStates";
 import { BotChatSessionModel } from "../../models/BotChatSession";
 import { isSchedulingActionWord, NluResult } from "../nlu.service";
 import { BotStateNode, HandlerResult } from "./BotStateNode";
-import { InicioState } from "./states/InicioState";
+import { InicioState } from "./states/InicioState.service";
 import { ColetandoServicoState } from "./states/ColetandoServicoState";
 import { ColetandoDataState } from "./states/ColetandoDataState";
 import { ColetandoHorarioState } from "./states/ColetandoHorarioState";

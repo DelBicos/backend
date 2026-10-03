@@ -13,6 +13,7 @@ import {
 import { buildGreetingReply } from "./greetingReply.rules";
 import { isAvailableTimesQuestion } from "./contextualMessage";
 import { normalizeText } from "../../utils/nlp.util";
+import { parseAppointmentQuery } from "./appointmentQuery.rules";
 
 export interface BotMessageResponse {
   sessionId: number;
@@ -171,6 +172,16 @@ export async function processMessage(
     trimmedMessage,
     ctx as Record<string, unknown>,
   );
+  const appointmentQuery = parseAppointmentQuery(
+    trimmedMessage,
+    session.state === BotState.INICIO ? ctx.appointmentQuery : undefined,
+  );
+  if (appointmentQuery) {
+    // Uma consulta explícita de status não pode virar uma ação de cancelamento
+    // por uma classificação aproximada do NLU.
+    nlu.intent = "CONSULTAR";
+    nlu.entities = {};
+  }
 
   // Persiste mensagem do usuário
   await BotSessionManager.createMessage(
@@ -202,7 +213,7 @@ export async function processMessage(
       (session.state === BotState.CONFIRMACAO &&
         ctx.bookingDetailsStep === "ADDRESS")) &&
     (ctx.pendingAction ?? "CREATE") === "CREATE";
-  const isContextualBookingAnswer = !isExplicitGreeting && (
+  const isContextualBookingAnswer = !appointmentQuery && !isExplicitGreeting && (
     (isCollectingBookingDetails &&
       !/\b(?:agendar|reagendar|remarcar|cancelar|consultar|alterar)\b.*\b(?:agendamento|reserva|servico)s?\b/.test(normalizedMessage)) ||
     (session.state === BotState.CONFIRMACAO && ctx.pendingAction === "CREATE" &&
@@ -243,7 +254,7 @@ export async function processMessage(
   const isExplicitIntent =
     !isContextualAvailabilityQuestion &&
     !isContextualDateAnswer &&
-    !isContextualTimeAnswer &&
+    (!isContextualTimeAnswer || Boolean(appointmentQuery)) &&
     !isContextualBookingAnswer &&
     ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR"].includes(nlu.intent);
   let shouldRedirectToInicio = false;
@@ -305,7 +316,9 @@ export async function processMessage(
 
   if (shouldRedirectToInicio) {
     session.state = BotState.INICIO;
-    session.context = {};
+    session.context = appointmentQuery && ctx.appointmentQuery
+      ? { appointmentQuery: ctx.appointmentQuery }
+      : {};
     // Um novo pedido não deve manter o vínculo com o agendamento que estava
     // sendo acompanhado antes da mudança de intenção.
     session.appointment_id = null;
