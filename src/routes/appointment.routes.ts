@@ -4,6 +4,7 @@ import {
   confirmAppointment,
   reviewAppointment,
   getAppointmentInvoice,
+  createAppointment,
   updateAppointmentStatus,
   markInTransitAppointment,
   markArrivedAppointment,

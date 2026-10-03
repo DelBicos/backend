@@ -15,15 +15,12 @@ import {
   syncChatRoomStatusForAppointment,
 } from "../utils/chatRoom";
 import { syncBotSessionsForAppointmentStatus } from "../services/botAppointmentStatus.service";
-<<<<<<< HEAD
 import { emitAppointmentStatusUpdate } from "../realtime/chatSocket";
-=======
 import {
   createAppointmentWithScheduleLock,
   changePendingAppointmentStatus,
   ScheduleConflictError,
 } from "../services/appointmentSchedule.service";
->>>>>>> origin/stag
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -569,14 +566,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
       } else if (status === "canceled") {
         let refundMsg = "";
         if (appointment.payment_intent_id) {
-<<<<<<< HEAD
-          const refunded = await PaymentService.refundPaymentIntent(appointment.payment_intent_id);
-          refundMsg = refunded
-            ? " O valor do pagamento foi estornado com sucesso."
-            : " O estorno do pagamento está sendo processado.";
-=======
           refundMsg = " O estorno do pagamento será processado automaticamente.";
->>>>>>> origin/stag
         }
         await NotificationModel.create({
           user_id: clientUser.id,
