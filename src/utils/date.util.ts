@@ -67,7 +67,11 @@ const NUMBER_WORDS: ReadonlyArray<readonly [string, number]> = [
   ["zero", 0],
 ];
 
-export const PORTUGUESE_DAY_WORDS: readonly string[] = NUMBER_WORDS.map(([word]) => word);
+// Palavras de dia por extenso, na ordem em que aparecem em NUMBER_WORDS, para
+// reuso em padrões que reconhecem uma data isolada (ex.: STANDALONE_DAY_PATTERN).
+export const PORTUGUESE_DAY_WORDS: readonly string[] = NUMBER_WORDS.map(
+  ([word]) => word,
+);
 
 const MONTHS: Record<string, number> = {
   janeiro: 1,
@@ -125,8 +129,14 @@ function normalizePortugueseText(text: string): string {
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[ªº]/g, "")
     .replace(/[–—]/g, "-")
-    .replace(/\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)-?feira\b/g, "$1 feira")
-    .replace(/\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)feira\b/g, "$1 feira")
+    .replace(
+      /\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)-?feira\b/g,
+      "$1 feira",
+    )
+    .replace(
+      /\b(segunda|terca|quarta|quinta|sexta|sabado|domingo)feira\b/g,
+      "$1 feira",
+    )
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -724,7 +734,10 @@ export function parsePortugueseDate(
       : null;
   }
 
-  const dayOnlyMatch = normalized.match(/\bdia\s+(\d{1,2})\b/);
+  // Aceita "dia 28" ou, quando a mensagem inteira é só o número (dígito ou por
+  // extenso, ex.: "vinte e oito"), o dia isolado sem a palavra "dia".
+  const dayOnlyMatch =
+    normalized.match(/\bdia\s+(\d{1,2})\b/) ?? normalized.match(/^(\d{1,2})$/);
   if (dayOnlyMatch) {
     const candidate = resolveDayOnly(Number(dayOnlyMatch[1]), today);
     return candidate ? formatIsoCalendarDate(candidate) : null;

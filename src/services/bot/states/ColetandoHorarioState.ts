@@ -284,6 +284,7 @@ export class ColetandoHorarioState implements BotStateNode {
         },
       };
     }
+
     if (!time) {
       const requestedPeriod =
         nlu.entities.time_period ?? parseTimePeriodFromText(userMessage);
