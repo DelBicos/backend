@@ -18,7 +18,7 @@ import { AppointmentModel } from "../../../../models/Appointment";
 import { ClientModel } from "../../../../models/Client";
 import type { BotChatSessionModel } from "../../../../models/BotChatSession";
 import type { NluResult } from "../../../nlu.service";
-import { InicioState } from "../InicioState";
+import { InicioState } from "../InicioState.service";
 
 const fallbackNlu: NluResult = {
   intent: "FALLBACK",
