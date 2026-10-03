@@ -15,6 +15,7 @@ import {
   syncChatRoomStatusForAppointment,
 } from "../utils/chatRoom";
 import { syncBotSessionsForAppointmentStatus } from "../services/botAppointmentStatus.service";
+import { emitAppointmentStatusUpdate } from "../realtime/chatSocket";
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -674,6 +675,77 @@ function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: num
 
   return R * c;
 }
+
+export const markInTransitAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User" }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User" }] },
+        { model: ServiceModel, as: "Service" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const professional = (appointment as any).Professional;
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional responsável pode marcar deslocamento.",
+      });
+    }
+
+    appointment.status = "in_transit";
+    await appointment.save();
+
+    const apptData: any = appointment;
+    const clientUser = apptData.Client?.User;
+    const profUser = apptData.Professional?.User;
+
+    if (clientUser) {
+      await NotificationModel.create({
+        user_id: clientUser.id,
+        title: "Profissional a caminho! 🚘",
+        message: `O profissional ${profUser?.name || ""} está a caminho do seu endereço!`,
+        notification_type: "appointment",
+        related_entity_id: appointment.id,
+        is_read: false,
+      });
+
+      emitAppointmentStatusUpdate(clientUser.id, {
+        appointment_id: appointment.id,
+        status: "in_transit",
+        session_ids: [],
+        message: `Profissional ${profUser?.name || ""} está a caminho!`,
+        payment_status: appointment.payment_intent_id ? "paid" : "pending",
+        payment_pending: !appointment.payment_intent_id,
+        paid: !!appointment.payment_intent_id,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    logger.info("Appointment marcado como a caminho (in_transit)", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Deslocamento iniciado com sucesso!",
+      appointment,
+    });
+  } catch (error: any) {
+    logError("Erro ao marcar deslocamento", error, { paramId });
+    res.status(500).json({ error: "Erro ao iniciar deslocamento" });
+  }
+};
 
 export const markArrivedAppointment = async (req: Request, res: Response) => {
   const paramId = req.params.id;

@@ -67,6 +67,8 @@ const NUMBER_WORDS: ReadonlyArray<readonly [string, number]> = [
   ["zero", 0],
 ];
 
+export const PORTUGUESE_DAY_WORDS: readonly string[] = NUMBER_WORDS.map(([word]) => word);
+
 const MONTHS: Record<string, number> = {
   janeiro: 1,
   jan: 1,

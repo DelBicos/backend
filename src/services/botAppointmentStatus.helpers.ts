@@ -2,7 +2,10 @@ export type AppointmentStatus =
   | "pending"
   | "confirmed"
   | "completed"
-  | "canceled";
+  | "canceled"
+  | "in_transit"
+  | "arrived"
+  | "in_progress";
 
 interface AppointmentPaymentSnapshot {
   status: AppointmentStatus;
@@ -30,5 +33,8 @@ export function getAppointmentStatusMessage(
     return "\u274c O profissional recusou ou o agendamento foi cancelado.";
   }
   if (status === "completed") return "\u2705 O agendamento foi conclu\u00eddo.";
+  if (status === "in_transit") return "\uD83D\uDE98 O profissional est\u00e1 a caminho do local.";
+  if (status === "arrived") return "\uD83C\uDFAF O profissional chegou no local.";
+  if (status === "in_progress") return "\uD83D\uDE80 O servi\u00e7o est\u00e1 em andamento.";
   return "O agendamento continua pendente de resposta do profissional.";
 }

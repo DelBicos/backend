@@ -38,10 +38,13 @@ export interface IAppointment {
   start_time: Date;
   end_time: Date;
   completed_at?: Date;
+  arrived_at?: Date;
+  started_at?: Date;
+  verification_code?: string;
   final_price?: number;
   rating?: number;
   review?: string;
-  status?: "pending" | "confirmed" | "completed" | "canceled";
+  status?: "pending" | "confirmed" | "completed" | "canceled" | "in_transit" | "arrived" | "in_progress";
   payment_intent_id?: string | null;
   createdAt?: Date;
 }
@@ -61,10 +64,13 @@ export class AppointmentModel extends Model<
   public start_time!: Date;
   public end_time!: Date;
   public completed_at?: Date;
+  public arrived_at?: Date;
+  public started_at?: Date;
+  public verification_code?: string;
   public final_price?: number;
   public rating?: number;
   public review?: string;
-  public status!: "pending" | "confirmed" | "completed" | "canceled";
+  public status!: "pending" | "confirmed" | "completed" | "canceled" | "in_transit" | "arrived" | "in_progress";
   public created_at!: Date;
   public payment_intent_id?: string | null;
   public readonly createdAt!: Date;
@@ -129,6 +135,18 @@ AppointmentModel.init(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    arrived_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    started_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    verification_code: {
+      type: DataTypes.STRING(6),
+      allowNull: true,
+    },
     final_price: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: true,
@@ -142,7 +160,7 @@ AppointmentModel.init(
       allowNull: false,
     },
     status: {
-      type: DataTypes.ENUM("pending", "confirmed", "completed", "canceled"),
+      type: DataTypes.ENUM("pending", "confirmed", "completed", "canceled", "in_transit", "arrived", "in_progress"),
       defaultValue: "pending",
     },
     payment_intent_id: {

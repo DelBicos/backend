@@ -6,6 +6,9 @@ import {
   getAppointmentInvoice,
   updateAppointmentStatus,
   createAppointment,
+  markInTransitAppointment,
+  markArrivedAppointment,
+  startServiceAppointment,
 } from "../controllers/appointment.controller";
 import authMiddleware from "../middlewares/auth.middleware";
 
@@ -506,5 +509,8 @@ router.post("/:id/review", authMiddleware, reviewAppointment);
  *         description: Erro interno do servidor
  */
 router.get("/:id/receipt", authMiddleware, getAppointmentInvoice);
+router.post("/:id/in-transit", authMiddleware, markInTransitAppointment);
+router.post("/:id/arrived", authMiddleware, markArrivedAppointment);
+router.post("/:id/start-service", authMiddleware, startServiceAppointment);
 
 export default router;
