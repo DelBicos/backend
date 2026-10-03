@@ -23,7 +23,7 @@ import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
 import { isAvailableTimesQuestion } from "../contextualMessage";
 import { ColetandoDataState } from "./ColetandoDataState";
-import { buildConfirmationResponse } from "./stateHelpers";
+import { buildConfirmationResponse } from "./stateHelpers.rules";
 
 const MAX_TIME_SUGGESTIONS = 6;
 
