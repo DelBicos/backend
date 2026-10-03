@@ -335,3 +335,81 @@ export const updateUserAvatarUri = async (req: AuthenticatedRequest, res: Respon
     res.status(500).json({ error: error.message });
   }
 };
+
+export const updateLocationConsent = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: "Usuário não autenticado." });
+
+  try {
+    const user = await UserModel.findByPk(userId);
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
+
+    const now = new Date();
+    user.location_consent_accepted = true;
+    user.location_consent_at = now;
+    user.location_consent_revoked_at = null;
+    await user.save();
+
+    logger.info("Consentimento LGPD de geolocalização registrado com sucesso", { userId, acceptedAt: now });
+    res.status(200).json({
+      success: true,
+      message: "Consentimento de geolocalização registrado com sucesso.",
+      consent: {
+        accepted: true,
+        accepted_at: now,
+        revoked_at: null,
+      },
+    });
+  } catch (error: any) {
+    logError("Erro ao registrar consentimento LGPD de localização", error, { userId });
+    res.status(500).json({ error: "Erro interno ao registrar consentimento." });
+  }
+};
+
+export const revokeLocationConsent = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: "Usuário não autenticado." });
+
+  try {
+    const user = await UserModel.findByPk(userId);
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
+
+    const now = new Date();
+    user.location_consent_accepted = false;
+    user.location_consent_revoked_at = now;
+    await user.save();
+
+    logger.info("Consentimento LGPD de geolocalização revogado", { userId, revokedAt: now });
+    res.status(200).json({
+      success: true,
+      message: "Consentimento de geolocalização revogado com sucesso.",
+      consent: {
+        accepted: false,
+        accepted_at: user.location_consent_at,
+        revoked_at: now,
+      },
+    });
+  } catch (error: any) {
+    logError("Erro ao revogar consentimento LGPD de localização", error, { userId });
+    res.status(500).json({ error: "Erro interno ao revogar consentimento." });
+  }
+};
+
+export const getLocationConsent = async (req: AuthenticatedRequest, res: Response) => {
+  const userId = req.user?.id;
+  if (!userId) return res.status(401).json({ error: "Usuário não autenticado." });
+
+  try {
+    const user = await UserModel.findByPk(userId);
+    if (!user) return res.status(404).json({ error: "Usuário não encontrado." });
+
+    res.status(200).json({
+      accepted: !!user.location_consent_accepted,
+      accepted_at: user.location_consent_at || null,
+      revoked_at: user.location_consent_revoked_at || null,
+    });
+  } catch (error: any) {
+    logError("Erro ao buscar consentimento LGPD de localização", error, { userId });
+    res.status(500).json({ error: "Erro interno ao buscar consentimento." });
+  }
+};

@@ -19,6 +19,10 @@ jest.mock("../../config/database", () => {
   const { Sequelize } = require("sequelize");
   return {
     sequelize: new Sequelize({ dialect: "postgres", logging: false }),
+    chatMongoConnection: {
+      model: jest.fn().mockReturnValue({}),
+      on: jest.fn(),
+    },
   };
 });
 jest.mock("../../models/Appointment");

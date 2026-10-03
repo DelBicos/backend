@@ -31,6 +31,7 @@ export class VoiceUnclearAudioError extends Error {
     this.name = "VoiceUnclearAudioError";
   }
 }
+
 export class VoiceTranscriptionConfigurationError extends Error {
   public constructor() {
     super("Serviço de transcrição não configurado");
