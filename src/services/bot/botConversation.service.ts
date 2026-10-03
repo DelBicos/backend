@@ -1,18 +1,18 @@
-import { BotSessionContext, BotSessionState } from "../models/BotChatSession";
-import { analyzeMessage, isRestartCommand } from "./nlu.service";
-import { BotSessionManager } from "./bot/BotSessionManager";
-import { BotMessageRouter } from "./bot/BotMessageRouter";
-import { BotState } from "../constants/botStates";
-import { logError } from "../utils/logger";
+import { BotSessionContext, BotSessionState } from "../../models/BotChatSession";
+import { analyzeMessage, isRestartCommand } from "../nlu.service";
+import { BotSessionManager } from "./BotSessionManager";
+import { BotMessageRouter } from "./BotMessageRouter.service";
+import { BotState } from "../../constants/botStates";
+import { logError } from "../../utils/logger";
 import {
   parsePortugueseDate,
   parseTimeFromText,
   parseTimePeriodFromText,
   DEFAULT_BOT_TIME_ZONE,
-} from "../utils/date.util";
-import { buildGreetingReply } from "./bot/greetingReply";
-import { isAvailableTimesQuestion } from "./bot/contextualMessage";
-import { normalizeText } from "../utils/nlp.util";
+} from "../../utils/date.util";
+import { buildGreetingReply } from "./greetingReply.rules";
+import { isAvailableTimesQuestion } from "./contextualMessage";
+import { normalizeText } from "../../utils/nlp.util";
 
 export interface BotMessageResponse {
   sessionId: number;
@@ -195,12 +195,27 @@ export async function processMessage(
     (Boolean(parseTimeFromText(trimmedMessage)) ||
       (!isExplicitGreeting &&
         Boolean(parseTimePeriodFromText(trimmedMessage))));
+  // Respostas faladas como “segunda opção” ou “sim”
+  // pertencem à pergunta atual, mesmo quando o NLU infere outra intenção.
+  const isCollectingBookingDetails =
+    (session.state === BotState.COLETANDO_ENDERECO ||
+      (session.state === BotState.CONFIRMACAO &&
+        ctx.bookingDetailsStep === "ADDRESS")) &&
+    (ctx.pendingAction ?? "CREATE") === "CREATE";
+  const isContextualBookingAnswer = !isExplicitGreeting && (
+    (isCollectingBookingDetails &&
+      !/\b(?:agendar|reagendar|remarcar|cancelar|consultar|alterar)\b.*\b(?:agendamento|reserva|servico)s?\b/.test(normalizedMessage)) ||
+    (session.state === BotState.CONFIRMACAO && ctx.pendingAction === "CREATE" &&
+      (ctx.bookingDetailsStep === "REVIEW"
+        ? /^(?:sim|s|yes|confirmar|confirmo|confirmado|ok|pode|vamos|n[aã]o|nao|no|cancelar|desistir|voltar)$/.test(normalizedMessage)
+        : /^(?:trocar|mudar|outro|alterar)(?: o)? endereco$/.test(normalizedMessage)))
+  );
 
   // Saudações são globais: elas nunca devem ser interpretadas como nome de
   // serviço nem apagar um agendamento parcialmente preenchido. Uma resposta
   // de horário reconhecível, porém, pertence à etapa em andamento mesmo se o
   // classificador confundir "noite" com "boa noite".
-  if (nlu.intent === "SAUDACAO" && !isContextualTimeAnswer) {
+  if (nlu.intent === "SAUDACAO" && !isContextualTimeAnswer && !isContextualBookingAnswer) {
     const replyText = buildGreetingReply(session.state, ctx);
     await BotSessionManager.saveSession(session, session.state, ctx);
     await BotSessionManager.createMessage(session.id, "bot", replyText);
@@ -229,6 +244,7 @@ export async function processMessage(
     !isContextualAvailabilityQuestion &&
     !isContextualDateAnswer &&
     !isContextualTimeAnswer &&
+    !isContextualBookingAnswer &&
     ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR"].includes(nlu.intent);
   let shouldRedirectToInicio = false;
   if (isExplicitIntent) {
@@ -239,6 +255,7 @@ export async function processMessage(
         BotState.COLETANDO_HORARIO,
         BotState.SELECIONANDO_PROFISSIONAL,
         BotState.CONFIRMACAO,
+        BotState.COLETANDO_ENDERECO,
       ];
       const isContinuingCurrentBooking =
         ctx.pendingAction === "CREATE" &&
@@ -305,7 +322,7 @@ export async function processMessage(
       userId,
       selectedTimeIso,
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     logError("Bot: erro inesperado no roteamento de mensagem", error, {
       userId,
       sessionId: session.id,

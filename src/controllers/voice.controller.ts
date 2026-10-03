@@ -9,7 +9,7 @@ import {
   VoiceTranscriptionRateLimitError,
   VoiceUnclearAudioError,
 } from "../services/voiceTranscription.service";
-import { processMessage } from "../services/botConversation.service";
+import { processMessage } from "../services/bot/botConversation.service";
 import { BotSessionContext } from "../models/BotChatSession";
 import {
   getVoiceCommandIdempotencyKey,
