@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "deny": [
+      "Edit(/.agents/**)",
+      "Edit(/AGENTS.md)",
+      "Edit(/CLAUDE.md)",
+      "Edit(/.claude/rules/**)",
+      "Edit(/.claude/settings.json)",
+      "Edit(/.cursor/rules/**)",
+      "Edit(/.github/copilot-instructions.md)",
+      "Edit(/.github/instructions/**)",
+      "Edit(/.github/CODEOWNERS)",
+      "Edit(/.github/workflows/rules.yml)",
+      "Edit(/.husky/**)",
+      "Edit(/scripts/rules/**)",
+      "Edit(/src/__tests__/codeQuality.test.ts)"
+    ]
+  }
+}

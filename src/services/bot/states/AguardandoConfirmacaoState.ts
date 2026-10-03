@@ -47,7 +47,10 @@ export class AguardandoConfirmacaoState implements BotStateNode {
           "O profissional tem at\u00e9 12 horas para responder. " +
           "Voc\u00ea n\u00e3o precisa manter esta tela aberta: atualizaremos a conversa automaticamente.",
         nextState: "AGUARDANDO_CONFIRMACAO",
-        contextUpdate: { appointmentStatus: "pending", appointmentPaid: false },
+        contextUpdate: {
+          appointmentStatus: "pending",
+          appointmentPaid: Boolean(appointment.payment_intent_id),
+        },
       };
     }
 

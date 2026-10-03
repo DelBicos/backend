@@ -8,7 +8,7 @@ import {
   parsePortugueseDate,
   parseTimeFromText,
   parseTimePeriodFromText,
-  resolveBotTimeZone,
+  DEFAULT_BOT_TIME_ZONE,
 } from "../utils/date.util";
 import { buildGreetingReply } from "./bot/greetingReply";
 import { isAvailableTimesQuestion } from "./bot/contextualMessage";
@@ -96,7 +96,7 @@ export async function processMessage(
   }
 
   const ctx = (session.context ?? {}) as BotSessionContext;
-  ctx.timeZone = resolveBotTimeZone(timeZone ?? ctx.timeZone);
+  ctx.timeZone = DEFAULT_BOT_TIME_ZONE;
 
   // B. Escolher outro profissional
   if (

@@ -42,6 +42,17 @@ function serviceFixture(
 describe("ColetandoHorarioState", () => {
   beforeEach(() => jest.clearAllMocks());
 
+  it("exclui o próprio agendamento ao consultar horários de remarcação", async () => {
+    const date = futureDate();
+    (ServiceModel.findAll as jest.Mock).mockResolvedValue([serviceFixture(10, 100, "Ana", 90)]);
+    (getAvailableSlots as jest.Mock).mockResolvedValue(["09:00"]);
+    const result = await new ColetandoHorarioState().handle("quais os horários", { intent: "FALLBACK", entities: {}, confidence: 1 }, {
+      context: { pendingAction: "RESCHEDULE", appointmentId: 77, serviceId: 10, professionalId: 100, serviceDuration: 60, newDate: date },
+    } as BotChatSessionModel, 1);
+    expect(getAvailableSlots).toHaveBeenCalledWith(100, date, 60, 10, { excludeAppointmentId: 77 });
+    expect(result.reply).toContain("09:00");
+  });
+
   it('lista os horários do dia quando o usuário pergunta "quais os horários"', async () => {
     const date = futureDate();
     (ServiceModel.findAll as jest.Mock).mockResolvedValue([

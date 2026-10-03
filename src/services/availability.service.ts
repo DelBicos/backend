@@ -1,152 +1,176 @@
-import { Op } from "sequelize";
+import { Op, Transaction } from "sequelize";
 import { ProfessionalAvailabilityModel } from "../models/ProfessionalAvailability";
+import { ProfessionalAvailabilityLockModel } from "../models/ProfessionalAvailabilityLock";
 import { ServiceAvailabilityModel } from "../models/ServiceAvailability";
 import { ServiceModel } from "../models/Service";
 import { AppointmentModel } from "../models/Appointment";
+import { parseLocalAppointmentStart } from "../utils/date.util";
 
-/**
- * Retorna os horários disponíveis de um profissional para uma data específica.
- *
- * @param professionalId - ID do profissional
- * @param date           - Data no formato YYYY-MM-DD
- * @param serviceDuration - Duração do serviço em minutos
- * @param serviceId      - ID do serviço (opcional; sem ele, considera todos os serviços ativos)
- * @returns Array de strings HH:MM ordenado e sem duplicatas
- */
+export interface AvailabilityOptions {
+  transaction?: Transaction;
+  excludeAppointmentId?: number;
+}
+
+// start_day/end_day são datas de calendário, inclusive quando o driver retorna Date.
+function calendarDay(value: Date | string): string {
+  return value instanceof Date
+    ? value.toISOString().slice(0, 10)
+    : value.slice(0, 10);
+}
+
+export function ruleAppliesOnDate(
+  rule: ProfessionalAvailabilityModel,
+  date: string,
+): boolean {
+  if (rule.start_day && calendarDay(rule.start_day) > date) return false;
+  if (rule.end_day && calendarDay(rule.end_day) < date) return false;
+  const day = new Date(`${date}T12:00:00Z`);
+  switch (rule.recurrence_pattern) {
+    case "daily":
+      return true;
+    case "weekly":
+      return rule.days_of_week?.[day.getUTCDay()] === "1";
+    case "monthly":
+      return (
+        day.getUTCDate() >= (rule.start_day_of_month ?? 1) &&
+        day.getUTCDate() <= (rule.end_day_of_month ?? 31)
+      );
+    case "none":
+      return Boolean(rule.start_day && rule.end_day);
+    default:
+      return false;
+  }
+}
+
+export function appointmentOverlapWhere(
+  professionalId: number,
+  start: Date,
+  end: Date,
+  excludeAppointmentId?: number,
+) {
+  return {
+    professional_id: professionalId,
+    status: { [Op.in]: ["confirmed", "pending"] },
+    start_time: { [Op.lt]: end },
+    end_time: { [Op.gt]: start },
+    ...(excludeAppointmentId ? { id: { [Op.ne]: excludeAppointmentId } } : {}),
+  };
+}
+
+/** Horários de calendário em São Paulo; todos os intervalos são comparados em UTC. */
 export async function getAvailableSlots(
   professionalId: number,
   date: string,
   serviceDuration: number,
   serviceId?: number,
+  options: AvailabilityOptions = {},
 ): Promise<string[]> {
-  const targetDate = new Date(`${date}T12:00:00.000Z`);
-  const dayOfWeek = targetDate.getUTCDay(); // 0=Dom..6=Sáb
-  const bitmaskDay = "_".repeat(dayOfWeek) + "1" + "_".repeat(6 - dayOfWeek);
+  if (
+    !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+    !Number.isFinite(serviceDuration) ||
+    serviceDuration <= 0
+  )
+    return [];
+  const targetDate = new Date(`${date}T12:00:00Z`);
+  if (
+    isNaN(targetDate.getTime()) ||
+    targetDate.toISOString().slice(0, 10) !== date
+  )
+    return [];
+  const nextDate = new Date(targetDate);
+  nextDate.setUTCDate(nextDate.getUTCDate() + 1);
+  const startOfDay = parseLocalAppointmentStart(date, "00:00");
+  const endOfDay = parseLocalAppointmentStart(
+    nextDate.toISOString().slice(0, 10),
+    "00:00",
+  );
+  const { transaction } = options;
+  const rules = (
+    await ProfessionalAvailabilityModel.findAll({
+      where: { professional_id: professionalId },
+      transaction,
+    })
+  ).filter((rule) => ruleAppliesOnDate(rule, date));
 
-  // ── 1. Regras de disponibilidade geral do profissional ─────────────────────
-  const professionalRules = await ProfessionalAvailabilityModel.findAll({
-    where: {
-      professional_id: professionalId,
-      is_available: true,
-      [Op.or]: [
-        {
-          recurrence_pattern: "weekly",
-          days_of_week: { [Op.like]: `%${bitmaskDay}%` },
-        },
-        {
-          recurrence_pattern: "none",
-          start_day: { [Op.lte]: targetDate },
-          end_day: { [Op.gte]: targetDate },
-        },
-      ],
-    },
-  });
-
-  // ── 2. Disponibilidades do serviço específico (ServiceAvailabilityModel) ───
-  let serviceRules: { start_time: string; end_time: string }[] = [];
-  if (serviceId) {
-    serviceRules = await ServiceAvailabilityModel.findAll({
-      where: { service_id: serviceId, day_of_week: dayOfWeek },
-    });
-  } else {
-    const profServices = await ServiceModel.findAll({
-      where: { professional_id: professionalId, active: true },
-      attributes: ["id"],
-    });
-    if (profServices.length > 0) {
-      serviceRules = await ServiceAvailabilityModel.findAll({
-        where: {
-          service_id: profServices.map((s: any) => s.id),
-          day_of_week: dayOfWeek,
-        },
-      });
-    }
+  let serviceIds: number[] = serviceId ? [serviceId] : [];
+  if (!serviceId) {
+    serviceIds = (
+      await ServiceModel.findAll({
+        where: { professional_id: professionalId, active: true },
+        attributes: ["id"],
+        transaction,
+      })
+    ).map((service) => service.id);
   }
-
-  // Une as duas fontes de disponibilidade
-  const allRules: { start_time: string; end_time: string }[] = [
-    ...professionalRules,
+  const serviceRules = serviceIds.length
+    ? await ServiceAvailabilityModel.findAll({
+        where: {
+          service_id: { [Op.in]: serviceIds },
+          day_of_week: targetDate.getUTCDay(),
+        },
+        transaction,
+      })
+    : [];
+  const allRules = [
+    ...rules.filter((rule) => rule.is_available),
     ...serviceRules,
   ];
+  if (!allRules.length) return [];
 
-  if (allRules.length === 0) return [];
-
-  const startOfDay = new Date(`${date}T00:00:00.000Z`);
-  const endOfDay = new Date(`${date}T23:59:59.999Z`);
-
-  // ── 3. Bloqueios: agendamentos confirmados/pendentes + bloqueios explícitos ─
   const appointments = await AppointmentModel.findAll({
+    where: appointmentOverlapWhere(
+      professionalId,
+      startOfDay,
+      endOfDay,
+      options.excludeAppointmentId,
+    ),
+    transaction,
+  });
+  const locks = await ProfessionalAvailabilityLockModel.findAll({
     where: {
       professional_id: professionalId,
-      status: { [Op.in]: ["confirmed", "pending"] },
-      start_time: { [Op.between]: [startOfDay, endOfDay] },
+      start_time: { [Op.lt]: endOfDay },
+      end_time: { [Op.gt]: startOfDay },
     },
+    transaction,
   });
+  const blockages = [...appointments, ...locks].map((item) => ({
+    start: new Date(item.start_time),
+    end: new Date(item.end_time),
+  }));
+  for (const rule of rules.filter((rule) => !rule.is_available)) {
+    blockages.push({
+      start: parseLocalAppointmentStart(date, rule.start_time),
+      end: parseLocalAppointmentStart(date, rule.end_time),
+    });
+  }
 
-  const blocks = await ProfessionalAvailabilityModel.findAll({
-    where: {
-      professional_id: professionalId,
-      is_available: false,
-      recurrence_pattern: "none",
-      start_day: { [Op.lte]: targetDate },
-      end_day: { [Op.gte]: targetDate },
-    },
-  });
-
-  const allBlockages = [
-    ...appointments.map((a) => ({
-      start: new Date(a.start_time),
-      end: new Date(a.end_time),
-    })),
-    ...blocks.map((b) => {
-      const [startH, startM] = b.start_time.split(":").map(Number);
-      const [endH, endM] = b.end_time.split(":").map(Number);
-      const blockStart = new Date(startOfDay);
-      blockStart.setUTCHours(startH, startM);
-      const blockEnd = new Date(startOfDay);
-      blockEnd.setUTCHours(endH, endM);
-      return { start: blockStart, end: blockEnd };
-    }),
-  ];
-
-  // ── 4. Gerar slots disponíveis ──────────────────────────────────────────────
-  const availableSlots: string[] = [];
-  const slotInterval = 30;
-
+  const availableSlots = new Set<string>();
   for (const rule of allRules) {
-    const [startH, startM] = rule.start_time.split(":").map(Number);
-    const [endH, endM] = rule.end_time.split(":").map(Number);
-
-    const ruleStart = new Date(startOfDay);
-    ruleStart.setUTCHours(startH, startM, 0, 0);
-    const ruleEnd = new Date(startOfDay);
-    ruleEnd.setUTCHours(endH, endM, 0, 0);
-
-    let currentSlotStart = new Date(ruleStart);
-
-    while (currentSlotStart < ruleEnd) {
-      const slotEnd = new Date(
-        currentSlotStart.getTime() + serviceDuration * 60000,
-      );
-
-      if (slotEnd > ruleEnd) break;
-
-      const isBlocked = allBlockages.some(
-        (block) => currentSlotStart < block.end && slotEnd > block.start,
-      );
-
-      if (!isBlocked) {
-        availableSlots.push(
-          currentSlotStart.toLocaleTimeString("pt-BR", {
+    const start = parseLocalAppointmentStart(date, rule.start_time).getTime();
+    const end = parseLocalAppointmentStart(date, rule.end_time).getTime();
+    for (
+      let slot = start;
+      slot + serviceDuration * 60000 <= end;
+      slot += 30 * 60000
+    ) {
+      const slotEnd = slot + serviceDuration * 60000;
+      if (
+        !blockages.some(
+          (block) =>
+            slot < block.end.getTime() && slotEnd > block.start.getTime(),
+        )
+      ) {
+        availableSlots.add(
+          new Date(slot).toLocaleTimeString("pt-BR", {
+            timeZone: "America/Sao_Paulo",
             hour: "2-digit",
             minute: "2-digit",
-            timeZone: "UTC",
+            hour12: false,
           }),
         );
       }
-      currentSlotStart.setMinutes(currentSlotStart.getMinutes() + slotInterval);
     }
   }
-
-  return [...new Set(availableSlots)].sort();
+  return [...availableSlots].sort();
 }

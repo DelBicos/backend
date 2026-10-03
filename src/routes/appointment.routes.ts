@@ -5,15 +5,16 @@ import {
   reviewAppointment,
   getAppointmentInvoice,
   updateAppointmentStatus,
-  createAppointment,
   markInTransitAppointment,
   markArrivedAppointment,
   startServiceAppointment,
   getAppointmentById,
+  cancelClientAppointment,
 } from "../controllers/appointment.controller";
 import authMiddleware from "../middlewares/auth.middleware";
 
 const router = Router();
+router.post("/:id/cancel", authMiddleware, cancelClientAppointment);
 
 /**
  * @swagger
@@ -538,8 +539,5 @@ router.post("/:id/start-service", authMiddleware, startServiceAppointment);
  *         description: Agendamento não encontrado
  */
 router.get("/:id", authMiddleware, getAppointmentById);
-router.post("/:id/in-transit", authMiddleware, markInTransitAppointment);
-router.post("/:id/arrived", authMiddleware, markArrivedAppointment);
-router.post("/:id/start-service", authMiddleware, startServiceAppointment);
 
 export default router;

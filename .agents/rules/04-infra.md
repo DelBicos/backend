@@ -1,0 +1,15 @@
+---
+description: Infrastructure - CI workflows, Docker and scripts
+trigger: glob
+globs: ".github/workflows/**, Dockerfile*, docker-compose*.yml, scripts/**, package.json"
+alwaysApply: false
+---
+
+# Infrastructure
+- CI: `.github/workflows/tests.yml` runs the typecheck, the Jest unit project
+  and the `nlp-service` pytest suite on every push and pull request. Keep the
+  job names: branch rulesets depend on them.
+- Use npm (`npm ci` in CI). Never add `pnpm-lock.yaml` or `yarn.lock`.
+- Secrets come from GitHub secrets or `.env`, never from files in the
+  repository.
+- Never change `.github/workflows/rules.yml` or `scripts/rules/`.

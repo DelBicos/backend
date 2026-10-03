@@ -133,8 +133,8 @@ export class InicioState implements BotStateNode {
           const lines = activeAppointments.map((a: any, i: number) => {
             const idx = i + 1;
             const d = new Date(a.start_time);
-            const dateStr = d.toLocaleDateString("pt-BR");
-            const timeStr = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+            const dateStr = d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+            const timeStr = d.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
             const svcTitle = a.Service?.title ?? "Serviço";
             const label = `${idx}. ${svcTitle} (${dateStr})`;
 
@@ -203,8 +203,8 @@ export class InicioState implements BotStateNode {
         }
         const lines = upcoming.map((a: any, i: number) => {
           const d = new Date(a.start_time);
-          const dateStr = d.toLocaleDateString("pt-BR");
-          const timeStr = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+          const dateStr = d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+          const timeStr = d.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
           return `${i + 1}. ID ${a.id} — ${a.Service?.title ?? "serviço"} — ${dateStr} às ${timeStr} (${a.status})`;
         });
         return {

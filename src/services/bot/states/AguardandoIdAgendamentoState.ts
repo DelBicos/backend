@@ -6,6 +6,7 @@ import { UserModel } from "../../../models/User";
 import { BotChatSessionModel, BotSessionContext } from "../../../models/BotChatSession";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
+import { appointmentCalendarDate } from "../../../utils/date.util";
 
 export class AguardandoIdAgendamentoState implements BotStateNode {
   public async handle(
@@ -106,8 +107,8 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
     const svcTitle = apptData.Service?.title ?? "Serviço";
     const profName = apptData.Professional?.User?.name ?? "Profissional";
     const startDate = new Date(appointment.start_time);
-    const dateStr = startDate.toLocaleDateString("pt-BR");
-    const timeStr = startDate.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    const dateStr = startDate.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    const timeStr = startDate.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
 
     if (ctx.pendingAction === "CANCEL") {
       return {
@@ -144,6 +145,27 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
         appointmentId: appointment.id,
         serviceId: appointment.service_id,
         professionalId: appointment.professional_id,
+        serviceName: svcTitle,
+        professionalName: profName,
+        serviceDuration: (new Date(appointment.end_time).getTime() - startDate.getTime()) / 60000,
+        servicePrice: appointment.final_price != null
+          ? Math.round(Number(appointment.final_price) * 100)
+          : (apptData.Service?.price_cents ?? Math.round(Number(apptData.Service?.price ?? 0) * 100)),
+        matchedServiceIds: [appointment.service_id],
+        availableDayServiceIds: undefined,
+        availableDayProfessionals: undefined,
+        professionalOptionsData: undefined,
+        suggestedDates: undefined,
+        suggestedSlots: undefined,
+        suggestedSlotsData: undefined,
+        date: appointmentCalendarDate(startDate),
+        time: timeStr,
+        newDate: undefined,
+        newTime: undefined,
+        newTimePeriod: undefined,
+        appointmentStatus: appointment.status,
+        appointmentPaid: Boolean(appointment.payment_intent_id),
+        timeZone: "America/Sao_Paulo",
         serviceOptions: undefined,
         userAppointmentList: undefined,
       },

@@ -30,7 +30,7 @@ const MAX_TIME_SUGGESTIONS = 6;
 async function loadMatchingServices(
   context: BotSessionContext,
 ): Promise<ServiceModel[]> {
-  const ids = Array.from(
+  const ids = context.pendingAction === "RESCHEDULE" ? (context.serviceId ? [context.serviceId] : []) : Array.from(
     new Set([
       ...(context.availableDayServiceIds?.length
         ? context.availableDayServiceIds
@@ -80,12 +80,18 @@ async function loadMatchingServices(
 async function availableTimesForService(
   service: any,
   date: string,
+  context?: BotSessionContext,
 ): Promise<string[]> {
   return getAvailableSlots(
     service.professional_id,
     date,
-    service.duration ?? 60,
+    context?.pendingAction === "RESCHEDULE"
+      ? (context.serviceDuration ?? service.duration ?? 60)
+      : (service.duration ?? 60),
     service.id,
+    ...(context?.pendingAction === "RESCHEDULE"
+      ? [{ excludeAppointmentId: context.appointmentId }]
+      : []),
   );
 }
 
@@ -214,6 +220,10 @@ export class ColetandoHorarioState implements BotStateNode {
         time: legacyOption.time,
       };
       const update = professionalContextUpdate(option, timeField);
+      if (isAlterar) {
+        update.servicePrice = ctx.servicePrice;
+        update.serviceDuration = ctx.serviceDuration;
+      }
       return buildConfirmationResponse(
         { ...ctx, ...update },
         date,
@@ -251,7 +261,7 @@ export class ColetandoHorarioState implements BotStateNode {
     if (date && availabilityQuestion) {
       const availableTimes = new Set<string>();
       for (const service of matchingServices) {
-        const slots = await availableTimesForService(service, date);
+        const slots = await availableTimesForService(service, date, ctx);
         slots.forEach((slot) => availableTimes.add(slot));
       }
 
@@ -292,7 +302,7 @@ export class ColetandoHorarioState implements BotStateNode {
       if (requestedPeriod && date) {
         const availableTimes = new Set<string>();
         for (const service of matchingServices) {
-          const slots = await availableTimesForService(service, date);
+          const slots = await availableTimesForService(service, date, ctx);
           slots
             .filter((slot) => isTimeInPeriod(slot, requestedPeriod))
             .forEach((slot) => availableTimes.add(slot));
@@ -358,7 +368,7 @@ export class ColetandoHorarioState implements BotStateNode {
     const allAvailableTimes = new Set<string>();
 
     for (const service of matchingServices) {
-      const slots = await availableTimesForService(service, date);
+      const slots = await availableTimesForService(service, date, ctx);
       availabilityByService.push({ service, slots });
       slots.forEach((slot) => allAvailableTimes.add(slot));
     }

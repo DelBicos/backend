@@ -43,6 +43,7 @@ function requestsFollowingWeekday(userMessage: string): boolean {
 }
 
 function matchingServiceIds(context: BotSessionContext): number[] {
+  if (context.pendingAction === "RESCHEDULE") return context.serviceId ? [context.serviceId] : [];
   return Array.from(
     new Set([
       ...(context.matchedServiceIds ?? []),
@@ -84,14 +85,20 @@ interface ServiceAvailability {
 async function loadServiceAvailability(
   services: ServiceModel[],
   date: string,
+  context?: BotSessionContext,
 ): Promise<ServiceAvailability[]> {
   const checks = await Promise.all(
     services.map(async (service) => {
       const slots = await getAvailableSlots(
         service.professional_id,
         date,
-        service.duration ?? 60,
+        context?.pendingAction === "RESCHEDULE"
+          ? (context.serviceDuration ?? service.duration ?? 60)
+          : (service.duration ?? 60),
         service.id,
+        ...(context?.pendingAction === "RESCHEDULE"
+          ? [{ excludeAppointmentId: context.appointmentId }]
+          : []),
       );
       return slots.length > 0 ? { service, slots } : null;
     }),
@@ -154,6 +161,7 @@ async function findSuggestedDates(
   services: ServiceModel[],
   unavailableDate: string,
   period?: TimePeriod,
+  context?: BotSessionContext,
 ): Promise<string[]> {
   const suggestions: string[] = [];
 
@@ -165,7 +173,7 @@ async function findSuggestedDates(
   ) {
     const candidate = addDays(unavailableDate, offset);
     const available = availableServices(
-      await loadServiceAvailability(services, candidate),
+      await loadServiceAvailability(services, candidate, context),
       period,
     );
     if (available.length > 0) suggestions.push(candidate);
@@ -266,7 +274,7 @@ export class ColetandoDataState implements BotStateNode {
       };
     }
 
-    const dayAvailability = await loadServiceAvailability(services, date);
+    const dayAvailability = await loadServiceAvailability(services, date, ctx);
     const allDayServices = availableServices(dayAvailability);
     const matchingPeriodServices = availableServices(
       dayAvailability,
@@ -278,6 +286,7 @@ export class ColetandoDataState implements BotStateNode {
         services,
         date,
         requestedPeriod ?? undefined,
+        ctx,
       );
       const periodText = requestedPeriod
         ? ` no período ${formatTimePeriodPtBR(requestedPeriod)}`
