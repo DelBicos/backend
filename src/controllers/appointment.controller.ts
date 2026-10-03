@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { cancelBotAppointment } from "../services/bot/states/appointmentActions";
+import { cancelBotAppointment } from "../services/bot/states/appointmentActions.service";
 import { AppointmentModel } from "../models/Appointment";
 import { UserModel } from "../models/User";
 import { ClientModel } from "../models/Client";
