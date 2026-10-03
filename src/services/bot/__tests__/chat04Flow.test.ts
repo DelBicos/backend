@@ -20,7 +20,7 @@ jest.mock("../BotSessionManager", () => ({
 }));
 // Earlier scheduling stages have their own availability/semantic tests. Keep
 // the actual professional selection, details, final confirmation and creation.
-jest.mock("../states/InicioState", () => ({ InicioState: class {} }));
+jest.mock("../states/InicioState.service", () => ({ InicioState: class {} }));
 jest.mock("../states/ColetandoServicoState", () => ({ ColetandoServicoState: class {} }));
 jest.mock("../states/ColetandoDataState", () => ({ ColetandoDataState: class {} }));
 jest.mock("../states/ColetandoHorarioState", () => ({ ColetandoHorarioState: class {} }));
