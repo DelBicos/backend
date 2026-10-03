@@ -1,4 +1,4 @@
-import { buildGreetingReply } from "../greetingReply";
+import { buildGreetingReply } from "../greetingReply.rules";
 
 describe("buildGreetingReply", () => {
   it("retoma a pergunta de data sem perder o serviço", () => {
