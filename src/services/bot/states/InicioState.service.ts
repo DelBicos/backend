@@ -1,3 +1,4 @@
+import { AguardandoIdAgendamentoState } from "./AguardandoIdAgendamentoState.service";
 import { Op } from "sequelize";
 import { AppointmentModel } from "../../../models/Appointment";
 import { ClientModel } from "../../../models/Client";
@@ -110,6 +111,21 @@ export class InicioState implements BotStateNode {
         const action = nlu.intent === "CANCELAR" ? "CANCEL" : "RESCHEDULE";
         const actionText = nlu.intent === "CANCELAR" ? "cancelar" : "reagendar";
         const intentName = nlu.intent;
+        const explicitCode = userMessage.match(/#([a-z0-9]{1,6})\b/i)?.[1];
+        const reference = explicitCode ?? nlu.entities.appointment_id;
+        if (action === "CANCEL" && reference !== undefined) {
+          const result = await new AguardandoIdAgendamentoState().handle(
+            String(reference),
+            { ...nlu, entities: {} },
+            { ...session, context: { pendingAction: action } } as BotChatSessionModel,
+            userId,
+          );
+          return {
+            ...result,
+            contextUpdate: { intent: intentName, pendingAction: action, ...result.contextUpdate },
+          };
+        }
+
 
         const clientRecord = await ClientModel.findOne({
           where: { user_id: userId },

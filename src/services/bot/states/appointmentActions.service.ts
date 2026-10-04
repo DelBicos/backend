@@ -315,6 +315,17 @@ export async function cancelBotAppointment(
         throw new Error("Não é possível cancelar um agendamento já concluído");
       if (appointment.status === "canceled")
         throw new Error("Este agendamento já está cancelado");
+      const professional = await ProfessionalModel.findByPk(appointment.professional_id, { transaction });
+      if (!professional) throw new Error("Profissional do agendamento não encontrado");
+      // Status e notificação são persistidos juntos: uma falha mantém a reserva ativa.
+      await NotificationModel.create({
+        user_id: professional.user_id,
+        title: "Agendamento cancelado",
+        message: `O cliente cancelou o agendamento #${appointment.short_id || appointment.id}.`,
+        notification_type: "appointment",
+        related_entity_id: appointment.id,
+        is_read: false,
+      }, { transaction });
       appointment.status = "canceled";
       await appointment.save({ transaction });
     },
