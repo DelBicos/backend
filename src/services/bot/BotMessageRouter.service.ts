@@ -7,7 +7,7 @@ import { ColetandoServicoState } from "./states/ColetandoServicoState";
 import { ColetandoDataState } from "./states/ColetandoDataState";
 import { ColetandoHorarioState } from "./states/ColetandoHorarioState";
 import { ConfirmacaoState } from "./states/ConfirmacaoState.service";
-import { AguardandoIdAgendamentoState } from "./states/AguardandoIdAgendamentoState";
+import { AguardandoIdAgendamentoState } from "./states/AguardandoIdAgendamentoState.service";
 import { AguardandoConfirmacaoState } from "./states/AguardandoConfirmacaoState";
 import { SelecionandoProfissionalState } from "./states/SelecionandoProfissionalState";
 import { normalizeText } from "../../utils/nlp.util";
