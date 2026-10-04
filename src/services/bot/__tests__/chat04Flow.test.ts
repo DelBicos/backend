@@ -24,7 +24,7 @@ jest.mock("../states/InicioState.service", () => ({ InicioState: class {} }));
 jest.mock("../states/ColetandoServicoState", () => ({ ColetandoServicoState: class {} }));
 jest.mock("../states/ColetandoDataState", () => ({ ColetandoDataState: class {} }));
 jest.mock("../states/ColetandoHorarioState", () => ({ ColetandoHorarioState: class {} }));
-jest.mock("../states/AguardandoIdAgendamentoState", () => ({ AguardandoIdAgendamentoState: class {} }));
+jest.mock("../states/AguardandoIdAgendamentoState.service", () => ({ AguardandoIdAgendamentoState: class {} }));
 jest.mock("../states/AguardandoConfirmacaoState", () => ({ AguardandoConfirmacaoState: class {} }));
 jest.mock("../../voiceTranscription.service", () => ({
   ALLOWED_AUDIO_MIME_TYPES: new Set(["audio/webm"]), transcribeVoiceAudio: jest.fn(),

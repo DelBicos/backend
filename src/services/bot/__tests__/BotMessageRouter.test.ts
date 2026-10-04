@@ -55,7 +55,7 @@ jest.mock("../states/ConfirmacaoState.service", () => ({
     }
   },
 }));
-jest.mock("../states/AguardandoIdAgendamentoState", () => ({
+jest.mock("../states/AguardandoIdAgendamentoState.service", () => ({
   AguardandoIdAgendamentoState: class AguardandoIdAgendamentoState {
     public async handle() {
       throw new Error(
