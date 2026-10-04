@@ -13,7 +13,7 @@ export const adminLogin = async (req: Request, res: Response) => {
   if (!email || !password)
     return res.status(400).json({ error: "Email e senha obrigatórios" });
   try {
-    const user = await UserModel.findOne({ where: { email } });
+    const user = await UserModel.unscoped().findOne({ where: { email } });
     if (!user) return res.status(404).json({ error: "Usuário não encontrado" });
 
     const isValid = await bcrypt.compare(password, user.password);

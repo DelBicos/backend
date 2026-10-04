@@ -6,6 +6,9 @@ import {
   changePassword,
   getUserByToken,
   updateUserProfile,
+  updateLocationConsent,
+  revokeLocationConsent,
+  getLocationConsent,
 } from "../controllers/user.controller";
 
 const router = Router();
@@ -405,6 +408,13 @@ router.post("/change-password", authMiddleware, changePassword);
 
 router.get("/me", authMiddleware, getUserByToken);
 router.put("/me", authMiddleware, updateUserProfile);
+
+/**
+ * LGPD Location Consent endpoints
+ */
+router.get("/location-consent", authMiddleware, getLocationConsent);
+router.post("/location-consent", authMiddleware, updateLocationConsent);
+router.post("/revoke-location-consent", authMiddleware, revokeLocationConsent);
 
 /**
  * @swagger
