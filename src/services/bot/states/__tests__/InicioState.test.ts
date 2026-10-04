@@ -1,3 +1,5 @@
+jest.mock("../../../../models/Professional", () => ({ ProfessionalModel: {} }));
+jest.mock("../../../../models/User", () => ({ UserModel: {} }));
 jest.mock("../../../../models/Appointment", () => ({
   AppointmentModel: {
     findAll: jest.fn(),
