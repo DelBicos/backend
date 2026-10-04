@@ -18,7 +18,7 @@ export const logInUser = async (req: Request, res: Response): Promise<void> => {
   try {
     console.log("\n🔍 [LOGIN] Iniciando processo de login para:", email);
 
-    const user = await UserModel.findOne({ where: { email } });
+    const user = await UserModel.unscoped().findOne({ where: { email } });
     if (!user) {
       logAuth("login", undefined, email, false, "Usuário não encontrado");
       res.status(404).json({ message: "Usuário não encontrado" });
@@ -148,7 +148,7 @@ export const changePassword = async (
       return;
     }
 
-    const user = await UserModel.findByPk(userId);
+    const user = await UserModel.unscoped().findByPk(userId);
     if (!user) {
       res.status(404).json({ message: "Usuário não encontrado" });
       return;

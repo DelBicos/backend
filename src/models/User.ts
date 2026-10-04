@@ -109,6 +109,14 @@ UserModel.init(
     tableName: "users",
     underscored: true,
     timestamps: true,
+    defaultScope: {
+      attributes: { exclude: ["password"] },
+    },
+    scopes: {
+      withPassword: {
+        attributes: { include: ["password"] },
+      },
+    },
     indexes: [
       {
         name: "idx_users_active",
