@@ -430,8 +430,8 @@ export const markInTransitAppointment = async (req: Request, res: Response) => {
     const appointment = await AppointmentModel.findOne({
       where: whereClause,
       include: [
-        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User" }] },
-        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User" }] },
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
         { model: ServiceModel, as: "Service" },
         { model: AddressModel, as: "Address" },
       ],
@@ -516,12 +516,12 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
         {
           model: ClientModel,
           as: "Client",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         {
           model: ProfessionalModel,
           as: "Professional",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         { model: ServiceModel, as: "Service" },
       ],
@@ -622,7 +622,7 @@ export const reviewAppointment = async (req: Request, res: Response) => {
         {
           model: ClientModel,
           as: "Client",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
       ],
     });
@@ -728,12 +728,12 @@ export const getAppointmentInvoice = async (req: Request, res: Response) => {
         {
           model: ClientModel,
           as: "Client",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         {
           model: ProfessionalModel,
           as: "Professional",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         {
           model: AddressModel,
@@ -810,6 +810,19 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
   const { latitude, longitude } = req.body;
 
   try {
+    if (
+      latitude === undefined ||
+      latitude === null ||
+      longitude === undefined ||
+      longitude === null ||
+      !Number.isFinite(Number(latitude)) ||
+      !Number.isFinite(Number(longitude))
+    ) {
+      return res.status(400).json({
+        error: "Coordenadas (latitude e longitude) são obrigatórias para confirmar a chegada.",
+      });
+    }
+
     const isNumeric = /^\d+$/.test(paramId);
     const whereClause = isNumeric
       ? { id: Number(paramId) }
@@ -818,8 +831,8 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
     const appointment = await AppointmentModel.findOne({
       where: whereClause,
       include: [
-        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User" }] },
-        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User" }] },
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
         { model: ServiceModel, as: "Service" },
         { model: AddressModel, as: "Address" },
       ],
@@ -836,8 +849,14 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
       });
     }
 
+    if (appointment.status !== "in_transit" && appointment.status !== "arrived") {
+      return res.status(400).json({
+        error: `Não é possível marcar chegada em um agendamento com status '${appointment.status}'`,
+      });
+    }
+
     const address = (appointment as any).Address;
-    if (latitude != null && longitude != null && address && address.lat != null && address.lng != null) {
+    if (address && address.lat != null && address.lng != null) {
       const profLat = Number(latitude);
       const profLng = Number(longitude);
       const addrLat = Number(address.lat);
@@ -896,12 +915,14 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
       });
     }
 
+    const apptJson = appointment.toJSON() as any;
+    delete apptJson.verification_code;
+
     logger.info("Appointment marcado como chegou no local", { appointmentId: appointment.id });
     res.json({
       success: true,
       message: "Chegada confirmada com sucesso! Peça o código de 4 dígitos ao cliente.",
-      appointment,
-      verification_code: code,
+      appointment: apptJson,
     });
   } catch (error: any) {
     logError("Erro ao marcar chegada no local", error, { paramId });
@@ -927,8 +948,8 @@ export const startServiceAppointment = async (req: Request, res: Response) => {
     const appointment = await AppointmentModel.findOne({
       where: whereClause,
       include: [
-        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User" }] },
-        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User" }] },
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
         { model: ServiceModel, as: "Service" },
       ],
     });
@@ -941,6 +962,12 @@ export const startServiceAppointment = async (req: Request, res: Response) => {
     if (!authReq.user || professional?.user_id !== authReq.user.id) {
       return res.status(403).json({
         error: "Apenas o profissional responsável pode iniciar o serviço.",
+      });
+    }
+
+    if (appointment.status !== "arrived" && appointment.status !== "in_progress") {
+      return res.status(400).json({
+        error: `Não é possível iniciar o serviço em um agendamento com status '${appointment.status}'`,
       });
     }
 
@@ -981,11 +1008,14 @@ export const startServiceAppointment = async (req: Request, res: Response) => {
       });
     }
 
+    const apptJson = appointment.toJSON() as any;
+    delete apptJson.verification_code;
+
     logger.info("Appointment iniciado", { appointmentId: appointment.id });
     res.json({
       success: true,
       message: "Serviço iniciado com sucesso!",
-      appointment,
+      appointment: apptJson,
     });
   } catch (error: any) {
     logError("Erro ao iniciar serviço", error, { paramId });
@@ -995,6 +1025,11 @@ export const startServiceAppointment = async (req: Request, res: Response) => {
 
 export const getAppointmentById = async (req: Request, res: Response) => {
   const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+
+  if (!authReq.user) {
+    return res.status(401).json({ error: "Usuário não autenticado" });
+  }
 
   try {
     const isNumeric = /^\d+$/.test(paramId);
@@ -1042,7 +1077,21 @@ export const getAppointmentById = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Agendamento não encontrado" });
     }
 
-    res.json(appointment);
+    const apptData = appointment as any;
+    const clientUserId = apptData.Client?.User?.id;
+    const profUserId = apptData.Professional?.User?.id;
+    const currentUserId = authReq.user.id;
+
+    if (currentUserId !== clientUserId && currentUserId !== profUserId) {
+      return res.status(403).json({ error: "Acesso negado a este agendamento" });
+    }
+
+    const json = appointment.toJSON() as any;
+    if (currentUserId === profUserId) {
+      delete json.verification_code;
+    }
+
+    res.json(json);
   } catch (error: any) {
     logError("Erro ao buscar agendamento por ID", error, { paramId });
     res.status(500).json({ error: "Erro interno ao buscar agendamento" });
