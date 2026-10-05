@@ -21,13 +21,13 @@ import {
   findUserByEmail,
   hashPassword,
   normalizeEmail,
-} from "./credentials";
+} from "./credentials.rules";
 import {
   CODE_TTL_MS,
   PendingAddress,
   PendingRegistrationStore,
   PendingUserData,
-} from "./pendingRegistration.store";
+} from "./pendingRegistration.service";
 
 export const pendingRegistrations = new PendingRegistrationStore();
 

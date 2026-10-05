@@ -1,6 +1,6 @@
 import { levenshteinDistance } from "../../utils/nlp.util";
 import { PORTUGUESE_DAY_WORDS } from "../../utils/date.util";
-import type { NluIntent } from "./types";
+import type { NluIntent } from "./nlu.types";
 
 export const RESTART_COMMAND_PATTERN =
   /^(?:reiniciar|recomecar|comecar\s+(?:de\s+novo|novamente)|novo\s+(?:atendimento|agendamento|pedido)|iniciar\s+novamente|limpar\s+(?:o\s+)?(?:chat|bate\s*papo|conversa)|zerar\s+(?:o\s+)?(?:chat|bate\s*papo|conversa)|cancelar\s+(?:o\s+)?(?:processo|fluxo)|voltar\s+(?:ao\s+)?inicio|sair\s+(?:do\s+)?(?:atendimento|fluxo))$/;

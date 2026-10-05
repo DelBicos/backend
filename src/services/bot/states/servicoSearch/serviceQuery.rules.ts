@@ -1,6 +1,6 @@
 import { stringSimilarity } from "../../../../utils/nlp.util";
 import { canonicalizeServiceToken } from "../../serviceChoice.helpers";
-import type { ServiceQueryAnalysis } from "./types";
+import type { ServiceQueryAnalysis } from "./serviceSearch.types";
 
 export const SERVICE_SEARCH_STOP_WORDS = new Set([
   "a",

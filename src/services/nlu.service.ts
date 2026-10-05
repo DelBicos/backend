@@ -1,12 +1,12 @@
 import { parseTimePeriodFromText } from "../utils/date.util";
 import { normalizeText } from "../utils/nlp.util";
 import logger from "../utils/logger";
-import type { NluEntities, NluIntent, NluResult } from "./nlu/types";
-import { STANDALONE_EXPLICIT_TIME_PATTERN, STANDALONE_TIME_PERIOD_PATTERN, classifyExplicitIntent, isStandaloneDateInput } from "./nlu/rules";
-import { extractDate, extractEntities, extractTime } from "./nlu/entities";
+import type { NluEntities, NluIntent, NluResult } from "./nlu/nlu.types";
+import { STANDALONE_EXPLICIT_TIME_PATTERN, STANDALONE_TIME_PERIOD_PATTERN, classifyExplicitIntent, isStandaloneDateInput } from "./nlu/intent.rules";
+import { extractDate, extractEntities, extractTime } from "./nlu/entities.rules";
 
-export type { NluIntent, NluEntities, NluResult } from "./nlu/types";
-export { isSchedulingActionWord, isRestartCommand } from "./nlu/rules";
+export type { NluIntent, NluEntities, NluResult } from "./nlu/nlu.types";
+export { isSchedulingActionWord, isRestartCommand } from "./nlu/intent.rules";
 
 /** Tempo máximo de espera pelo classificador interno em milissegundos. */
 const configuredTimeoutMs = Number(

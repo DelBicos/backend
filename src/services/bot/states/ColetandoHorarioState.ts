@@ -25,7 +25,7 @@ import { isAvailableTimesQuestion } from "../contextualMessage";
 import { ColetandoDataState } from "./ColetandoDataState";
 import { buildConfirmationResponse } from "./stateHelpers";
 
-import type { BotCatalogService } from "./servicoSearch/types";
+import type { BotCatalogService } from "./servicoSearch/serviceSearch.types";
 const MAX_TIME_SUGGESTIONS = 6;
 
 async function loadMatchingServices(

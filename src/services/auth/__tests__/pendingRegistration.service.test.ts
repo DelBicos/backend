@@ -3,7 +3,7 @@ import {
   MAX_VERIFY_ATTEMPTS,
   PendingRegistrationStore,
   PendingUserData,
-} from "../pendingRegistration.store";
+} from "../pendingRegistration.service";
 
 const data: PendingUserData = {
   name: "Ana Souza",

@@ -27,7 +27,7 @@ jest.mock("../appointment.service", () => ({
   assertProfessionalIsFree: jest.fn(),
   toPublicAppointment: jest.fn((a: any) => ({ id: a.short_id, status: a.status })),
 }));
-jest.mock("../appointment.notifications", () => ({
+jest.mock("../appointmentNotifications.service", () => ({
   notifyAppointmentCanceled: jest.fn(),
   notifyNoShow: jest.fn(),
   notifyRescheduleRequested: jest.fn(),
@@ -41,9 +41,9 @@ jest.mock("../../../utils/logger", () => ({
 import { ProfessionalModel } from "../../../models/Professional";
 import { PaymentService } from "../../payment.service";
 import * as appointmentService from "../appointment.service";
-import * as notifications from "../appointment.notifications";
+import * as notifications from "../appointmentNotifications.service";
 import { getAvailableSlots } from "../../availability.service";
-import * as lifecycle from "../appointment.lifecycle";
+import * as lifecycle from "../lifecycle.rules";
 
 const mocked = (fn: unknown) => fn as jest.Mock;
 

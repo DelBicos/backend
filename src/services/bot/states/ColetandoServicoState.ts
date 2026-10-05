@@ -35,7 +35,7 @@ import {
   analyzeServiceQuery,
   serviceSearchTokens,
   normalizeServiceSearchText,
-} from "./servicoSearch/text";
+} from "./servicoSearch/serviceQuery.rules";
 import {
   filterStrongSemanticServices,
   findLexicalServiceAnchors,
@@ -43,19 +43,19 @@ import {
   findServiceChoiceByName,
   semanticServiceGroupKey,
   serviceTitlesCoverQuery,
-} from "./servicoSearch/ranking";
+} from "./servicoSearch/serviceRanking.rules";
 import {
   findUniqueTaxonomyMatch,
   loadActiveTaxonomy,
   servicesForTaxonomy,
-} from "./servicoSearch/taxonomy";
+} from "./servicoSearch/taxonomy.rules";
 import {
   buildServiceOption,
   clearedServiceSearchContext,
   serviceChoiceResponse,
   serviceChoiceSummary,
-} from "./servicoSearch/choices";
-import type { BotCatalogService, TaxonomyMatch } from "./servicoSearch/types";
+} from "./servicoSearch/serviceChoices.rules";
+import type { BotCatalogService, TaxonomyMatch } from "./servicoSearch/serviceSearch.types";
 
 export class ColetandoServicoState implements BotStateNode {
   public async handle(

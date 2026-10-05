@@ -1,8 +1,8 @@
 import { SubCategoryModel } from "../../../../models/Subcategory";
 import { CategoryModel } from "../../../../models/Category";
 import { normalizeText } from "../../../../utils/nlp.util";
-import type { ActiveTaxonomy, BotCatalogService, LexicalMatch, TaxonomyMatch } from "./types";
-import { calculateLexicalMatch } from "./ranking";
+import type { ActiveTaxonomy, BotCatalogService, LexicalMatch, TaxonomyMatch } from "./serviceSearch.types";
+import { calculateLexicalMatch } from "./serviceRanking.rules";
 
 /** findAll opcional: mocks antigos de teste nao o definem. */
 interface ModelLoader<Row> {

@@ -16,8 +16,8 @@ import { EmailService } from "../email.service";
 import { verificationCodeEmail } from "../../templates/emails/verificationCode";
 import { generateVerificationCode } from "../../utils/verification";
 import logger from "../../utils/logger";
-import { verifyPassword } from "./credentials";
-import { CODE_TTL_MS, VerificationCodeStore } from "./pendingRegistration.store";
+import { verifyPassword } from "./credentials.rules";
+import { CODE_TTL_MS, VerificationCodeStore } from "./pendingRegistration.service";
 
 export const loginChallenges = new VerificationCodeStore<{ userId: number }>();
 export const setupChallenges = new VerificationCodeStore<{ userId: number }>();

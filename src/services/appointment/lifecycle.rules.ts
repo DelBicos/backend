@@ -29,7 +29,7 @@ import {
   retentionFor,
   type CancelActor,
   type CancellationTier,
-} from "./cancellation.policy";
+} from "./cancellation.rules";
 import { assertSlotInAgenda, getAvailableSlots } from "../availability.service";
 import {
   assertNoAppointmentOverlap,
@@ -45,7 +45,7 @@ import {
   notifyNoShow,
   notifyRescheduleAnswered,
   notifyRescheduleRequested,
-} from "./appointment.notifications";
+} from "./appointmentNotifications.service";
 
 import { errorMessage } from "../../utils/errors.util";
 import type { AppointmentWithRelations } from "./appointment.types";

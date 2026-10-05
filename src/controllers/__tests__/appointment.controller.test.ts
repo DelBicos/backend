@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from "express";
-import * as Lifecycle from "../../services/appointment/appointment.lifecycle";
+import * as Lifecycle from "../../services/appointment/lifecycle.rules";
 import { HttpError } from "../../errors/HttpError";
 import { nextToErrorHandler, settled } from "./handlerTestUtils";
 import type { AuthenticatedRequest } from "../../interfaces/authentication.interface";
@@ -48,7 +48,7 @@ jest.mock("../../utils/logger", () => ({
   logError: jest.fn(),
   logDatabase: jest.fn(),
 }));
-jest.mock("../../services/appointment/appointment.lifecycle", () => ({
+jest.mock("../../services/appointment/lifecycle.rules", () => ({
   cancelAppointment: jest.fn(),
 }));
 jest.mock("../../services/availability.service", () => ({

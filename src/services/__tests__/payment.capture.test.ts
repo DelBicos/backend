@@ -14,7 +14,7 @@ jest.mock("../../utils/chatRoom", () => ({ ensureChatRoomForAppointment: jest.fn
 jest.mock("../botAppointmentStatus.service", () => ({
   syncBotSessionsForAppointmentStatus: jest.fn(),
 }));
-jest.mock("../appointment/appointment.notifications", () => ({
+jest.mock("../appointment/appointmentNotifications.service", () => ({
   notifyPaymentConfirmed: jest.fn(),
   notifyAppointmentCreated: jest.fn(),
 }));

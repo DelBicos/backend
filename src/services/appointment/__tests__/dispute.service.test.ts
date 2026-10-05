@@ -22,7 +22,7 @@ jest.mock("../../payment.service", () => ({
   PaymentService: { getPaidAmountCents: jest.fn(), refundAmount: jest.fn() },
 }));
 jest.mock("../appointment.service", () => ({ findAppointmentByPublicId: jest.fn() }));
-jest.mock("../appointment.notifications", () => ({
+jest.mock("../appointmentNotifications.service", () => ({
   notifyDisputeOpened: jest.fn(),
   notifyDisputeResolved: jest.fn(),
 }));
@@ -35,7 +35,7 @@ import { AppointmentModel } from "../../../models/Appointment";
 import { DisputeModel } from "../../../models/Dispute";
 import { PaymentService } from "../../payment.service";
 import * as appointmentService from "../appointment.service";
-import * as notifications from "../appointment.notifications";
+import * as notifications from "../appointmentNotifications.service";
 import * as disputes from "../dispute.service";
 
 const mocked = (fn: unknown) => fn as jest.Mock;

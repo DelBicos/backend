@@ -20,7 +20,7 @@ import {
   hashPassword,
   normalizeEmail,
   verifyPassword,
-} from "./credentials";
+} from "./credentials.rules";
 
 /** Mensagem unica: nao revela se o e-mail existe ou se a senha esta errada. */
 const INVALID_CREDENTIALS = "E-mail ou senha inválidos";

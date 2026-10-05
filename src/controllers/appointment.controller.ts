@@ -3,7 +3,7 @@ import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 import { HttpError } from "../errors/HttpError";
 import { asyncHandler } from "../utils/asyncHandler";
 import * as AppointmentService from "../services/appointment/appointment.service";
-import * as Lifecycle from "../services/appointment/appointment.lifecycle";
+import * as Lifecycle from "../services/appointment/lifecycle.rules";
 import * as Disputes from "../services/appointment/dispute.service";
 
 /** Controllers finos: extraem dados do HTTP e delegam ao AppointmentService. */

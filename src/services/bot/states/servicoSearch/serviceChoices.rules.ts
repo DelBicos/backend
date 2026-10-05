@@ -1,6 +1,6 @@
 import { BotServiceChoice, BotServiceOption, BotSessionContext } from "../../../../models/BotChatSession";
 import type { HandlerResult } from "../../BotStateNode";
-import type { BotCatalogService } from "./types";
+import type { BotCatalogService } from "./serviceSearch.types";
 
 export function buildServiceOption(service: BotCatalogService): BotServiceOption {
   const ratings = (service.Appointments ?? [])

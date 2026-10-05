@@ -42,7 +42,7 @@ import {
   notifyAppointmentCreated,
   notifyAppointmentRejected,
   notifyReviewReceived,
-} from "./appointment.notifications";
+} from "./appointmentNotifications.service";
 
 import type { AppointmentWithRelations } from "./appointment.types";
 const USER_PUBLIC_ATTRIBUTES = ["id", "name", "avatar_uri", "phone", "email"];

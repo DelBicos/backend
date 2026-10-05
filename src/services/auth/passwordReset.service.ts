@@ -14,8 +14,8 @@ import {
   findUserByEmail,
   hashPassword,
   normalizeEmail,
-} from "./credentials";
-import { CODE_TTL_MS, VerificationCodeStore } from "./pendingRegistration.store";
+} from "./credentials.rules";
+import { CODE_TTL_MS, VerificationCodeStore } from "./pendingRegistration.service";
 
 export const passwordResets = new VerificationCodeStore<{ userId: number }>();
 

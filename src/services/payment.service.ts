@@ -35,9 +35,9 @@ import {
 } from "./appointmentSchedule.service";
 
 import { errorMessage } from "../utils/errors.util";
-import { PaymentSettlementOperations } from "./payment/settlement";
-export type { PaymentSettlement, PaymentSplit } from "./payment/settlement";
-import type { PaymentSplit } from "./payment/settlement";
+import { PaymentSettlementOperations } from "./payment/settlement.service";
+export type { PaymentSettlement, PaymentSplit } from "./payment/settlement.service";
+import type { PaymentSplit } from "./payment/settlement.service";
 const CURRENCY = "brl";
 
 
@@ -129,7 +129,7 @@ async function notifyPaymentConfirmation(
   isNewAppointment: boolean,
 ) {
   // Import tardio: evita ciclo payment.service <-> appointment.service.
-  const notifications = await import("./appointment/appointment.notifications");
+  const notifications = await import("./appointment/appointmentNotifications.service");
   if (!isNewAppointment) {
     await notifications.notifyPaymentConfirmed(
       userId,

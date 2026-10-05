@@ -14,7 +14,7 @@ import {
 import { getAvailableSlots } from "../../availability.service";
 import { withProfessionalScheduleLock } from "../../appointmentSchedule.service";
 import { ensureChatRoomForAppointment } from "../../../utils/chatRoom";
-import { cancelAppointment, requestReschedule } from "../../appointment/appointment.lifecycle";
+import { cancelAppointment, requestReschedule } from "../../appointment/lifecycle.rules";
 import { MIN_ADVANCE_HOURS } from "../../../constants/booking";
 import logger from "../../../utils/logger";
 

@@ -1,8 +1,8 @@
 import { normalizeText, stringSimilarity } from "../../../../utils/nlp.util";
 import { BotServiceChoice } from "../../../../models/BotChatSession";
 import { normalizeServiceChoiceTitleKey } from "../../serviceChoice.helpers";
-import type { BotCatalogService, LexicalMatch, RankedService } from "./types";
-import { analyzeServiceQuery, serviceSearchTokens, strongTokenSimilarity, normalizeServiceSearchText, canonicalServiceToken } from "./text";
+import type { BotCatalogService, LexicalMatch, RankedService } from "./serviceSearch.types";
+import { analyzeServiceQuery, serviceSearchTokens, strongTokenSimilarity, normalizeServiceSearchText, canonicalServiceToken } from "./serviceQuery.rules";
 
 export function calculateLexicalMatch(
   searchTokens: string[],

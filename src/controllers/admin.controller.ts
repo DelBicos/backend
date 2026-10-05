@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { findUserByEmail, verifyPassword } from "../services/auth/credentials";
+import { findUserByEmail, verifyPassword } from "../services/auth/credentials.rules";
 import { signToken } from "../utils/jwt.util";
 import { UserModel } from "../models/User";
 import { AdminModel } from "../models/Admin";

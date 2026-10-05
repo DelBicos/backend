@@ -6,7 +6,7 @@ import {
   assertCanReschedule,
   computeCancellationOutcome,
   retentionFor,
-} from "../cancellation.policy";
+} from "../cancellation.rules";
 
 const NOW = new Date("2030-01-10T12:00:00.000Z");
 const inHours = (h: number) => new Date(NOW.getTime() + h * 3_600_000);

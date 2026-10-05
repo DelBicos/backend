@@ -19,8 +19,8 @@ import { HttpError } from "../../errors/HttpError";
 import logger from "../../utils/logger";
 import { PaymentService } from "../payment.service";
 import { findAppointmentByPublicId } from "./appointment.service";
-import { assertCanDispute } from "./cancellation.policy";
-import { notifyDisputeOpened, notifyDisputeResolved } from "./appointment.notifications";
+import { assertCanDispute } from "./cancellation.rules";
+import { notifyDisputeOpened, notifyDisputeResolved } from "./appointmentNotifications.service";
 
 import type { AppointmentWithRelations } from "./appointment.types";
 export const MIN_DESCRIPTION_LENGTH = 10;

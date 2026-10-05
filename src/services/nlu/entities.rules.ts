@@ -1,6 +1,6 @@
 import { parsePortugueseDate, parseTimeFromText, parseTimePeriodFromText } from "../../utils/date.util";
-import type { NluEntities, NluIntent } from "./types";
-import { isSimpleAgendarVariant, isStandaloneDateInput, normalizeForRules } from "./rules";
+import type { NluEntities, NluIntent } from "./nlu.types";
+import { isSimpleAgendarVariant, isStandaloneDateInput, normalizeForRules } from "./intent.rules";
 
 export function extractDate(message: string, timeZone?: string): string | undefined {
   return parsePortugueseDate(message, { timeZone }) ?? undefined;

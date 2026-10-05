@@ -27,7 +27,7 @@ import { ProfessionalModel } from "../../../models/Professional";
 import { AdminModel } from "../../../models/Admin";
 import { EmailService } from "../../email.service";
 import { saveLoginLog } from "../../loginLog.service";
-import { assertPasswordPolicy, normalizeEmail, verifyPassword } from "../credentials";
+import { assertPasswordPolicy, normalizeEmail, verifyPassword } from "../credentials.rules";
 import * as account from "../account.service";
 import * as registration from "../registration.service";
 

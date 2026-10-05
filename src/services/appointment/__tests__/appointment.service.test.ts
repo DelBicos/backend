@@ -27,7 +27,7 @@ jest.mock("../../availability.service", () => ({
   assertSlotInAgenda: jest.fn().mockResolvedValue(undefined),
   getAvailableSlots: jest.fn(),
 }));
-jest.mock("../appointment.notifications", () => ({
+jest.mock("../appointmentNotifications.service", () => ({
   formatAppointmentDate: jest.fn(() => "01/10/2026"),
   formatAppointmentTime: jest.fn(() => "10:00"),
   notifyAppointmentCreated: jest.fn(),
@@ -49,7 +49,7 @@ import { ServiceModel } from "../../../models/Service";
 import { AddressModel } from "../../../models/Address";
 import { UserModel } from "../../../models/User";
 import { PaymentService } from "../../payment.service";
-import * as notifications from "../appointment.notifications";
+import * as notifications from "../appointmentNotifications.service";
 import * as service from "../appointment.service";
 import * as scheduleLock from "../../appointmentSchedule.service";
 
