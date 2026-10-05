@@ -33,8 +33,8 @@ jobs:
       - name: Typecheck
         run: npm run lint
 
-      - name: Testes com cobertura
-        run: npm run test:coverage
+      - name: Testes unitários
+        run: npm run test:unit
 
       - name: Publicar relatório de cobertura
         if: always()

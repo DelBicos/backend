@@ -1,0 +1,14 @@
+---
+applyTo: "src/routes/**,server.ts"
+---
+<!-- GENERATED from .agents/rules/02-routes.md by scripts/rules/sync.mjs. Do not edit. -->
+
+# Routes
+- One file per domain: `src/routes/<domain>.routes.ts`, exporting a default
+  `Router`. Register it in `server.ts` with
+  `app.use("/api/<domain>", <domain>Routes)`.
+- A route only binds method, path, middlewares and controller:
+  `router.post("/", authMiddleware, addFavorite)`. No logic, no queries, no
+  inline handlers.
+- Auth and request validation run as middlewares from `src/middlewares/`.
+- Keep `server.ts` readable: middlewares, then route groups by domain.
