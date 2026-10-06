@@ -41,7 +41,7 @@ beforeEach(() => {
   withProfessionalScheduleLock.mockImplementation(async (_id: number, work: (transaction: unknown) => Promise<unknown>) => work({ LOCK: { UPDATE: "UPDATE" } }));
 });
 
-it.each(["A7F3", "a7f3", "1AB234"])("vai direto à confirmação de cancelar #%s sem alterar o banco", async (code) => {
+it.each(["A7F3", "a7f3", "1AB234", "123456"])("vai direto à confirmação de cancelar #%s sem alterar o banco", async (code) => {
   const result = await new InicioState().handle(`cancelar #${code}`,
     { intent: "CANCELAR", entities: {}, confidence: 1 }, { context: {} } as BotChatSessionModel, 6);
   expect(result.nextState).toBe("CONFIRMACAO");
@@ -66,7 +66,7 @@ it("não revela nem cancela agendamento de outro cliente", async () => {
   expect(save).not.toHaveBeenCalled();
 });
 
-it.each(["não", "talvez"])("não cancela com resposta %s", async (answer) => {
+it.each(["não", "talvez", "pode me explicar?", "sim?", "ok, mas quanto custa?"])("não cancela com resposta %s", async (answer) => {
   await new ConfirmacaoState().handle(answer, { intent: "FALLBACK", entities: {}, confidence: 1 },
     { context: { appointmentId: 92, pendingAction: "CANCEL" } } as BotChatSessionModel, 6);
   expect(save).not.toHaveBeenCalled();
