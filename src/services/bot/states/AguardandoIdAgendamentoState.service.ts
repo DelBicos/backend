@@ -17,6 +17,7 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
   ): Promise<HandlerResult> {
     const ctx = (session.context ?? {}) as BotSessionContext;
 
+    const explicitShortId = userMessage.trim().startsWith("#");
     const trimmedMsg = userMessage.trim().replace(/^#/, "");
     const clientRecord = await ClientModel.findOne({ where: { user_id: userId } });
     if (!clientRecord) {
@@ -34,7 +35,7 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
     const parsedNum = /^\d+(?:\.\s.*)?$/.test(trimmedMsg) ? parseInt(trimmedMsg, 10) : NaN;
     const appointmentList = (ctx.userAppointmentList as Array<{ index: number; id: number; shortId?: string }>) ?? [];
 
-    if (!isNaN(parsedNum) && appointmentList.length > 0) {
+    if (!explicitShortId && !isNaN(parsedNum) && appointmentList.length > 0) {
       const foundByIndex = appointmentList.find((item) => item.index === parsedNum);
       if (foundByIndex) {
         appointmentIdToUse = foundByIndex.id;
@@ -42,7 +43,7 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
     }
 
     // 2. Se não foi pelo índice, tenta buscar pelo ID direto (nlu ou número direto)
-    if (!appointmentIdToUse) {
+    if (!explicitShortId && !appointmentIdToUse) {
       const rawId = /^[a-z0-9]*[a-z][a-z0-9]*$/i.test(trimmedMsg) ? undefined : nlu.entities.appointment_id ?? (isNaN(parsedNum) ? undefined : parsedNum);
       if (typeof rawId === "number" && rawId > 0) {
         appointmentIdToUse = rawId;

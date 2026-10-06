@@ -115,7 +115,7 @@ export class InicioState implements BotStateNode {
         const reference = explicitCode ?? nlu.entities.appointment_id;
         if (action === "CANCEL" && reference !== undefined) {
           const result = await new AguardandoIdAgendamentoState().handle(
-            String(reference),
+            explicitCode ? `#${explicitCode}` : String(reference),
             { ...nlu, entities: {} },
             { ...session, context: { pendingAction: action } } as BotChatSessionModel,
             userId,

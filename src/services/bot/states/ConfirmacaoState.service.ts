@@ -23,7 +23,10 @@ export class ConfirmacaoState implements BotStateNode {
         !/^(?:n[aã]o|cancelar|desistir|voltar)[.!?]?$/.test(lower)) {
       return collectBookingDetails(userMessage, ctx, userId);
     }
-    const confirmed = /\b(sim|s|yes|confirmar|confirmo|ok|pode|vamos)\b/.test(lower);
+    // No cancelamento, perguntas e frases com ressalvas não são autorização.
+    const confirmed = pendingAction === "CANCEL"
+      ? /^(?:sim(?:,?\s+(?:confirmar|confirmo))?|s|yes|confirmar|confirmo|confirmar cancelamento|ok|pode|vamos)[.!]*$/.test(lower)
+      : /\b(sim|s|yes|confirmar|confirmo|ok|pode|vamos)\b/.test(lower);
     const denied = /\b(n[aã]o|nao|no|cancelar|desistir|voltar)\b/.test(lower);
 
     if (!confirmed && !denied) {
@@ -129,4 +132,3 @@ export class ConfirmacaoState implements BotStateNode {
     }
   }
 }
-
