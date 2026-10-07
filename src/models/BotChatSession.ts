@@ -74,6 +74,7 @@ export interface BotSessionContext {
   };
   intent?: string;
   pendingAction?: BotPendingAction;
+  cancellationChallengeId?: string;
   pendingPrompt?: BotPendingPrompt;
   timeZone?: string;
   serviceId?: number;
