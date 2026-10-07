@@ -1,7 +1,8 @@
 import { BotChatSessionModel, BotSessionContext } from "../../../models/BotChatSession";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
-import { BotAddressValidationError, cancelBotAppointment, createBotAppointment, rescheduleBotAppointment } from "./appointmentActions.service";
+import { BotAddressValidationError, createBotAppointment, rescheduleBotAppointment } from "./appointmentActions.service";
+import { handleCancellationCode } from "./cancellationCode.service";
 import { collectBookingDetails, requestBookingAddress } from "./bookingDetails.service";
 import { formatDatePtBR } from "../../../utils/date.util";
 import { logError } from "../../../utils/logger";
@@ -17,6 +18,9 @@ export class ConfirmacaoState implements BotStateNode {
     const ctx = (session.context ?? {}) as BotSessionContext;
     const lower = userMessage.toLowerCase().trim();
     const pendingAction = ctx.pendingAction ?? "CREATE";
+    if (pendingAction === "CANCEL" && ctx.cancellationChallengeId) {
+      return handleCancellationCode(userMessage, ctx, userId);
+    }
     if (pendingAction === "CREATE" &&
         (ctx.bookingDetailsStep === "ADDRESS" ||
          /^(?:trocar|mudar|outro|alterar)(?: o)? endere[cç]o[.!?]?$/.test(lower)) &&
@@ -55,14 +59,7 @@ export class ConfirmacaoState implements BotStateNode {
 
     try {
       if (pendingAction === "CANCEL") {
-        if (!ctx.appointmentId) throw new Error("ID do agendamento não encontrado na sessão");
-        await cancelBotAppointment(userId, ctx.appointmentId);
-        return {
-          reply: `✅ Agendamento ID ${ctx.appointmentId} cancelado com sucesso.`,
-          nextState: "FINALIZADO",
-          contextUpdate: {},
-          finalize: true,
-        };
+        return handleCancellationCode(userMessage, ctx, userId);
       }
 
       if (pendingAction === "RESCHEDULE") {
