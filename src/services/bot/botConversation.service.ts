@@ -1,5 +1,5 @@
 import { BotSessionContext, BotSessionState } from "../../models/BotChatSession";
-import { analyzeMessage, isRestartCommand } from "../nlu.service";
+import { analyzeMessage, isRestartCommand, NluResult } from "../nlu.service";
 import { BotSessionManager } from "./BotSessionManager";
 import { BotMessageRouter } from "./BotMessageRouter.service";
 import { BotState } from "../../constants/botStates";
@@ -168,7 +168,8 @@ export async function processMessage(
   // 2. Entradas estruturadas (sim/não, número, data e hora) são tratadas por
   // regras dentro de analyzeMessage. As demais podem interromper o fluxo atual
   // por uma intenção explícita, mesmo durante um agendamento pendente.
-  const nlu = await analyzeMessage(
+  const verifyingCancellation = Boolean(ctx.cancellationChallengeId && ctx.pendingAction === "CANCEL");
+  const nlu: NluResult = verifyingCancellation ? { intent: "FALLBACK", entities: {}, confidence: 1 } : await analyzeMessage(
     trimmedMessage,
     ctx as Record<string, unknown>,
   );
@@ -187,7 +188,7 @@ export async function processMessage(
   await BotSessionManager.createMessage(
     session.id,
     "user",
-    trimmedMessage,
+    verifyingCancellation && /\d{6}/.test(trimmedMessage) ? "[Código de confirmação informado]" : trimmedMessage,
     nlu.intent,
     {
       ...nlu.entities,
