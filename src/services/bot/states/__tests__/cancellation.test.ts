@@ -20,6 +20,7 @@ import { InicioState } from "../InicioState.service";
 import { AguardandoIdAgendamentoState } from "../AguardandoIdAgendamentoState.service";
 import { ConfirmacaoState } from "../ConfirmacaoState.service";
 import { cancelBotAppointment } from "../appointmentActions.service";
+import { requestCancellationCode, confirmCancellationCode } from "../../../appointment/cancellationVerification.service";
 
 const save = jest.fn();
 const appointment = {
@@ -74,13 +75,27 @@ it.each(["não", "talvez", "pode me explicar?", "sim?", "ok, mas quanto custa?"]
 });
 
 it("confirma e notifica o usuário do profissional na mesma transação", async () => {
-  const result = await new ConfirmacaoState().handle("sim", { intent: "FALLBACK", entities: {}, confidence: 1 },
-    { context: { appointmentId: 92, pendingAction: "CANCEL" } } as BotChatSessionModel, 6);
-  expect(result.reply).toContain("cancelado com sucesso");
+  await cancelBotAppointment(6, 92);
   expect(appointment.status).toBe("canceled");
   expect(NotificationModel.create).toHaveBeenCalledWith(expect.objectContaining({ user_id: 10, related_entity_id: 92, notification_type: "appointment" }), save.mock.calls[0][0]);
   await expect(cancelBotAppointment(6, 92)).rejects.toThrow("já está cancelado");
   expect(NotificationModel.create).toHaveBeenCalledTimes(1);
+});
+
+it("exige código por e-mail depois do sim, sem cancelar antecipadamente", async () => {
+  (requestCancellationCode as jest.Mock).mockResolvedValue({ challengeId: "challenge", email: "i***@example.com" });
+  const state = new ConfirmacaoState();
+  const nlu = { intent: "FALLBACK" as const, entities: {}, confidence: 1 };
+  const context = { appointmentId: 92, pendingAction: "CANCEL" };
+  const result = await state.handle("sim", nlu, { context } as BotChatSessionModel, 6);
+  expect(result.reply).toContain("seis dígitos");
+  expect(requestCancellationCode).toHaveBeenCalledWith(6, 92);
+  expect(confirmCancellationCode).not.toHaveBeenCalled();
+  expect(save).not.toHaveBeenCalled();
+  const confirmed = await state.handle("123456", nlu,
+    { context: { ...context, cancellationChallengeId: "challenge" } } as BotChatSessionModel, 6);
+  expect(confirmCancellationCode).toHaveBeenCalledWith(6, 92, "challenge", "123456");
+  expect(confirmed.reply).toContain("cancelado com sucesso");
 });
 
 it("falha sem salvar o cancelamento quando não consegue criar a notificação", async () => {
@@ -89,3 +104,7 @@ it("falha sem salvar o cancelamento quando não consegue criar a notificação",
   expect(save).not.toHaveBeenCalled();
   expect(appointment.status).toBe("pending");
 });
+jest.mock("../../../appointment/cancellationVerification.service", () => ({
+  requestCancellationCode: jest.fn(), confirmCancellationCode: jest.fn(), abandonCancellationCode: jest.fn(),
+  CancellationVerificationError: class extends Error {},
+}));

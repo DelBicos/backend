@@ -1,3 +1,4 @@
+jest.mock("../cancellationCode.service", () => ({ handleCancellationCode: jest.fn() }));
 jest.mock("../appointmentActions.service", () => ({
   BotAddressValidationError: class BotAddressValidationError extends Error {},
   createBotAppointment: jest.fn(),
