@@ -1,0 +1,30 @@
+import nodemailer from "nodemailer";
+import logger from "../../utils/logger";
+
+export async function sendCancellationCode(to: string, code: string): Promise<void> {
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || "587");
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.EMAIL_FROM;
+  if (!host || !user || !pass || !from || ![465, 587].includes(port))
+    throw new Error("Serviço de e-mail não configurado");
+  const transport = nodemailer.createTransport({
+    host, port, secure: port === 465, requireTLS: true,
+    auth: { user, pass }, connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000,
+  });
+  try {
+    const result = await transport.sendMail({
+      to, from, subject: "Confirme o cancelamento — DelBicos",
+      text: `Seu código para confirmar o cancelamento é ${code}. Ele expira em 10 minutos. Se você não solicitou, ignore este e-mail. O agendamento permanece ativo até a confirmação.`,
+      html: `<p>Confirme o cancelamento solicitado no DelBicos.</p><p>Seu código: <strong>${code}</strong></p><p>Válido por 10 minutos. Se não foi você, ignore este e-mail. O agendamento permanece ativo até a confirmação.</p>`,
+    });
+    if (!result.accepted.length) throw new Error("Destinatário recusado");
+  } catch {
+    // Respostas do provedor podem conter destinatário, credenciais e o código.
+    logger.warn("SMTP: falha no envio do código de cancelamento");
+    throw new Error("Não foi possível enviar o código. Tente novamente mais tarde.");
+  } finally {
+    transport.close();
+  }
+}
