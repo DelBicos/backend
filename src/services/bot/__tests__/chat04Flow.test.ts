@@ -1,3 +1,4 @@
+jest.mock("../states/cancellationCode.service", () => ({ handleCancellationCode: jest.fn() }));
 jest.mock("../../../models/Address", () => ({ AddressModel: { findAll: jest.fn(), findOne: jest.fn() } }));
 jest.mock("../../../models/Client", () => ({ ClientModel: { findOne: jest.fn() } }));
 jest.mock("../../../models/Service", () => ({ ServiceModel: { findByPk: jest.fn() } }));
