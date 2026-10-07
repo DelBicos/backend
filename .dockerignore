@@ -1,49 +1,47 @@
 # Dependencies
-
 node_modules/
-yarn-error.\*
+yarn-error.*
 
 # Debug
-
 .pnpm-debug.log
-npm-debug._
-yarn-debug._
+npm-debug.*
+yarn-debug.*
 
-# Python (evita falha de contexto por diretórios com ACL quebrada no Windows)
-
-.pytest_cache/
-**/.pytest_cache/
-**/__pycache__/
-*.pyc
-
-# macOS
-
+# macOS / Windows
 .DS_Store
-\*.pem
+Thumbs.db
+*.pem
 
 # Git
-
 .git
 .gitignore
 
 # IDE
-
 .vscode/
 .idea/
 
-# Env files (will be passed via docker-compose)
-
+# Env files (o .env e passado de proposito; so os locais ficam de fora)
 .env.local
-.env\*.local
+.env*.local
 
-# Typescript
+# Typescript / testes
+*.tsbuildinfo
+coverage/
+dist/
 
-\*.tsbuildinfo
+# Python (nlp-service tem build proprio; caches de pytest/venv travam o contexto no Windows)
+nlp-service/
+.pytest_cache/
+**/.pytest_cache/
+**/__pycache__/
+*.pyc
+.venv/
+**/.venv/
 
 # Misc
-
+scratch/
 README.md
 docs/
-assets/_.png
-assets/_.jpg
+assets/*.png
+assets/*.jpg
 app-example/

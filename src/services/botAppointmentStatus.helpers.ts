@@ -2,7 +2,8 @@ export type AppointmentStatus =
   | "pending"
   | "confirmed"
   | "completed"
-  | "canceled";
+  | "canceled"
+  | "no_show";
 
 interface AppointmentPaymentSnapshot {
   status: AppointmentStatus;
@@ -28,6 +29,9 @@ export function getAppointmentStatusMessage(
   }
   if (status === "canceled") {
     return "\u274c O profissional recusou ou o agendamento foi cancelado.";
+  }
+  if (status === "no_show") {
+    return "\u274c O agendamento foi encerrado por n\u00e3o comparecimento.";
   }
   if (status === "completed") return "\u2705 O agendamento foi conclu\u00eddo.";
   return "O agendamento continua pendente de resposta do profissional.";

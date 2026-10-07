@@ -1,4 +1,5 @@
 import { Op } from "sequelize";
+import { MIN_ADVANCE_HOURS } from "../../../constants/booking";
 import {
   BotChatSessionModel,
   BotDayProfessionalOption,
@@ -245,7 +246,7 @@ export class ColetandoDataState implements BotStateNode {
       } else {
         return {
           reply:
-            "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência. " +
+            `Os agendamentos precisam ser feitos com no mínimo ${MIN_ADVANCE_HOURS} horas de antecedência. ` +
             "Qual outro dia você prefere?",
           nextState: "COLETANDO_DATA",
           contextUpdate: {},

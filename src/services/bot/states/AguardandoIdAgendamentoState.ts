@@ -8,6 +8,7 @@ import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
 import { appointmentCalendarDate } from "../../../utils/date.util";
 
+import type { AppointmentWithRelations } from "../../appointment/appointment.types";
 export class AguardandoIdAgendamentoState implements BotStateNode {
   public async handle(
     userMessage: string,
@@ -103,7 +104,7 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
       };
     }
 
-    const apptData: any = appointment;
+    const apptData = appointment as AppointmentWithRelations;
     const svcTitle = apptData.Service?.title ?? "Serviço";
     const profName = apptData.Professional?.User?.name ?? "Profissional";
     const startDate = new Date(appointment.start_time);

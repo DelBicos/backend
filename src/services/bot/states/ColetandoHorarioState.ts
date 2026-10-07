@@ -25,6 +25,7 @@ import { isAvailableTimesQuestion } from "../contextualMessage";
 import { ColetandoDataState } from "./ColetandoDataState";
 import { buildConfirmationResponse } from "./stateHelpers";
 
+import type { BotCatalogService } from "./servicoSearch/serviceSearch.types";
 const MAX_TIME_SUGGESTIONS = 6;
 
 async function loadMatchingServices(
@@ -78,7 +79,7 @@ async function loadMatchingServices(
 }
 
 async function availableTimesForService(
-  service: any,
+  service: BotCatalogService,
   date: string,
   context?: BotSessionContext,
 ): Promise<string[]> {
@@ -96,12 +97,12 @@ async function availableTimesForService(
 }
 
 function buildProfessionalOption(
-  service: any,
+  service: BotCatalogService,
   index: number,
   time: string,
 ): BotProfessionalOption {
   const ratings = (service.Appointments ?? [])
-    .map((appointment: AppointmentModel) => appointment.rating)
+    .map((appointment) => appointment.rating)
     .filter(
       (rating: number | null | undefined): rating is number =>
         typeof rating === "number",

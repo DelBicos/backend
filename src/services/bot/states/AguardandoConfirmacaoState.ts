@@ -60,6 +60,7 @@ export class AguardandoConfirmacaoState implements BotStateNode {
         : `\u2705 O profissional confirmou o agendamento ID ${appointment.id}. O pagamento est\u00e1 pendente; use a op\u00e7\u00e3o Pagar para finalizar.`,
       canceled: `\u274c O agendamento ID ${appointment.id} foi recusado ou cancelado. Posso ajud\u00e1-lo a escolher outra op\u00e7\u00e3o.`,
       completed: `\u2705 O agendamento ID ${appointment.id} foi conclu\u00eddo. Posso ajud\u00e1-lo com mais alguma coisa?`,
+      no_show: `\u274c O agendamento ID ${appointment.id} foi encerrado por n\u00e3o comparecimento. Posso ajud\u00e1-lo a marcar outro?`,
     } as const;
 
     return {

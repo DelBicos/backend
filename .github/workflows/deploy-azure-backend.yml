@@ -1,19 +1,25 @@
 name: 04 - Deploy do backend no Azure App Service
 
-# Gatilho: dispara direto quando um PR e fechado/mergeado contra a stag-facul
-# (branch de integracao do projeto academico), independente do pipeline do
-# time principal (workflows 01/02/03, que so reagem a branch "stag").
+# Gatilho: dispara direto quando um PR e fechado/mergeado contra a stag,
+# independente do pipeline do time principal (workflows 01/02, que so reagem
+# a PRs da stag para a main).
 # O Azure App Service (Free F1) usa deploy nativo (Oryx), sem Docker.
 on:
   pull_request:
     types: [closed]
     branches:
-      - stag-facul
+      - stag
 
 jobs:
+  tests:
+    name: Testes antes do deploy
+    if: github.event.pull_request.merged == true
+    uses: ./.github/workflows/tests.yml
+
   deploy:
     name: Build e deploy no Azure App Service (delbicos-backend-edu)
     runs-on: ubuntu-latest
+    needs: tests
     if: github.event.pull_request.merged == true
 
     steps:
@@ -26,7 +32,7 @@ jobs:
           node-version: "20.x"
 
       - name: Instalar dependências (com devDependencies, necessárias para o build)
-        run: npm install
+        run: npm ci
 
       - name: Buildar TypeScript
         run: npm run build

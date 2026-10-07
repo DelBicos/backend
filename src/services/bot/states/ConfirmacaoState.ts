@@ -5,6 +5,7 @@ import { cancelBotAppointment, createBotAppointment, rescheduleBotAppointment } 
 import { formatDatePtBR } from "../../../utils/date.util";
 import { logError } from "../../../utils/logger";
 
+import { errorMessage } from "../../../utils/errors.util";
 export class ConfirmacaoState implements BotStateNode {
   public async handle(
     userMessage: string,
@@ -63,6 +64,18 @@ export class ConfirmacaoState implements BotStateNode {
           time: ctx.newTime ?? ctx.time,
         };
         const rescheduledAppointment = await rescheduleBotAppointment(userId, reschedCtx, selectedTimeIso);
+        if (rescheduledAppointment.reschedule_requested_start) {
+          return {
+            reply:
+              `📨 Pedido de reagendamento enviado!\n\n` +
+              `Novo horário proposto: ${formatDatePtBR(reschedCtx.date!)} às ${reschedCtx.time}.\n` +
+              `O profissional precisa aceitar a mudança. Até lá, o horário atual continua valendo.`,
+            nextState: "FINALIZADO",
+            contextUpdate: {},
+            finalize: true,
+            appointmentId: rescheduledAppointment.id,
+          };
+        }
         return {
           reply:
             `✅ Reagendamento concluído!\n\n` +
@@ -100,10 +113,10 @@ export class ConfirmacaoState implements BotStateNode {
         },
         appointmentId: appointment.id,
       };
-    } catch (error: any) {
+    } catch (error) {
       logError("Bot: erro ao executar ação de confirmação", error, { userId });
       return {
-        reply: `❌ ${error.message ?? "Ocorreu um erro. Por favor, tente novamente."}`,
+        reply: `❌ ${errorMessage(error, "Ocorreu um erro. Por favor, tente novamente.")}`,
         nextState: pendingAction === "CREATE" || pendingAction === "RESCHEDULE"
           ? "COLETANDO_HORARIO"
           : "INICIO",

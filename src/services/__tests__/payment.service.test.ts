@@ -4,6 +4,7 @@ import { UserModel } from "../../models/User";
 import { ClientModel } from "../../models/Client";
 import { ServiceModel } from "../../models/Service";
 import { NotificationModel } from "../../models/Notification";
+import { ProfessionalModel } from "../../models/Professional";
 import { AppointmentRefundModel } from "../../models/AppointmentRefund";
 import { ensureChatRoomForAppointment } from "../../utils/chatRoom";
 import { enqueuePaymentRefund } from "../appointmentRefund.service";
@@ -13,6 +14,7 @@ jest.mock("../botAppointmentStatus.service", () => ({
 }));
 jest.mock("../appointmentRefund.service", () => ({
   enqueuePaymentRefund: jest.fn(),
+  settleQueuedPayment: jest.fn(),
 }));
 jest.mock("../appointmentSchedule.service", () => ({
   withProfessionalScheduleLock: jest.fn(
@@ -37,6 +39,7 @@ jest.mock("../../models/User");
 jest.mock("../../models/Client");
 jest.mock("../../models/Service");
 jest.mock("../../models/Notification");
+jest.mock("../../models/Professional");
 jest.mock("../../utils/chatRoom", () => ({
   ensureChatRoomForAppointment: jest.fn(),
 }));
@@ -95,6 +98,7 @@ describe("PaymentService", () => {
       amount: inputParams.amount,
       currency: inputParams.currency,
       automatic_payment_methods: { enabled: true },
+      capture_method: "manual",
       metadata: inputParams.metadata,
     });
     expect(clientSecret).toBe(mockClientSecret);
@@ -121,6 +125,7 @@ describe("PaymentService", () => {
       amount: inputParams.amount,
       currency: inputParams.currency,
       automatic_payment_methods: { enabled: true },
+      capture_method: "manual",
       metadata: undefined,
     });
   });
@@ -134,6 +139,7 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
     serviceId: "5",
     selectedTime,
     addressId: "2",
+    userId: "1",
   };
 
   beforeAll(() => {
@@ -151,6 +157,7 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
     mockPaymentIntentsRetrieve.mockResolvedValue({
       id: paymentIntentId,
       status: "succeeded",
+      amount: 15000,
       amount_received: 15000,
       metadata: { ...metadata },
     });
@@ -171,6 +178,7 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
       async (data: any) => ({ id: 100, ...data }),
     );
     (NotificationModel.create as jest.Mock).mockResolvedValue({});
+    (ProfessionalModel.findByPk as jest.Mock).mockResolvedValue({ user_id: 7 });
   });
 
   describe("criação", () => {
@@ -192,7 +200,6 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
           status: "pending",
           payment_intent_id: paymentIntentId,
           final_price: 150,
-          short_id: expect.stringMatching(/^[0-9A-Z]{6}$/),
         }),
         expect.objectContaining({ transaction: expect.anything() }),
       );
@@ -260,7 +267,7 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
 
       await expect(
         PaymentService.confirmAndCreateAppointment(paymentIntentId, 1),
-      ).rejects.toThrow("O pagamento não foi concluído com sucesso.");
+      ).rejects.toThrow("O pagamento não foi autorizado.");
       expect(AppointmentModel.create).not.toHaveBeenCalled();
     });
 
@@ -296,11 +303,13 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
     );
 
     it("deve recusar quando o usuário não existir", async () => {
+      // Sem usuário não há perfil de cliente: a conta e validada pela busca do cliente.
       (UserModel.findByPk as jest.Mock).mockResolvedValue(null);
+      (ClientModel.findOne as jest.Mock).mockResolvedValue(null);
 
       await expect(
         PaymentService.confirmAndCreateAppointment(paymentIntentId, 1),
-      ).rejects.toThrow("Cliente (usuário) não encontrado.");
+      ).rejects.toThrow("Cliente não encontrado para o usuário.");
       expect(AppointmentModel.create).not.toHaveBeenCalled();
     });
 
@@ -326,5 +335,13 @@ describe("PaymentService - confirmAndCreateAppointment", () => {
         expect.anything(),
       );
     });
+  });
+});
+
+describe("PaymentService - valor calculado no servidor", () => {
+  it("AG-L-16: preço de 0.01 (primeiro valor acima de zero) vira 1 centavo", () => {
+    const { servicePriceInCents } = require("../payment.service");
+
+    expect(servicePriceInCents({ price: 0.01 })).toBe(1);
   });
 });

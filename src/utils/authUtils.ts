@@ -1,9 +1,9 @@
-import jwt from "jsonwebtoken";
 import { UserModel } from "../models/User";
 import { ClientModel } from "../models/Client";
 import { AddressModel } from "../models/Address";
 import { ITokenPayload } from "../interfaces/authentication.interface";
 import { randomUUID } from "crypto";
+import { signToken } from "./jwt.util";
 
 /**
  * Gera um token JWT e o payload do usuário para a resposta do frontend.
@@ -16,12 +16,6 @@ export const generateTokenAndUserPayload = (
   client: ClientModel,
   address: AddressModel | null
 ) => {
-  const secretKey = process.env.SECRET_KEY || "secret";
-  const expiresIn = process.env.EXPIRES_IN || "1h";
-  const options: jwt.SignOptions = {
-    expiresIn: expiresIn as jwt.SignOptions["expiresIn"],
-    jwtid: randomUUID(),
-  };
 
   const tokenPayload: ITokenPayload = {
     user: {
@@ -45,7 +39,7 @@ export const generateTokenAndUserPayload = (
       : undefined,
   };
 
-  const token = jwt.sign(tokenPayload, secretKey, options);
+  const token = signToken(tokenPayload, { jwtid: randomUUID() });
 
   const userPayload = {
     id: user.id,

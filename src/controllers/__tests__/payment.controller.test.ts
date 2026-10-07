@@ -1,170 +1,138 @@
 import { Request, Response } from "express";
 import {
-  confirmPaymentController,
-  createPaymentIntentController,
+  confirmPaymentController as confirmPaymentHandler,
+  createPaymentIntentController as createPaymentIntentHandler,
 } from "../payment.controller";
 import { PaymentService } from "../../services/payment.service";
+import { HttpError } from "../../errors/HttpError";
+import { nextToErrorHandler, settled } from "./handlerTestUtils";
 
 jest.mock("../../services/payment.service", () => ({
   PaymentService: {
-    createPaymentIntent: jest.fn(),
+    createBookingPaymentIntent: jest.fn(),
     confirmAndCreateAppointment: jest.fn(),
   },
-  PaymentValidationError: class PaymentValidationError extends Error {
-    code: string;
-    status: number;
-    constructor(message: string, code: string, status: number) {
-      super(message);
-      this.code = code;
-      this.status = status;
-    }
-  },
+}));
+jest.mock("../../utils/logger", () => ({
+  __esModule: true,
+  default: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
+  logError: jest.fn(),
 }));
 
-const buildResponse = () => {
+const createPaymentIntentController = settled(createPaymentIntentHandler);
+const confirmPaymentController = settled(confirmPaymentHandler);
+
+/** Chama o controller e devolve os mocks de resposta (erros passam pelo errorHandler). */
+const call = async (
+  handler: typeof createPaymentIntentController,
+  request: unknown,
+) => {
   const jsonMock = jest.fn();
   const statusMock = jest.fn().mockReturnValue({ json: jsonMock });
   const res = { status: statusMock, json: jsonMock } as Partial<Response>;
-  return { res, jsonMock, statusMock };
+  const next = nextToErrorHandler(() => request, () => res);
+  await handler(request as Request, res as Response, next);
+  return { jsonMock, statusMock };
 };
-
-beforeAll(() => {
-  jest.spyOn(console, "error").mockImplementation(() => {});
-});
-
-afterAll(() => {
-  jest.restoreAllMocks();
-});
 
 describe("PaymentController - createPaymentIntentController", () => {
   const validBody = {
-    amount: 150.5,
-    currency: "BRL",
     professionalId: 20,
     selectedTime: "2026-10-01T13:00:00.000Z",
     serviceId: 5,
     addressId: 2,
   };
+  const authed = (body: Record<string, unknown>) => ({ user: { id: 1 }, body });
 
   beforeEach(() => {
     jest.clearAllMocks();
-    (PaymentService.createPaymentIntent as jest.Mock).mockResolvedValue(
+    (PaymentService.createBookingPaymentIntent as jest.Mock).mockResolvedValue(
       "pi_123_secret_456",
     );
   });
 
-  it("deve criar o PaymentIntent com valor em centavos e dados do agendamento", async () => {
-    const { res, jsonMock, statusMock } = buildResponse();
-
-    await createPaymentIntentController(
-      { body: { ...validBody } } as Request,
-      res as Response,
+  it("deve criar o PaymentIntent do agendamento para o usuário autenticado", async () => {
+    const { jsonMock, statusMock } = await call(
+      createPaymentIntentController,
+      authed({ ...validBody }),
     );
 
-    expect(PaymentService.createPaymentIntent).toHaveBeenCalledWith({
-      amount: 15050,
-      currency: "brl",
-      metadata: {
-        professionalId: "20",
-        serviceId: "5",
-        selectedTime: validBody.selectedTime,
-        addressId: "2",
-      },
+    expect(PaymentService.createBookingPaymentIntent).toHaveBeenCalledWith(1, {
+      professionalId: 20,
+      selectedTime: validBody.selectedTime,
+      serviceId: 5,
+      addressId: 2,
+      appointmentId: undefined,
     });
     expect(statusMock).toHaveBeenCalledWith(200);
     expect(jsonMock).toHaveBeenCalledWith({ clientSecret: "pi_123_secret_456" });
   });
 
-  it("AG-L-16: amount=0.01 (primeiro valor acima de zero) é aceito e convertido para 1 centavo", async () => {
-    const { res, jsonMock, statusMock } = buildResponse();
-
-    await createPaymentIntentController(
-      { body: { ...validBody, amount: 0.01 } } as Request,
-      res as Response,
-    );
-
-    expect(PaymentService.createPaymentIntent).toHaveBeenCalledWith(
-      expect.objectContaining({ amount: 1, currency: "brl" }),
-    );
-    expect(statusMock).toHaveBeenCalledWith(200);
-    expect(jsonMock).toHaveBeenCalledWith({ clientSecret: "pi_123_secret_456" });
-  });
-
+  // O valor deixou de vir do app: o servidor calcula pelo preço do serviço
+  // (servicePriceInCents; ver AG-L-16 em payment.service.test.ts).
   it.each([
     ["ausente", undefined],
     ["zero", 0],
     ["negativo", -10],
     ["texto", "50"],
-  ])("deve retornar 400 quando amount for %s", async (_label, amount) => {
-    const { res, jsonMock, statusMock } = buildResponse();
-
-    await createPaymentIntentController(
-      { body: { ...validBody, amount } } as Request,
-      res as Response,
+    ["0.01", 0.01],
+  ])("deve ignorar o amount enviado pelo app (%s)", async (_label, amount) => {
+    const { statusMock } = await call(
+      createPaymentIntentController,
+      authed({ ...validBody, amount, currency: "usd" }),
     );
 
-    expect(statusMock).toHaveBeenCalledWith(400);
-    expect(jsonMock).toHaveBeenCalledWith({
-      error: expect.stringContaining('Parâmetro "amount" inválido'),
-    });
-    expect(PaymentService.createPaymentIntent).not.toHaveBeenCalled();
+    const [, input] = (PaymentService.createBookingPaymentIntent as jest.Mock).mock.calls[0];
+    expect(input).not.toHaveProperty("amount");
+    expect(input).not.toHaveProperty("currency");
+    expect(statusMock).toHaveBeenCalledWith(200);
   });
 
-  it.each([
-    ["ausente", undefined],
-    ["com 2 letras", "br"],
-    ["com 4 letras", "brls"],
-  ])("deve retornar 400 quando currency for %s", async (_label, currency) => {
-    const { res, jsonMock, statusMock } = buildResponse();
-
-    await createPaymentIntentController(
-      { body: { ...validBody, currency } } as Request,
-      res as Response,
-    );
-
-    expect(statusMock).toHaveBeenCalledWith(400);
-    expect(jsonMock).toHaveBeenCalledWith({
-      error: expect.stringContaining('Parâmetro "currency" inválido'),
+  it("deve retornar 401 quando o usuário não estiver autenticado", async () => {
+    const { statusMock } = await call(createPaymentIntentController, {
+      body: { ...validBody },
     });
-    expect(PaymentService.createPaymentIntent).not.toHaveBeenCalled();
+
+    expect(statusMock).toHaveBeenCalledWith(401);
+    expect(PaymentService.createBookingPaymentIntent).not.toHaveBeenCalled();
   });
 
+  // A validação dos campos do agendamento vive em PaymentService
+  // (createBookingPaymentIntent) e é testada em payment.capture.test.ts.
   it.each(["professionalId", "selectedTime", "serviceId", "addressId"])(
-    "deve retornar 400 quando %s estiver ausente",
+    "deve devolver o 400 do serviço quando %s estiver ausente",
     async (field) => {
-      const { res, jsonMock, statusMock } = buildResponse();
       const body: Record<string, unknown> = { ...validBody };
       delete body[field];
-
-      await createPaymentIntentController(
-        { body } as Request,
-        res as Response,
+      (PaymentService.createBookingPaymentIntent as jest.Mock).mockRejectedValue(
+        HttpError.badRequest(
+          "Dados do agendamento (professionalId, selectedTime, serviceId, addressId) são obrigatórios.",
+        ),
       );
+
+      const { jsonMock, statusMock } = await call(createPaymentIntentController, authed(body));
 
       expect(statusMock).toHaveBeenCalledWith(400);
       expect(jsonMock).toHaveBeenCalledWith({
         error:
           "Dados do agendamento (professionalId, selectedTime, serviceId, addressId) são obrigatórios.",
       });
-      expect(PaymentService.createPaymentIntent).not.toHaveBeenCalled();
     },
   );
 
-  it("deve retornar 500 quando o provedor de pagamento falhar", async () => {
-    (PaymentService.createPaymentIntent as jest.Mock).mockRejectedValue(
+  it("deve retornar 500 genérico quando o provedor de pagamento falhar", async () => {
+    (PaymentService.createBookingPaymentIntent as jest.Mock).mockRejectedValue(
       new Error("Stripe fora do ar"),
     );
-    const { res, jsonMock, statusMock } = buildResponse();
 
-    await createPaymentIntentController(
-      { body: { ...validBody } } as Request,
-      res as Response,
+    const { jsonMock, statusMock } = await call(
+      createPaymentIntentController,
+      authed({ ...validBody }),
     );
 
+    // Falhas inesperadas nao vazam a mensagem interna ao cliente.
     expect(statusMock).toHaveBeenCalledWith(500);
-    expect(jsonMock).toHaveBeenCalledWith({
-      error: "Falha ao processar o pagamento. Por favor, tente novamente.",
-    });
+    expect(jsonMock).toHaveBeenCalledWith({ error: "Erro interno do servidor" });
   });
 });
 
@@ -178,15 +146,11 @@ describe("PaymentController - confirmPaymentController", () => {
     (PaymentService.confirmAndCreateAppointment as jest.Mock).mockResolvedValue(
       appointment,
     );
-    const { res, jsonMock, statusMock } = buildResponse();
 
-    await confirmPaymentController(
-      {
-        user: { id: 1 },
-        body: { paymentIntentId: "pi_test_123", userId: "999" },
-      } as unknown as Request,
-      res as Response,
-    );
+    const { jsonMock, statusMock } = await call(confirmPaymentController, {
+      user: { id: 1 },
+      body: { paymentIntentId: "pi_test_123", userId: "999" },
+    });
 
     expect(PaymentService.confirmAndCreateAppointment).toHaveBeenCalledWith(
       "pi_test_123",
@@ -200,12 +164,9 @@ describe("PaymentController - confirmPaymentController", () => {
   });
 
   it("deve retornar 400 quando paymentIntentId estiver ausente", async () => {
-    const { res, jsonMock, statusMock } = buildResponse();
-
-    await confirmPaymentController(
-      { body: { userId: 1 } } as Request,
-      res as Response,
-    );
+    const { jsonMock, statusMock } = await call(confirmPaymentController, {
+      body: { userId: 1 },
+    });
 
     expect(statusMock).toHaveBeenCalledWith(400);
     expect(jsonMock).toHaveBeenCalledWith({
@@ -215,37 +176,42 @@ describe("PaymentController - confirmPaymentController", () => {
   });
 
   it("deve retornar 401 quando o usuário não estiver autenticado", async () => {
-    const { res, jsonMock, statusMock } = buildResponse();
-
-    await confirmPaymentController(
-      { body: { paymentIntentId: "pi_test_123", userId: 1 } } as Request,
-      res as Response,
-    );
+    const { jsonMock, statusMock } = await call(confirmPaymentController, {
+      body: { paymentIntentId: "pi_test_123", userId: 1 },
+    });
 
     expect(statusMock).toHaveBeenCalledWith(401);
-    expect(jsonMock).toHaveBeenCalledWith({
-      error: "Usuário não autenticado.",
-    });
+    expect(jsonMock).toHaveBeenCalledWith({ error: "Usuário não autenticado" });
     expect(PaymentService.confirmAndCreateAppointment).not.toHaveBeenCalled();
   });
 
-  it("deve retornar 500 com a mensagem do serviço quando a confirmação falhar", async () => {
+  it("deve devolver o erro de domínio do serviço quando a confirmação falhar", async () => {
     (PaymentService.confirmAndCreateAppointment as jest.Mock).mockRejectedValue(
-      new Error("O pagamento não foi concluído com sucesso."),
+      HttpError.badRequest("O pagamento não foi autorizado."),
     );
-    const { res, jsonMock, statusMock } = buildResponse();
 
-    await confirmPaymentController(
-      {
-        user: { id: 1 },
-        body: { paymentIntentId: "pi_test_123" },
-      } as unknown as Request,
-      res as Response,
+    const { jsonMock, statusMock } = await call(confirmPaymentController, {
+      user: { id: 1 },
+      body: { paymentIntentId: "pi_test_123" },
+    });
+
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "O pagamento não foi autorizado.",
+    });
+  });
+
+  it("deve retornar 500 genérico em falhas inesperadas", async () => {
+    (PaymentService.confirmAndCreateAppointment as jest.Mock).mockRejectedValue(
+      new Error("conexão perdida"),
     );
+
+    const { jsonMock, statusMock } = await call(confirmPaymentController, {
+      user: { id: 1 },
+      body: { paymentIntentId: "pi_test_123" },
+    });
 
     expect(statusMock).toHaveBeenCalledWith(500);
-    expect(jsonMock).toHaveBeenCalledWith({
-      error: "O pagamento não foi concluído com sucesso.",
-    });
+    expect(jsonMock).toHaveBeenCalledWith({ error: "Erro interno do servidor" });
   });
 });
