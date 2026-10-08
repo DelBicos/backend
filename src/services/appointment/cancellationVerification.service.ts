@@ -35,9 +35,10 @@ async function authorize(userId: number, appointment: AppointmentModel | null, t
 }
 
 export async function resolveCancellationAppointment(reference: string): Promise<number> {
+  // IDs numéricos das telas têm precedência; # identifica explicitamente um código curto numérico.
+  if (/^[1-9]\d*$/.test(reference) && Number.isSafeInteger(Number(reference))) return Number(reference);
   const byCode = await AppointmentModel.findOne({ where: { short_id: reference.replace(/^#/, "").toUpperCase() } });
   if (byCode) return byCode.id;
-  if (/^[1-9]\d*$/.test(reference) && Number.isSafeInteger(Number(reference))) return Number(reference);
   throw new CancellationVerificationError("Agendamento não encontrado", 404);
 }
 
