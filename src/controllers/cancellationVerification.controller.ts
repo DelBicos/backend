@@ -25,7 +25,7 @@ export const requestCancellation = async (req: Request, res: Response) => {
 export const confirmCancellation = async (req: Request, res: Response) => {
   const user = (req as AuthenticatedRequest).user;
   if (!user) return res.status(401).json({ error: "Usuário não autenticado" });
-  const { challengeId, code } = req.body as { challengeId?: unknown; code?: unknown };
+  const { challengeId, code } = (req.body ?? {}) as { challengeId?: unknown; code?: unknown };
   if (typeof challengeId !== "string" || typeof code !== "string")
     return res.status(400).json({ error: "Solicite e informe o código de confirmação enviado ao e-mail" });
   try {
@@ -38,7 +38,7 @@ export const confirmCancellation = async (req: Request, res: Response) => {
 export const abandonCancellation = async (req: Request, res: Response) => {
   const user = (req as AuthenticatedRequest).user;
   if (!user) return res.status(401).json({ error: "Usuário não autenticado" });
-  const { challengeId } = req.body as { challengeId?: unknown };
+  const { challengeId } = (req.body ?? {}) as { challengeId?: unknown };
   if (typeof challengeId !== "string") return res.status(400).json({ error: "Verificação inválida" });
   try {
     const id = await resolveCancellationAppointment(req.params.id);
@@ -49,6 +49,7 @@ export const abandonCancellation = async (req: Request, res: Response) => {
 
 // A rota legada de recusa também exige código; aceitar continua com o fluxo existente.
 export const updateVerifiedAppointmentStatus = async (req: Request, res: Response) => {
+  if (!req.body) return res.status(400).json({ error: "Informe o status do agendamento" });
   if (req.body.status === "canceled") return confirmCancellation(req, res);
   return updateLegacyStatus(req, res);
 };
