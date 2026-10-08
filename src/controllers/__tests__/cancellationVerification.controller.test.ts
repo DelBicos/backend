@@ -35,3 +35,10 @@ it("aceitação continua no fluxo existente", async () => {
   expect(updateAppointmentStatus).toHaveBeenCalledWith(request, response);
   expect(confirmCancellationCode).not.toHaveBeenCalled();
 });
+
+it.each([confirmCancellation, updateVerifiedAppointmentStatus])("retorna 400 para requisição sem corpo", async (handler) => {
+  await handler({ user: { id: 6 }, params: { id: "92" } } as unknown as Request, response);
+  expect(status).toHaveBeenCalledWith(400);
+  expect(confirmCancellationCode).not.toHaveBeenCalled();
+  expect(updateAppointmentStatus).not.toHaveBeenCalled();
+});
