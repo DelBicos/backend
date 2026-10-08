@@ -22,9 +22,15 @@ import { CancellationVerificationModel } from "../../models/CancellationVerifica
 import { sendCancellationCode } from "../email/cancellationEmail.service";
 import { withProfessionalScheduleLock } from "../appointmentSchedule.service";
 import { enqueueAppointmentRefund } from "../appointmentRefund.service";
-import { requestCancellationCode, confirmCancellationCode, abandonCancellationCode } from "../appointment/cancellationVerification.service";
+import { requestCancellationCode, confirmCancellationCode, abandonCancellationCode, resolveCancellationAppointment } from "../appointment/cancellationVerification.service";
 
 const challengeId = "12345678-1234-1234-1234-123456789012";
+it("ID numérico da tela não é confundido com código curto de outra reserva", async () => {
+  (AppointmentModel.findOne as jest.Mock).mockResolvedValue({ id: 999 });
+  await expect(resolveCancellationAppointment("123456")).resolves.toBe(123456);
+  expect(AppointmentModel.findOne).not.toHaveBeenCalled();
+  await expect(resolveCancellationAppointment("#123456")).resolves.toBe(999);
+});
 const transaction = { LOCK: { UPDATE: "UPDATE" } };
 const appointment = { id: 92, short_id: "A7F3", client_id: 6, professional_id: 1, status: "pending", save: jest.fn() };
 const verification = {
