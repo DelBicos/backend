@@ -169,7 +169,9 @@ export async function processMessage(
   // regras dentro de analyzeMessage. As demais podem interromper o fluxo atual
   // por uma intenção explícita, mesmo durante um agendamento pendente.
   const verifyingCancellation = Boolean(ctx.cancellationChallengeId && ctx.pendingAction === "CANCEL");
-  const nlu: NluResult = verifyingCancellation ? { intent: "FALLBACK", entities: {}, confidence: 1 } : await analyzeMessage(
+  const answeringCancellation = session.state === BotState.CONFIRMACAO && ctx.pendingAction === "CANCEL" &&
+    /^(?:sim(?:,?\s+(?:confirmar|confirmo))?|s|yes|confirmar|confirmo|confirmar cancelamento|ok|pode|vamos|n[aã]o(?:,?\s+(?:cancelar|voltar))?|desistir|voltar)[.!]*$/i.test(trimmedMessage);
+  const nlu: NluResult = verifyingCancellation || answeringCancellation ? { intent: "FALLBACK", entities: {}, confidence: 1 } : await analyzeMessage(
     trimmedMessage,
     ctx as Record<string, unknown>,
   );
