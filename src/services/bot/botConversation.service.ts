@@ -14,6 +14,7 @@ import { buildGreetingReply } from "./greetingReply.rules";
 import { isAvailableTimesQuestion } from "./contextualMessage";
 import { normalizeText } from "../../utils/nlp.util";
 import { parseAppointmentQuery } from "./appointmentQuery.rules";
+import { parseReschedulePreservation } from "./rescheduleInput.rules";
 
 export interface BotMessageResponse {
   sessionId: number;
@@ -255,6 +256,10 @@ export async function processMessage(
     ) &&
     Boolean(parsePortugueseDate(trimmedMessage, { timeZone: ctx.timeZone }));
   const isExplicitIntent =
+    // Respostas sobre manter parte da reserva pertencem à remarcação atual.
+    !((session.state === BotState.COLETANDO_DATA || session.state === BotState.COLETANDO_HORARIO) &&
+      !/#|\b(?:id|agendamento)\s+\d+/i.test(trimmedMessage) &&
+      Object.values(parseReschedulePreservation(trimmedMessage, session.state, ctx)).some(Boolean)) &&
     !isContextualAvailabilityQuestion &&
     !isContextualDateAnswer &&
     (!isContextualTimeAnswer || Boolean(appointmentQuery)) &&

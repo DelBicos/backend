@@ -5,7 +5,7 @@ import { BotStateNode, HandlerResult } from "./BotStateNode";
 import { InicioState } from "./states/InicioState.service";
 import { ColetandoServicoState } from "./states/ColetandoServicoState";
 import { ColetandoDataState } from "./states/ColetandoDataState";
-import { ColetandoHorarioState } from "./states/ColetandoHorarioState";
+import { ColetandoHorarioState } from "./states/ColetandoHorarioState.service";
 import { ConfirmacaoState } from "./states/ConfirmacaoState.service";
 import { AguardandoIdAgendamentoState } from "./states/AguardandoIdAgendamentoState.service";
 import { AguardandoConfirmacaoState } from "./states/AguardandoConfirmacaoState";
@@ -13,6 +13,7 @@ import { SelecionandoProfissionalState } from "./states/SelecionandoProfissional
 import { normalizeText } from "../../utils/nlp.util";
 import { requestBookingAddress } from "./states/bookingDetails.service";
 import { buildConfirmationResponse } from "./states/stateHelpers.rules";
+import { parseReschedulePreservation } from "./rescheduleInput.rules";
 
 const stateNodes: Record<BotState, BotStateNode> = {
   [BotState.INICIO]: new InicioState(),
@@ -120,6 +121,15 @@ export class BotMessageRouter {
       throw new Error(`Nenhum handler registrado para o estado: ${state}`);
     }
 
+    const preservation = parseReschedulePreservation(userMessage, state, session.context ?? {});
+    nlu = { ...nlu, entities: {
+      ...nlu.entities,
+      ...(preservation.keepDate && !nlu.entities.date ? { date: session.context?.date } : {}),
+      ...(!nlu.entities.time && preservation.keepTime ? { time: session.context?.time } : {}),
+      ...(!nlu.entities.time && !preservation.keepTime && state === BotState.COLETANDO_DATA &&
+        session.context?.pendingAction === "RESCHEDULE" && !session.context.newDate && session.context.newTime
+        ? { time: session.context.newTime } : {}),
+    } };
     let result = await handler.handle(
       userMessage,
       nlu,
@@ -170,6 +180,19 @@ export class BotMessageRouter {
           session.context = originalContext;
         }
       }
+    }
+
+    // Após resolver o ID, os valores originais ficam disponíveis também para
+    // pedidos completos como "alterar #ABC para dia 30 mantendo o horário".
+    const rescheduleContext = { ...session.context, ...result.contextUpdate };
+    const requestedPreservation = parseReschedulePreservation(userMessage, state, rescheduleContext);
+    nlu = { ...nlu, entities: {
+      ...nlu.entities,
+      ...(requestedPreservation.keepDate && !nlu.entities.date ? { date: rescheduleContext.date } : {}),
+      ...(requestedPreservation.keepTime && !nlu.entities.time ? { time: rescheduleContext.time } : {}),
+    } };
+    if (requestedPreservation.keepTime && result.nextState === BotState.COLETANDO_DATA && !nlu.entities.date) {
+      result.contextUpdate.newTime = nlu.entities.time;
     }
 
     // Uma única fala costuma trazer mais de uma etapa do agendamento, por
