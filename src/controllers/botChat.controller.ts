@@ -4,7 +4,7 @@ import {
   processMessage,
   getSessionHistory,
   getActiveSessionHistory,
-} from "../services/botConversation.service";
+} from "../services/bot/botConversation.service";
 import logger, { logError } from "../utils/logger";
 import { AppointmentModel } from "../models/Appointment";
 import { ClientModel } from "../models/Client";

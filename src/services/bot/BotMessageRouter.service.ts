@@ -2,15 +2,18 @@ import { BotState } from "../../constants/botStates";
 import { BotChatSessionModel } from "../../models/BotChatSession";
 import { isSchedulingActionWord, NluResult } from "../nlu.service";
 import { BotStateNode, HandlerResult } from "./BotStateNode";
-import { InicioState } from "./states/InicioState";
+import { InicioState } from "./states/InicioState.service";
 import { ColetandoServicoState } from "./states/ColetandoServicoState";
 import { ColetandoDataState } from "./states/ColetandoDataState";
-import { ColetandoHorarioState } from "./states/ColetandoHorarioState";
-import { ConfirmacaoState } from "./states/ConfirmacaoState";
-import { AguardandoIdAgendamentoState } from "./states/AguardandoIdAgendamentoState";
+import { ColetandoHorarioState } from "./states/ColetandoHorarioState.service";
+import { ConfirmacaoState } from "./states/ConfirmacaoState.service";
+import { AguardandoIdAgendamentoState } from "./states/AguardandoIdAgendamentoState.service";
 import { AguardandoConfirmacaoState } from "./states/AguardandoConfirmacaoState";
 import { SelecionandoProfissionalState } from "./states/SelecionandoProfissionalState";
 import { normalizeText } from "../../utils/nlp.util";
+import { requestBookingAddress } from "./states/bookingDetails.service";
+import { buildConfirmationResponse } from "./states/stateHelpers.rules";
+import { parseReschedulePreservation } from "./rescheduleInput.rules";
 
 const stateNodes: Record<BotState, BotStateNode> = {
   [BotState.INICIO]: new InicioState(),
@@ -20,6 +23,7 @@ const stateNodes: Record<BotState, BotStateNode> = {
   [BotState.COLETANDO_HORARIO]: new ColetandoHorarioState(),
   [BotState.VERIFICANDO_DISPONIBILIDADE]: new ColetandoHorarioState(), // Roteia para horário
   [BotState.CONFIRMACAO]: new ConfirmacaoState(),
+  [BotState.COLETANDO_ENDERECO]: new ConfirmacaoState(),
   [BotState.AGUARDANDO_CONFIRMACAO]: new AguardandoConfirmacaoState(),
   [BotState.AGUARDANDO_ID_AGENDAMENTO]: new AguardandoIdAgendamentoState(),
   [BotState.FINALIZADO]: new InicioState(),
@@ -117,6 +121,15 @@ export class BotMessageRouter {
       throw new Error(`Nenhum handler registrado para o estado: ${state}`);
     }
 
+    const preservation = parseReschedulePreservation(userMessage, state, session.context ?? {});
+    nlu = { ...nlu, entities: {
+      ...nlu.entities,
+      ...(preservation.keepDate && !nlu.entities.date ? { date: session.context?.date } : {}),
+      ...(!nlu.entities.time && preservation.keepTime ? { time: session.context?.time } : {}),
+      ...(!nlu.entities.time && !preservation.keepTime && state === BotState.COLETANDO_DATA &&
+        session.context?.pendingAction === "RESCHEDULE" && !session.context.newDate && session.context.newTime
+        ? { time: session.context.newTime } : {}),
+    } };
     let result = await handler.handle(
       userMessage,
       nlu,
@@ -169,6 +182,19 @@ export class BotMessageRouter {
       }
     }
 
+    // Após resolver o ID, os valores originais ficam disponíveis também para
+    // pedidos completos como "alterar #ABC para dia 30 mantendo o horário".
+    const rescheduleContext = { ...session.context, ...result.contextUpdate };
+    const requestedPreservation = parseReschedulePreservation(userMessage, state, rescheduleContext);
+    nlu = { ...nlu, entities: {
+      ...nlu.entities,
+      ...(requestedPreservation.keepDate && !nlu.entities.date ? { date: rescheduleContext.date } : {}),
+      ...(requestedPreservation.keepTime && !nlu.entities.time ? { time: rescheduleContext.time } : {}),
+    } };
+    if (requestedPreservation.keepTime && result.nextState === BotState.COLETANDO_DATA && !nlu.entities.date) {
+      result.contextUpdate.newTime = nlu.entities.time;
+    }
+
     // Uma única fala costuma trazer mais de uma etapa do agendamento, por
     // exemplo: "quero limpeza sexta às 14:30". O NLU já extrai essas
     // entidades, mas antes o roteador descartava data e horário assim que o
@@ -206,6 +232,39 @@ export class BotMessageRouter {
       );
     }
 
+    // A escolha do profissional inicia a coleta restante, nunca cria a reserva.
+    // A confirmação final só é mostrada depois da escolha do endereço.
+    const context = { ...(session.context ?? {}), ...result.contextUpdate };
+    if (result.nextState === BotState.CONFIRMACAO &&
+        (context.pendingAction ?? "CREATE") === "CREATE" &&
+        context.bookingDetailsStep === "REVIEW" &&
+        state !== BotState.CONFIRMACAO) {
+      const confirmation = buildConfirmationResponse(
+        context,
+        context.date ?? "",
+        context.time ?? "",
+        context,
+      );
+      return {
+        ...confirmation,
+        reply: buildConfirmationResponse(
+          context,
+          context.date ?? "",
+          context.time ?? "",
+          confirmation.contextUpdate,
+        ).reply,
+        contextUpdate: { ...context, ...confirmation.contextUpdate },
+      };
+    }
+    if (result.nextState === BotState.CONFIRMACAO &&
+        (context.pendingAction ?? "CREATE") === "CREATE" &&
+        context.bookingDetailsStep !== "REVIEW") {
+      const addressPrompt = await requestBookingAddress(userId);
+      return {
+        ...addressPrompt,
+        contextUpdate: { ...result.contextUpdate, ...addressPrompt.contextUpdate },
+      };
+    }
     return result;
   }
 }

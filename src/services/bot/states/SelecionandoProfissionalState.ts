@@ -6,7 +6,7 @@ import {
 import { normalizeText } from "../../../utils/nlp.util";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
-import { buildConfirmationResponse } from "./stateHelpers";
+import { buildConfirmationResponse } from "./stateHelpers.rules";
 
 function findProfessional(
   message: string,
