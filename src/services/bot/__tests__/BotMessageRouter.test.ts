@@ -41,7 +41,7 @@ jest.mock("../states/ColetandoDataState", () => ({
     }
   },
 }));
-jest.mock("../states/ColetandoHorarioState", () => ({
+jest.mock("../states/ColetandoHorarioState.service", () => ({
   ColetandoHorarioState: class ColetandoHorarioState {
     public async handle(...args: unknown[]) {
       return mockColetandoHorarioHandle(...args);
