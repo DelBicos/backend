@@ -145,7 +145,7 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
         `• Serviço: ${svcTitle}\n` +
         `• Profissional: ${profName}\n` +
         `• Data atual: ${dateStr} às ${timeStr}\n\n` +
-        `Qual nova data você prefere?`,
+        `Qual nova data você prefere? Se quiser alterar só o horário, diga "manter a data".`,
       nextState: "COLETANDO_DATA",
       contextUpdate: {
         appointmentId: appointment.id,

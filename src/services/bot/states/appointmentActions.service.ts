@@ -202,7 +202,6 @@ export async function rescheduleBotAppointment(
   const time = (ctx.newTime ?? ctx.time)?.trim();
   if (!date || !time) throw new Error("Informe a nova data e horário");
   const start = resolveBotAppointmentStart(date, time, selectedTimeIso);
-  let changed = false;
   const appointment = await withProfessionalScheduleLock(
     original.professional_id,
     async (transaction) => {
@@ -258,35 +257,24 @@ export async function rescheduleBotAppointment(
       current.start_time = start;
       current.end_time = new Date(start.getTime() + duration * 60000);
       current.status = "pending"; // Nova data requer novo aceite; pagamento permanece vinculado.
+      const professional = await ProfessionalModel.findByPk(current.professional_id, { transaction });
+      if (!professional) throw new Error("Profissional do agendamento não encontrado");
       await current.save({ transaction });
-      changed = true;
+      // Reserva e avisos são atômicos: falha na notificação impede a remarcação.
+      await NotificationModel.bulkCreate(
+        [...new Set([userId, professional.user_id])].map((id) => ({
+          user_id: id,
+          title: "Agendamento Remarcado",
+          message: `Agendamento ${current.short_id || current.id} remarcado para ${date} às ${time}. Aguardando aceite do profissional.`,
+          notification_type: "appointment",
+          related_entity_id: current.id,
+          is_read: false,
+        })),
+        { transaction },
+      );
       return current;
     },
   );
-  if (changed) {
-    try {
-      const professional = await ProfessionalModel.findByPk(
-        appointment.professional_id,
-      );
-      const recipients = [userId, professional?.user_id].filter(
-        (id): id is number => id !== undefined,
-      );
-      await NotificationModel.bulkCreate(
-        recipients.map((id) => ({
-          user_id: id,
-          title: "Agendamento Remarcado",
-          message: `Agendamento ${appointment.short_id || appointment.id} remarcado para ${date} às ${time}. Aguardando aceite do profissional.`,
-          notification_type: "appointment",
-          related_entity_id: appointment.id,
-          is_read: false,
-        })),
-      );
-    } catch {
-      logger.warn("Bot: falha ao notificar remarcação", {
-        appointmentId: appointment.id,
-      });
-    }
-  }
   return appointment;
 }
 

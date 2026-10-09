@@ -27,9 +27,10 @@ export class ConfirmacaoState implements BotStateNode {
         !/^(?:n[aã]o|cancelar|desistir|voltar)[.!?]?$/.test(lower)) {
       return collectBookingDetails(userMessage, ctx, userId);
     }
-    // No cancelamento, perguntas e frases com ressalvas não são autorização.
-    const confirmed = pendingAction === "CANCEL"
-      ? /^(?:sim(?:,?\s+(?:confirmar|confirmo))?|s|yes|confirmar|confirmo|confirmar cancelamento|ok|pode|vamos)[.!]*$/.test(lower)
+    // Alterações de reservas exigem autorização explícita, sem perguntas ou ressalvas.
+    const confirmed = pendingAction === "CANCEL" || pendingAction === "RESCHEDULE"
+      ? /^(?:sim(?:,?\s+(?:confirmar|confirmo))?|s|yes|confirmar|confirmo|ok|pode|vamos)[.!]*$/.test(lower) ||
+        (pendingAction === "CANCEL" && /^confirmar cancelamento[.!]*$/.test(lower))
       : /\b(sim|s|yes|confirmar|confirmo|ok|pode|vamos)\b/.test(lower);
     const denied = /\b(n[aã]o|nao|no|cancelar|desistir|voltar)\b/.test(lower);
 

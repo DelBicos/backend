@@ -78,7 +78,7 @@ async function loadMatchingServices(
 }
 
 async function availableTimesForService(
-  service: any,
+  service: ServiceModel,
   date: string,
   context?: BotSessionContext,
 ): Promise<string[]> {
@@ -96,7 +96,10 @@ async function availableTimesForService(
 }
 
 function buildProfessionalOption(
-  service: any,
+  service: ServiceModel & {
+    Appointments?: AppointmentModel[];
+    Professional?: { User?: { name?: string; avatar_uri?: string | null }; MainAddress?: { city?: string | null; state?: string | null } };
+  },
   index: number,
   time: string,
 ): BotProfessionalOption {
@@ -233,9 +236,14 @@ export class ColetandoHorarioState implements BotStateNode {
     }
 
     const parsedTime = nlu.entities.time ?? parseTimeFromText(userMessage);
+    // Horário preservado já é HH:mm exato; não deve virar uma alternativa de
+    // 12 horas (09:00 -> 21:00) quando o original estiver indisponível.
+    const timeInput = isAlterar && parsedTime === ctx.time && !parseTimeFromText(userMessage)
+      ? parsedTime
+      : userMessage;
     let time = parsedTime
       ? resolveAmbiguousTimeFromAvailableSlots(
-          userMessage,
+          timeInput,
           parsedTime,
           ctx.suggestedSlots ?? [],
           preferredPeriod,
@@ -377,7 +385,7 @@ export class ColetandoHorarioState implements BotStateNode {
     // horários reais do dia para decidir entre 02:30 e 14:30.
     if (parsedTime) {
       time = resolveAmbiguousTimeFromAvailableSlots(
-        userMessage,
+        timeInput,
         parsedTime,
         Array.from(allAvailableTimes),
         preferredPeriod,
@@ -418,6 +426,15 @@ export class ColetandoHorarioState implements BotStateNode {
           professionalOptionsData: undefined,
         },
       };
+    }
+
+    if (isAlterar) {
+      return buildConfirmationResponse(ctx, date, time, {
+        newTime: time,
+        professionalOptionsData: undefined,
+        suggestedSlots: undefined,
+        suggestedSlotsData: undefined,
+      });
     }
 
     const uniqueByProfessional = new Map<number, ServiceModel>();

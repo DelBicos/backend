@@ -112,8 +112,15 @@ export class InicioState implements BotStateNode {
         const actionText = nlu.intent === "CANCELAR" ? "cancelar" : "reagendar";
         const intentName = nlu.intent;
         const explicitCode = userMessage.match(/#([a-z0-9]{1,6})\b/i)?.[1];
-        const reference = explicitCode ?? nlu.entities.appointment_id;
-        if (action === "CANCEL" && reference !== undefined) {
+        // O NLU também pode extrair números da data; só usa ID de remarcação
+        // quando estiver ligado ao verbo ou a uma referência explícita.
+        const numericReference = userMessage.match(
+          /\b(?:id|agendamento|n[uú]mero|alterar|altere|reagendar|reagende|remarcar|remarque)\s+(\d+)\b(?![/:h\d])/i,
+        )?.[1];
+        const reference = explicitCode ?? (action === "CANCEL"
+          ? nlu.entities.appointment_id
+          : numericReference);
+        if (reference !== undefined) {
           const result = await new AguardandoIdAgendamentoState().handle(
             explicitCode ? `#${explicitCode}` : String(reference),
             { ...nlu, entities: {} },
