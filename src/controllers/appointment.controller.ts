@@ -21,6 +21,46 @@ import {
   changePendingAppointmentStatus,
   ScheduleConflictError,
 } from "../services/appointmentSchedule.service";
+import {
+  AppointmentAuditLogModel,
+  AuditLogAction,
+} from "../models/AppointmentAuditLog";
+import { confirmationCodesMatch } from "../utils/confirmationCode.util";
+import { sequelize } from "../config/database";
+
+type AppointmentStatus = AppointmentModel["status"];
+
+/**
+ * Aplica a transição de status e grava o log de auditoria na mesma transação.
+ * O WHERE com o status anterior impede que duas requisições simultâneas façam a
+ * mesma transição: a segunda não afeta nenhuma linha e recebe `false`.
+ */
+const applyStatusTransitionWithAudit = (
+  appointmentId: number,
+  fromStatus: AppointmentStatus,
+  changes: { status: AppointmentStatus; started_at?: Date; completed_at?: Date },
+  audit: { user_id: number; action: AuditLogAction; metadata: Record<string, unknown> },
+): Promise<boolean> =>
+  sequelize.transaction(async (transaction) => {
+    const [affected] = await AppointmentModel.update(changes, {
+      where: { id: appointmentId, status: fromStatus },
+      transaction,
+    });
+    if (affected === 0) return false;
+
+    await AppointmentAuditLogModel.create(
+      {
+        appointment_id: appointmentId,
+        user_id: audit.user_id,
+        action: audit.action,
+        from_status: fromStatus,
+        to_status: changes.status,
+        metadata: JSON.stringify(audit.metadata),
+      },
+      { transaction },
+    );
+    return true;
+  });
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -875,15 +915,28 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
       }
     }
 
-    let code = appointment.verification_code;
-    if (!code) {
-      code = Math.floor(1000 + Math.random() * 9000).toString();
-      appointment.verification_code = code;
-    }
-
+    const previousStatus = appointment.status;
+    const userId = authReq.user.id;
     appointment.status = "arrived";
     appointment.arrived_at = new Date();
-    await appointment.save();
+
+    // O save() dispara o hook beforeValidate do model, que gera o verification_code
+    // (AB-12) caso o agendamento ainda não tenha um.
+    await sequelize.transaction(async (transaction) => {
+      await appointment.save({ transaction });
+      await AppointmentAuditLogModel.create(
+        {
+          appointment_id: appointment.id,
+          user_id: userId,
+          action: "status_change",
+          from_status: previousStatus,
+          to_status: "arrived",
+          metadata: JSON.stringify({ arrived_at: appointment.arrived_at }),
+        },
+        { transaction },
+      );
+    });
+    const code = appointment.verification_code;
 
     const apptData: any = appointment;
     const clientUser = apptData.Client?.User;
@@ -916,13 +969,14 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
     }
 
     const apptJson = appointment.toJSON() as any;
-    delete apptJson.verification_code;
+    apptJson.verification_code = code;
 
     logger.info("Appointment marcado como chegou no local", { appointmentId: appointment.id });
     res.json({
       success: true,
-      message: "Chegada confirmada com sucesso! Peça o código de 4 dígitos ao cliente.",
+      message: "Chegada confirmada com sucesso! Peça o código ao cliente.",
       appointment: apptJson,
+      verification_code: code,
     });
   } catch (error: any) {
     logError("Erro ao marcar chegada no local", error, { paramId });
@@ -936,10 +990,6 @@ export const startServiceAppointment = async (req: Request, res: Response) => {
   const { code } = req.body;
 
   try {
-    if (!code || String(code).trim().length !== 4) {
-      return res.status(400).json({ error: "Informe o código de 4 dígitos." });
-    }
-
     const isNumeric = /^\d+$/.test(paramId);
     const whereClause = isNumeric
       ? { id: Number(paramId) }
@@ -965,21 +1015,57 @@ export const startServiceAppointment = async (req: Request, res: Response) => {
       });
     }
 
-    if (appointment.status !== "arrived" && appointment.status !== "in_progress") {
+    // CHK-06: Rejeitar código já utilizado
+    if (appointment.status === "in_progress" || appointment.status === "completed") {
+      await AppointmentAuditLogModel.create({
+        appointment_id: appointment.id,
+        user_id: authReq.user.id,
+        action: "check_in_failed",
+        from_status: appointment.status,
+        to_status: appointment.status,
+        metadata: JSON.stringify({ reason: "already_used", status: appointment.status }),
+      });
       return res.status(400).json({
-        error: `Não é possível iniciar o serviço em um agendamento com status '${appointment.status}'`,
+        error: "Este código já foi utilizado para este agendamento.",
       });
     }
 
-    if (String(appointment.verification_code).trim() !== String(code).trim()) {
+    if (appointment.status !== "arrived") {
       return res.status(400).json({
-        error: "Código de verificação incorreto. Peça novamente ao cliente.",
+        error: `Não é possível iniciar o serviço em um agendamento com status '${appointment.status}'. Confirme a chegada primeiro.`,
       });
     }
 
+    // CHK-03 & CHK-06: Validação case-sensitive do código e log de tentativa falha
+    if (!confirmationCodesMatch(code, appointment.verification_code)) {
+      await AppointmentAuditLogModel.create({
+        appointment_id: appointment.id,
+        user_id: authReq.user.id,
+        action: "check_in_failed",
+        from_status: appointment.status,
+        to_status: appointment.status,
+        metadata: JSON.stringify({ reason: "invalid_code", code_attempted: String(code || "").slice(0, 10) }),
+      });
+      return res.status(400).json({
+        error: "Código de confirmação incorreto. Verifique o código com o cliente.",
+      });
+    }
+
+    // CHK-05 & CHK-07: status, timestamp e log de check-in na mesma transação
+    const startedAt = new Date();
+    const transitioned = await applyStatusTransitionWithAudit(
+      appointment.id,
+      "arrived",
+      { status: "in_progress", started_at: startedAt },
+      { user_id: authReq.user.id, action: "check_in", metadata: { started_at: startedAt } },
+    );
+    if (!transitioned) {
+      return res.status(409).json({
+        error: "Este código já foi utilizado para este agendamento.",
+      });
+    }
     appointment.status = "in_progress";
-    appointment.started_at = new Date();
-    await appointment.save();
+    appointment.started_at = startedAt;
 
     const apptData: any = appointment;
     const clientUser = apptData.Client?.User;
@@ -1009,17 +1095,197 @@ export const startServiceAppointment = async (req: Request, res: Response) => {
     }
 
     const apptJson = appointment.toJSON() as any;
-    delete apptJson.verification_code;
 
-    logger.info("Appointment iniciado", { appointmentId: appointment.id });
+    logger.info("Appointment iniciado com sucesso (check-in)", { appointmentId: appointment.id });
     res.json({
       success: true,
-      message: "Serviço iniciado com sucesso!",
+      message: "Check-in realizado com sucesso! Atendimento iniciado.",
       appointment: apptJson,
     });
   } catch (error: any) {
     logError("Erro ao iniciar serviço", error, { paramId });
     res.status(500).json({ error: "Erro ao iniciar serviço" });
+  }
+};
+
+export const completeServiceAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+  const { code } = req.body;
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ServiceModel, as: "Service" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const professional = (appointment as any).Professional;
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional responsável pode finalizar o serviço.",
+      });
+    }
+
+    // CHK-06: Rejeitar se já concluído
+    if (appointment.status === "completed") {
+      await AppointmentAuditLogModel.create({
+        appointment_id: appointment.id,
+        user_id: authReq.user.id,
+        action: "check_out_failed",
+        from_status: appointment.status,
+        to_status: appointment.status,
+        metadata: JSON.stringify({ reason: "already_completed" }),
+      });
+      return res.status(400).json({
+        error: "Este serviço já foi concluído anteriormente.",
+      });
+    }
+
+    if (appointment.status !== "in_progress") {
+      return res.status(400).json({
+        error: `Não é possível finalizar um serviço com status '${appointment.status}'. O serviço precisa estar em andamento.`,
+      });
+    }
+
+    // CHK-04 & CHK-06: Validação case-sensitive do código para check-out e log de falha
+    if (!confirmationCodesMatch(code, appointment.verification_code)) {
+      await AppointmentAuditLogModel.create({
+        appointment_id: appointment.id,
+        user_id: authReq.user.id,
+        action: "check_out_failed",
+        from_status: appointment.status,
+        to_status: appointment.status,
+        metadata: JSON.stringify({ reason: "invalid_code", code_attempted: String(code || "").slice(0, 10) }),
+      });
+      return res.status(400).json({
+        error: "Código de confirmação incorreto. Verifique o código com o cliente.",
+      });
+    }
+
+    // CHK-05 & CHK-07: status, timestamp e log de check-out na mesma transação
+    const completedAt = new Date();
+    const transitioned = await applyStatusTransitionWithAudit(
+      appointment.id,
+      "in_progress",
+      { status: "completed", completed_at: completedAt },
+      { user_id: authReq.user.id, action: "check_out", metadata: { completed_at: completedAt } },
+    );
+    if (!transitioned) {
+      return res.status(409).json({
+        error: "Este serviço já foi concluído anteriormente.",
+      });
+    }
+    appointment.status = "completed";
+    appointment.completed_at = completedAt;
+
+    const apptData: any = appointment;
+    const clientUser = apptData.Client?.User;
+    const profUser = apptData.Professional?.User;
+    const service = apptData.Service;
+
+    if (clientUser) {
+      await NotificationModel.create({
+        user_id: clientUser.id,
+        title: "Serviço Concluído! 🎉",
+        message: `O serviço '${service?.title || ""}' foi finalizado com sucesso por ${profUser?.name || ""}.`,
+        notification_type: "appointment",
+        related_entity_id: appointment.id,
+        is_read: false,
+      });
+
+      emitAppointmentStatusUpdate(clientUser.id, {
+        appointment_id: appointment.id,
+        status: "completed",
+        session_ids: [],
+        message: `Serviço concluído por ${profUser?.name || ""}.`,
+        payment_status: appointment.payment_intent_id ? "paid" : "pending",
+        payment_pending: !appointment.payment_intent_id,
+        paid: !!appointment.payment_intent_id,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    const apptJson = appointment.toJSON() as any;
+
+    logger.info("Appointment finalizado com sucesso (check-out)", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Check-out realizado com sucesso! Atendimento concluído.",
+      appointment: apptJson,
+    });
+  } catch (error: any) {
+    logError("Erro ao finalizar serviço", error, { paramId });
+    res.status(500).json({ error: "Erro ao finalizar serviço" });
+  }
+};
+
+export const getAppointmentAuditTrail = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+
+  if (!authReq.user) {
+    return res.status(401).json({ error: "Usuário não autenticado" });
+  }
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client" },
+        { model: ProfessionalModel, as: "Professional" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const clientUserId = (appointment as any).Client?.user_id;
+    const profUserId = (appointment as any).Professional?.user_id;
+    const currentUserId = authReq.user.id;
+
+    if (currentUserId !== clientUserId && currentUserId !== profUserId) {
+      return res.status(403).json({ error: "Acesso negado aos logs deste agendamento." });
+    }
+
+    const logs = await AppointmentAuditLogModel.findAll({
+      where: { appointment_id: appointment.id },
+      include: [
+        {
+          model: UserModel,
+          as: "User",
+          attributes: ["id", "name", "email", "avatar_uri"],
+        },
+      ],
+      order: [["created_at", "ASC"]],
+    });
+
+    res.json({
+      success: true,
+      appointment_id: appointment.id,
+      audit_trail: logs,
+    });
+  } catch (error: any) {
+    logError("Erro ao buscar logs de auditoria do agendamento", error, { paramId });
+    res.status(500).json({ error: "Erro ao buscar logs de auditoria" });
   }
 };
 
@@ -1087,9 +1353,6 @@ export const getAppointmentById = async (req: Request, res: Response) => {
     }
 
     const json = appointment.toJSON() as any;
-    if (currentUserId === profUserId) {
-      delete json.verification_code;
-    }
 
     res.json(json);
   } catch (error: any) {

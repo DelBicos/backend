@@ -1,6 +1,7 @@
-import { DataTypes, Model, Optional, Transaction } from "sequelize";
+import { DataTypes, Model, Op, Optional, Transaction } from "sequelize";
 import { sequelize } from "../config/database";
 import { customAlphabet } from 'nanoid';
+import { generateConfirmationCode } from "../utils/confirmationCode.util";
 
 const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 export const generateShortId = customAlphabet(alphabet, 6);
@@ -199,6 +200,7 @@ AppointmentModel.init(
     timestamps: true,
     hooks: {
       beforeValidate: async (appointment: AppointmentModel, options) => {
+        const tx = (options as { transaction?: Transaction }).transaction;
         if (!appointment.short_id) {
           let shortId: string;
           let attempts = 0;
@@ -209,9 +211,36 @@ AppointmentModel.init(
             if (attempts > 100) {
               throw new Error('Não foi possível gerar short_id único após 100 tentativas');
             }
-            const existing = await AppointmentModel.findOne({ where: { short_id: shortId }, transaction: (options as { transaction?: Transaction }).transaction });
+            const existing = await AppointmentModel.findOne({ where: { short_id: shortId }, transaction: tx });
             if (!existing) {
               appointment.short_id = shortId;
+              unique = true;
+            }
+          }
+        }
+
+        // O código só precisa ser único entre agendamentos ativos: são apenas 67.600
+        // combinações (AB-12), e checar o histórico inteiro esgotaria o espaço com o tempo.
+        if (!appointment.verification_code) {
+          let code: string;
+          let attempts = 0;
+          let unique = false;
+          while (!unique) {
+            code = generateConfirmationCode();
+            attempts++;
+            if (attempts > 100) {
+              throw new Error('Não foi possível gerar verification_code único após 100 tentativas');
+            }
+            const existing = await AppointmentModel.findOne({
+              where: {
+                verification_code: code,
+                status: { [Op.notIn]: ["completed", "canceled"] },
+              },
+              attributes: ["id"],
+              transaction: tx,
+            });
+            if (!existing) {
+              appointment.verification_code = code;
               unique = true;
             }
           }

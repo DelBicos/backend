@@ -9,6 +9,8 @@ import {
   markInTransitAppointment,
   markArrivedAppointment,
   startServiceAppointment,
+  completeServiceAppointment,
+  getAppointmentAuditTrail,
   getAppointmentById,
   cancelClientAppointment,
 } from "../controllers/appointment.controller";
@@ -515,6 +517,8 @@ router.get("/:id/receipt", authMiddleware, getAppointmentInvoice);
 router.post("/:id/in-transit", authMiddleware, markInTransitAppointment);
 router.post("/:id/arrived", authMiddleware, markArrivedAppointment);
 router.post("/:id/start-service", authMiddleware, startServiceAppointment);
+router.post("/:id/complete-service", authMiddleware, completeServiceAppointment);
+router.get("/:id/audit-trail", authMiddleware, getAppointmentAuditTrail);
 
 /**
  * @swagger
