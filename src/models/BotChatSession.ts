@@ -67,8 +67,14 @@ export interface BotDayProfessionalOption {
 }
 
 export interface BotSessionContext {
+  appointmentQuery?: {
+    statuses: Array<"pending" | "confirmed" | "completed" | "canceled">;
+    offset: number;
+    hasMore: boolean;
+  };
   intent?: string;
   pendingAction?: BotPendingAction;
+  cancellationChallengeId?: string;
   pendingPrompt?: BotPendingPrompt;
   timeZone?: string;
   serviceId?: number;
@@ -95,6 +101,10 @@ export interface BotSessionContext {
   appointmentId?: number;
   appointmentStatus?: "pending" | "confirmed" | "completed" | "canceled";
   appointmentPaid?: boolean;
+  bookingDetailsStep?: "ADDRESS" | "REVIEW";
+  addressId?: number;
+  addressLabel?: string;
+  addressOptions?: Array<{ id: number; label: string }>;
   suggestedSlots?: string[];
   serviceOptions?: string[];
   serviceOptionsData?: BotServiceOption[];

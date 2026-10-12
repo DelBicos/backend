@@ -2,14 +2,16 @@ jest.mock("../../../../models/Client", () => ({
   ClientModel: { findOne: jest.fn() },
 }));
 jest.mock("../../../../models/Appointment", () => ({
-  AppointmentModel: { findByPk: jest.fn() },
+  AppointmentModel: { findByPk: jest.fn(), findOne: jest.fn() },
 }));
 jest.mock("../../../../models/Service", () => ({ ServiceModel: {} }));
 jest.mock("../../../../models/Professional", () => ({ ProfessionalModel: {} }));
 jest.mock("../../../../models/User", () => ({ UserModel: {} }));
+import type { NluResult } from "../../../nlu.service";
+import type { BotChatSessionModel } from "../../../../models/BotChatSession";
 import { ClientModel } from "../../../../models/Client";
 import { AppointmentModel } from "../../../../models/Appointment";
-import { AguardandoIdAgendamentoState } from "../AguardandoIdAgendamentoState";
+import { AguardandoIdAgendamentoState } from "../AguardandoIdAgendamentoState.service";
 
 it("recompõe o contexto, limpa escolhas antigas e mostra o dia de São Paulo na virada UTC", async () => {
   (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 3 });
@@ -28,7 +30,7 @@ it("recompõe o contexto, limpa escolhas antigas e mostra o dia de São Paulo na
   });
   const result = await new AguardandoIdAgendamentoState().handle(
     "8",
-    { entities: {} } as any,
+    { intent: "FALLBACK", entities: {}, confidence: 1 } as NluResult,
     {
       context: {
         pendingAction: "RESCHEDULE",
@@ -36,7 +38,7 @@ it("recompõe o contexto, limpa escolhas antigas e mostra o dia de São Paulo na
         newDate: "2099-02-02",
         newTime: "10:00",
       },
-    } as any,
+    } as BotChatSessionModel,
     10,
   );
   expect(result.contextUpdate).toMatchObject({

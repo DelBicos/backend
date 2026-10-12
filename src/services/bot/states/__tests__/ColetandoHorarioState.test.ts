@@ -12,7 +12,7 @@ jest.mock("../../../availability.service", () => ({
 import type { BotChatSessionModel } from "../../../../models/BotChatSession";
 import { ServiceModel } from "../../../../models/Service";
 import { getAvailableSlots } from "../../../availability.service";
-import { ColetandoHorarioState } from "../ColetandoHorarioState";
+import { ColetandoHorarioState } from "../ColetandoHorarioState.service";
 
 function futureDate(daysAhead = 5): string {
   const date = new Date();

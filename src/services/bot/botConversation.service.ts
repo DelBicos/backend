@@ -1,18 +1,20 @@
-import { BotSessionContext, BotSessionState } from "../models/BotChatSession";
-import { analyzeMessage, isRestartCommand } from "./nlu.service";
-import { BotSessionManager } from "./bot/BotSessionManager";
-import { BotMessageRouter } from "./bot/BotMessageRouter";
-import { BotState } from "../constants/botStates";
-import { logError } from "../utils/logger";
+import { BotSessionContext, BotSessionState } from "../../models/BotChatSession";
+import { analyzeMessage, isRestartCommand, NluResult } from "../nlu.service";
+import { BotSessionManager } from "./BotSessionManager";
+import { BotMessageRouter } from "./BotMessageRouter.service";
+import { BotState } from "../../constants/botStates";
+import { logError } from "../../utils/logger";
 import {
   parsePortugueseDate,
   parseTimeFromText,
   parseTimePeriodFromText,
   DEFAULT_BOT_TIME_ZONE,
-} from "../utils/date.util";
-import { buildGreetingReply } from "./bot/greetingReply";
-import { isAvailableTimesQuestion } from "./bot/contextualMessage";
-import { normalizeText } from "../utils/nlp.util";
+} from "../../utils/date.util";
+import { buildGreetingReply } from "./greetingReply.rules";
+import { isAvailableTimesQuestion } from "./contextualMessage";
+import { normalizeText } from "../../utils/nlp.util";
+import { parseAppointmentQuery } from "./appointmentQuery.rules";
+import { parseReschedulePreservation } from "./rescheduleInput.rules";
 
 export interface BotMessageResponse {
   sessionId: number;
@@ -167,16 +169,29 @@ export async function processMessage(
   // 2. Entradas estruturadas (sim/não, número, data e hora) são tratadas por
   // regras dentro de analyzeMessage. As demais podem interromper o fluxo atual
   // por uma intenção explícita, mesmo durante um agendamento pendente.
-  const nlu = await analyzeMessage(
+  const verifyingCancellation = Boolean(ctx.cancellationChallengeId && ctx.pendingAction === "CANCEL");
+  const answeringCancellation = session.state === BotState.CONFIRMACAO && ctx.pendingAction === "CANCEL" &&
+    /^(?:sim(?:,?\s+(?:confirmar|confirmo))?|s|yes|confirmar|confirmo|confirmar cancelamento|ok|pode|vamos|n[aã]o(?:,?\s+(?:cancelar|voltar))?|desistir|voltar)[.!]*$/i.test(trimmedMessage);
+  const nlu: NluResult = verifyingCancellation || answeringCancellation ? { intent: "FALLBACK", entities: {}, confidence: 1 } : await analyzeMessage(
     trimmedMessage,
     ctx as Record<string, unknown>,
   );
+  const appointmentQuery = parseAppointmentQuery(
+    trimmedMessage,
+    session.state === BotState.INICIO ? ctx.appointmentQuery : undefined,
+  );
+  if (appointmentQuery) {
+    // Uma consulta explícita de status não pode virar uma ação de cancelamento
+    // por uma classificação aproximada do NLU.
+    nlu.intent = "CONSULTAR";
+    nlu.entities = {};
+  }
 
   // Persiste mensagem do usuário
   await BotSessionManager.createMessage(
     session.id,
     "user",
-    trimmedMessage,
+    verifyingCancellation && /\d{6}/.test(trimmedMessage) ? "[Código de confirmação informado]" : trimmedMessage,
     nlu.intent,
     {
       ...nlu.entities,
@@ -195,12 +210,27 @@ export async function processMessage(
     (Boolean(parseTimeFromText(trimmedMessage)) ||
       (!isExplicitGreeting &&
         Boolean(parseTimePeriodFromText(trimmedMessage))));
+  // Respostas faladas como “segunda opção” ou “sim”
+  // pertencem à pergunta atual, mesmo quando o NLU infere outra intenção.
+  const isCollectingBookingDetails =
+    (session.state === BotState.COLETANDO_ENDERECO ||
+      (session.state === BotState.CONFIRMACAO &&
+        ctx.bookingDetailsStep === "ADDRESS")) &&
+    (ctx.pendingAction ?? "CREATE") === "CREATE";
+  const isContextualBookingAnswer = !appointmentQuery && !isExplicitGreeting && (
+    (isCollectingBookingDetails &&
+      !/\b(?:agendar|reagendar|remarcar|cancelar|consultar|alterar)\b.*\b(?:agendamento|reserva|servico)s?\b/.test(normalizedMessage)) ||
+    (session.state === BotState.CONFIRMACAO && ctx.pendingAction === "CREATE" &&
+      (ctx.bookingDetailsStep === "REVIEW"
+        ? /^(?:sim|s|yes|confirmar|confirmo|confirmado|ok|pode|vamos|n[aã]o|nao|no|cancelar|desistir|voltar)$/.test(normalizedMessage)
+        : /^(?:trocar|mudar|outro|alterar)(?: o)? endereco$/.test(normalizedMessage)))
+  );
 
   // Saudações são globais: elas nunca devem ser interpretadas como nome de
   // serviço nem apagar um agendamento parcialmente preenchido. Uma resposta
   // de horário reconhecível, porém, pertence à etapa em andamento mesmo se o
   // classificador confundir "noite" com "boa noite".
-  if (nlu.intent === "SAUDACAO" && !isContextualTimeAnswer) {
+  if (nlu.intent === "SAUDACAO" && !isContextualTimeAnswer && !isContextualBookingAnswer) {
     const replyText = buildGreetingReply(session.state, ctx);
     await BotSessionManager.saveSession(session, session.state, ctx);
     await BotSessionManager.createMessage(session.id, "bot", replyText);
@@ -226,9 +256,14 @@ export async function processMessage(
     ) &&
     Boolean(parsePortugueseDate(trimmedMessage, { timeZone: ctx.timeZone }));
   const isExplicitIntent =
+    // Respostas sobre manter parte da reserva pertencem à remarcação atual.
+    !((session.state === BotState.COLETANDO_DATA || session.state === BotState.COLETANDO_HORARIO) &&
+      !/#|\b(?:id|agendamento)\s+\d+/i.test(trimmedMessage) &&
+      Object.values(parseReschedulePreservation(trimmedMessage, session.state, ctx)).some(Boolean)) &&
     !isContextualAvailabilityQuestion &&
     !isContextualDateAnswer &&
-    !isContextualTimeAnswer &&
+    (!isContextualTimeAnswer || Boolean(appointmentQuery)) &&
+    !isContextualBookingAnswer &&
     ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR"].includes(nlu.intent);
   let shouldRedirectToInicio = false;
   if (isExplicitIntent) {
@@ -239,6 +274,7 @@ export async function processMessage(
         BotState.COLETANDO_HORARIO,
         BotState.SELECIONANDO_PROFISSIONAL,
         BotState.CONFIRMACAO,
+        BotState.COLETANDO_ENDERECO,
       ];
       const isContinuingCurrentBooking =
         ctx.pendingAction === "CREATE" &&
@@ -288,7 +324,9 @@ export async function processMessage(
 
   if (shouldRedirectToInicio) {
     session.state = BotState.INICIO;
-    session.context = {};
+    session.context = appointmentQuery && ctx.appointmentQuery
+      ? { appointmentQuery: ctx.appointmentQuery }
+      : {};
     // Um novo pedido não deve manter o vínculo com o agendamento que estava
     // sendo acompanhado antes da mudança de intenção.
     session.appointment_id = null;
@@ -305,7 +343,7 @@ export async function processMessage(
       userId,
       selectedTimeIso,
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     logError("Bot: erro inesperado no roteamento de mensagem", error, {
       userId,
       sessionId: session.id,

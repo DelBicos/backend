@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { AuthController } from "../controllers/auth.controller";
+import { handleRegister, handleVerifyCode, handleResendCode } from "../controllers/auth.controller";
 
 const authRouter = Router();
 
@@ -121,7 +121,7 @@ const authRouter = Router();
  *         description: Falha ao verificar ou enviar e-mail
  */
 
-authRouter.post("/register", AuthController.handleRegister);
+authRouter.post("/register", handleRegister);
 
 /**
  * @swagger
@@ -155,7 +155,7 @@ authRouter.post("/register", AuthController.handleRegister);
  *         description: Falha interna ao criar usuario
  */
 
-authRouter.post("/verify", AuthController.handleVerifyCode);
+authRouter.post("/verify", handleVerifyCode);
 
 /**
  * @swagger
@@ -183,6 +183,6 @@ authRouter.post("/verify", AuthController.handleVerifyCode);
  *         description: Falha no envio de e-mail
  */
 
-authRouter.post("/resend", AuthController.handleResendCode);
+authRouter.post("/resend", handleResendCode);
 
 export default authRouter;

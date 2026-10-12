@@ -1,4 +1,5 @@
 import { ClientModel } from "../../../models/Client";
+import { AddressModel } from "../../../models/Address";
 import { ProfessionalModel } from "../../../models/Professional";
 import { ServiceModel } from "../../../models/Service";
 import { AppointmentModel } from "../../../models/Appointment";
@@ -13,6 +14,8 @@ import { getAvailableSlots } from "../../availability.service";
 import { withProfessionalScheduleLock } from "../../appointmentSchedule.service";
 import { ensureChatRoomForAppointment } from "../../../utils/chatRoom";
 import logger from "../../../utils/logger";
+
+export class BotAddressValidationError extends Error {}
 
 export function resolveBotAppointmentStart(
   date: string,
@@ -81,10 +84,21 @@ export async function createBotAppointment(
   );
   const endTime = new Date(startTime.getTime() + service.duration * 60000);
 
-  const addressId = clientRecord.main_address_id ?? 1; // fallback
+  const addressId = ctx.addressId;
+  if (!addressId || !Number.isInteger(addressId)) {
+    throw new BotAddressValidationError("Escolha o endereço do atendimento antes de confirmar.");
+  }
   const appointment = await withProfessionalScheduleLock(
     professionalId,
     async (transaction) => {
+      const address = await AddressModel.findOne({
+        where: { id: addressId, user_id: userId, active: true },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!address) {
+        throw new BotAddressValidationError("O endereço escolhido não está mais disponível. Escolha outro endereço.");
+      }
       const currentService = await ServiceModel.findByPk(serviceId, {
         transaction,
       });
@@ -188,7 +202,6 @@ export async function rescheduleBotAppointment(
   const time = (ctx.newTime ?? ctx.time)?.trim();
   if (!date || !time) throw new Error("Informe a nova data e horário");
   const start = resolveBotAppointmentStart(date, time, selectedTimeIso);
-  let changed = false;
   const appointment = await withProfessionalScheduleLock(
     original.professional_id,
     async (transaction) => {
@@ -244,35 +257,24 @@ export async function rescheduleBotAppointment(
       current.start_time = start;
       current.end_time = new Date(start.getTime() + duration * 60000);
       current.status = "pending"; // Nova data requer novo aceite; pagamento permanece vinculado.
+      const professional = await ProfessionalModel.findByPk(current.professional_id, { transaction });
+      if (!professional) throw new Error("Profissional do agendamento não encontrado");
       await current.save({ transaction });
-      changed = true;
+      // Reserva e avisos são atômicos: falha na notificação impede a remarcação.
+      await NotificationModel.bulkCreate(
+        [...new Set([userId, professional.user_id])].map((id) => ({
+          user_id: id,
+          title: "Agendamento Remarcado",
+          message: `Agendamento ${current.short_id || current.id} remarcado para ${date} às ${time}. Aguardando aceite do profissional.`,
+          notification_type: "appointment",
+          related_entity_id: current.id,
+          is_read: false,
+        })),
+        { transaction },
+      );
       return current;
     },
   );
-  if (changed) {
-    try {
-      const professional = await ProfessionalModel.findByPk(
-        appointment.professional_id,
-      );
-      const recipients = [userId, professional?.user_id].filter(
-        (id): id is number => id !== undefined,
-      );
-      await NotificationModel.bulkCreate(
-        recipients.map((id) => ({
-          user_id: id,
-          title: "Agendamento Remarcado",
-          message: `Agendamento ${appointment.short_id || appointment.id} remarcado para ${date} às ${time}. Aguardando aceite do profissional.`,
-          notification_type: "appointment",
-          related_entity_id: appointment.id,
-          is_read: false,
-        })),
-      );
-    } catch {
-      logger.warn("Bot: falha ao notificar remarcação", {
-        appointmentId: appointment.id,
-      });
-    }
-  }
   return appointment;
 }
 
@@ -301,6 +303,17 @@ export async function cancelBotAppointment(
         throw new Error("Não é possível cancelar um agendamento já concluído");
       if (appointment.status === "canceled")
         throw new Error("Este agendamento já está cancelado");
+      const professional = await ProfessionalModel.findByPk(appointment.professional_id, { transaction });
+      if (!professional) throw new Error("Profissional do agendamento não encontrado");
+      // Status e notificação são persistidos juntos: uma falha mantém a reserva ativa.
+      await NotificationModel.create({
+        user_id: professional.user_id,
+        title: "Agendamento cancelado",
+        message: `O cliente cancelou o agendamento #${appointment.short_id || appointment.id}.`,
+        notification_type: "appointment",
+        related_entity_id: appointment.id,
+        is_read: false,
+      }, { transaction });
       appointment.status = "canceled";
       await appointment.save({ transaction });
     },

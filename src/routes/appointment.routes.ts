@@ -4,14 +4,79 @@ import {
   confirmAppointment,
   reviewAppointment,
   getAppointmentInvoice,
-  updateAppointmentStatus,
   createAppointment,
-  cancelClientAppointment,
 } from "../controllers/appointment.controller";
 import authMiddleware from "../middlewares/auth.middleware";
+import { requestCancellation, confirmCancellation, abandonCancellation, updateVerifiedAppointmentStatus } from "../controllers/cancellationVerification.controller";
 
 const router = Router();
-router.post("/:id/cancel", authMiddleware, cancelClientAppointment);
+/**
+ * @swagger
+ * /appointments/{id}/cancel/request:
+ *   post:
+ *     summary: Envia código de cancelamento ao e-mail do participante autenticado
+ *     description: Código válido por 10 minutos, até 5 tentativas e 5 envios por hora. Reenvio após 60 segundos invalida o código anterior.
+ *     tags: [Appointments]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Retorna challengeId, email mascarado, expiresAt e resendAfterSeconds. Reserva permanece ativa.
+ *       401:
+ *         description: Não autenticado
+ *       404:
+ *         description: Agendamento não encontrado ou de outro participante
+ *       409:
+ *         description: Agendamento não pode ser cancelado
+ *       429:
+ *         description: Limite de envios ou tentativas atingido
+ *       503:
+ *         description: Envio indisponível, sem cancelamento
+ * /appointments/{id}/cancel:
+ *   post:
+ *     summary: Valida código, cancela e notifica o outro participante
+ *     tags: [Appointments]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [challengeId, code]
+ *             properties:
+ *               challengeId: { type: string, format: uuid }
+ *               code: { type: string, pattern: '^[0-9]{6}$' }
+ *     responses:
+ *       200:
+ *         description: Cancelamento confirmado
+ *       400:
+ *         description: Código ausente, inválido, expirado ou já utilizado
+ *       429:
+ *         description: Limite de tentativas atingido
+ * /appointments/{id}/cancel/abandon:
+ *   post:
+ *     summary: Invalida o challengeId informado no corpo sem cancelar o agendamento
+ *     tags: [Appointments]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       204:
+ *         description: Verificação descartada
+ */
+router.post("/:id/cancel/request", authMiddleware, requestCancellation);
+router.post("/:id/cancel/abandon", authMiddleware, abandonCancellation);
+router.post("/:id/cancel", authMiddleware, confirmCancellation);
 
 /**
  * @swagger
@@ -388,6 +453,7 @@ router.post("/:id/confirm", authMiddleware, confirmAppointment);
  * /appointments/{id}:
  *   put:
  *     summary: Atualiza o status de um agendamento pendente (Aceitar/Recusar)
+ *     description: Para status canceled, exige também challengeId e code obtidos no fluxo de cancelamento por e-mail.
  *     tags: [Appointments]
  *     parameters:
  *       - in: path
@@ -417,7 +483,7 @@ router.post("/:id/confirm", authMiddleware, confirmAppointment);
  *       500:
  *         description: Erro interno do servidor
  */
-router.put("/:id", authMiddleware, updateAppointmentStatus);
+router.put("/:id", authMiddleware, updateVerifiedAppointmentStatus);
 
 
 /**

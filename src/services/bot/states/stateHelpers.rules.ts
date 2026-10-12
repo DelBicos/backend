@@ -10,6 +10,7 @@ export function buildConfirmationResponse(
   ctxUpdate: Partial<BotSessionContext>,
 ): HandlerResult {
   const isAlterar = ctx.pendingAction === "RESCHEDULE";
+  const isFinalReview = ctxUpdate.bookingDetailsStep === "REVIEW";
   const price = ctx.servicePrice != null ? formatCurrency(ctx.servicePrice, undefined) : "";
   const rating =
     ctx.professionalRatingsCount && ctx.professionalRating != null
@@ -39,11 +40,21 @@ export function buildConfirmationResponse(
       `Horário: ${time}\n` +
       (ctx.serviceDuration ? `Duração: ${ctx.serviceDuration} minutos\n` : "") +
       (price ? `Valor: ${price}\n` : "") +
+      (isFinalReview && ctx.addressLabel ? `Endereço: ${ctx.addressLabel}\n` : "") +
       oldInfo +
+      (isFinalReview
+        ? "Status: ficará pendente até o profissional responder.\n"
+        : "") +
       `\nConfirma? Responda com *sim* para confirmar ou *não* para cancelar.`,
     nextState: "CONFIRMACAO",
     contextUpdate: {
       ...ctxUpdate,
+      ...(!isAlterar && !isFinalReview ? {
+        bookingDetailsStep: undefined,
+        addressId: undefined,
+        addressLabel: undefined,
+        addressOptions: undefined,
+      } : {}),
       serviceOptions: ["Sim", "Não"],
       serviceOptionsData: undefined,
     },

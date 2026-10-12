@@ -78,6 +78,11 @@ services:
       - SENDGRID_API_KEY=${SENDGRID_API_KEY:-sk_API_KEY}
       - SENDER_EMAIL_VERIFICADO=${SENDER_EMAIL_VERIFICADO:-deliverydebicos@gmail.com}
       - LAMBDA_FUNCTION_URL=${LAMBDA_FUNCTION_URL:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - EMAIL_FROM=${EMAIL_FROM:-}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-sk_API_KEY}
       - MONGODB_URI=mongodb://mongo:27017/logs_db
       - MONGODB_CHAT_URI=mongodb://mongo:27017/delbicos_chat
