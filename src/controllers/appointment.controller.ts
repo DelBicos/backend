@@ -25,6 +25,7 @@ import {
   AppointmentAuditLogModel,
   AuditLogAction,
 } from "../models/AppointmentAuditLog";
+import { AdminModel } from "../models/Admin";
 import { confirmationCodesMatch } from "../utils/confirmationCode.util";
 import { sequelize } from "../config/database";
 
@@ -1261,8 +1262,12 @@ export const getAppointmentAuditTrail = async (req: Request, res: Response) => {
     const clientUserId = (appointment as any).Client?.user_id;
     const profUserId = (appointment as any).Professional?.user_id;
     const currentUserId = authReq.user.id;
+    const isUserAdmin =
+      Boolean(authReq.user.admin) ||
+      authReq.user.role === "admin" ||
+      Boolean(await AdminModel.findOne({ where: { user_id: currentUserId } }));
 
-    if (currentUserId !== clientUserId && currentUserId !== profUserId) {
+    if (!isUserAdmin && currentUserId !== clientUserId && currentUserId !== profUserId) {
       return res.status(403).json({ error: "Acesso negado aos logs deste agendamento." });
     }
 

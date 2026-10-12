@@ -21,6 +21,7 @@ import { AddressModel } from "../../models/Address";
 import { NotificationModel } from "../../models/Notification";
 import { ensureChatRoomForAppointment } from "../../utils/chatRoom";
 import { AppointmentAuditLogModel } from "../../models/AppointmentAuditLog";
+import { AdminModel } from "../../models/Admin";
 
 jest.mock("../../config/database", () => {
   const { Sequelize } = require("sequelize");
@@ -43,6 +44,7 @@ jest.mock("../../models/Address");
 jest.mock("../../models/Service");
 jest.mock("../../models/Subcategory");
 jest.mock("../../models/Notification");
+jest.mock("../../models/Admin");
 jest.mock("../../models/AppointmentAuditLog", () => ({
   AppointmentAuditLogModel: {
     create: jest.fn().mockResolvedValue({}),
@@ -1013,6 +1015,7 @@ describe("getAppointmentAuditTrail (CHK-05 e CHK-07)", () => {
     statusMock = jest.fn().mockReturnValue({ json: jsonMock });
     req = { user: { id: 1 }, params: { id: "100" } };
     res = { status: statusMock, json: jsonMock };
+    (AdminModel.findOne as jest.Mock).mockResolvedValue(null);
   });
 
   it("deve retornar 403 se usuário não fizer parte do agendamento", async () => {
@@ -1030,6 +1033,37 @@ describe("getAppointmentAuditTrail (CHK-05 e CHK-07)", () => {
 
   it("deve retornar os registros de auditoria ordenados para o cliente (CHK-07)", async () => {
     req.user = { id: 1 };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      Client: { user_id: 1 },
+      Professional: { user_id: 2 },
+    });
+
+    await getAppointmentAuditTrail(req as Request, res as Response);
+
+    const result = jsonMock.mock.calls[0][0];
+    expect(result.success).toBe(true);
+    expect(result).toHaveProperty("audit_trail");
+  });
+
+  it("deve permitir que administradores acessem os registros de auditoria mesmo sem ser cliente ou profissional", async () => {
+    req.user = { id: 99, role: "admin" };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      Client: { user_id: 1 },
+      Professional: { user_id: 2 },
+    });
+
+    await getAppointmentAuditTrail(req as Request, res as Response);
+
+    const result = jsonMock.mock.calls[0][0];
+    expect(result.success).toBe(true);
+    expect(result).toHaveProperty("audit_trail");
+  });
+
+  it("deve permitir acesso se o registro de admin for encontrado no banco de dados", async () => {
+    req.user = { id: 99 };
+    (AdminModel.findOne as jest.Mock).mockResolvedValue({ id: 1, user_id: 99 });
     (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
       id: 100,
       Client: { user_id: 1 },

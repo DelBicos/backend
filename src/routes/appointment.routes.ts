@@ -514,12 +514,6 @@ router.post("/:id/review", authMiddleware, reviewAppointment);
  *         description: Erro interno do servidor
  */
 router.get("/:id/receipt", authMiddleware, getAppointmentInvoice);
-router.post("/:id/in-transit", authMiddleware, markInTransitAppointment);
-router.post("/:id/arrived", authMiddleware, markArrivedAppointment);
-router.post("/:id/start-service", authMiddleware, startServiceAppointment);
-router.post("/:id/complete-service", authMiddleware, completeServiceAppointment);
-router.get("/:id/audit-trail", authMiddleware, getAppointmentAuditTrail);
-
 /**
  * @swagger
  * /appointments/{id}/in-transit:
@@ -538,10 +532,263 @@ router.get("/:id/audit-trail", authMiddleware, getAppointmentAuditTrail);
  *     responses:
  *       200:
  *         description: Status do agendamento atualizado para em deslocamento
+ *       400:
+ *         description: Transição de status inválida
  *       403:
  *         description: Usuário não é o profissional responsável
  *       404:
  *         description: Agendamento não encontrado
+ *       500:
+ *         description: Erro interno do servidor
+ */
+router.post("/:id/in-transit", authMiddleware, markInTransitAppointment);
+
+/**
+ * @swagger
+ * /appointments/{id}/arrived:
+ *   post:
+ *     summary: Confirma a chegada do profissional no local e gera código de confirmação (AB-12)
+ *     tags: [Appointments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID ou short_id do agendamento
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               latitude:
+ *                 type: number
+ *                 description: Latitude opcional do GPS do profissional
+ *               longitude:
+ *                 type: number
+ *                 description: Longitude opcional do GPS do profissional
+ *     responses:
+ *       200:
+ *         description: Chegada confirmada com sucesso e código de confirmação gerado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 appointment_id:
+ *                   type: integer
+ *                 status:
+ *                   type: string
+ *                 verification_code:
+ *                   type: string
+ *                   example: "AB-12"
+ *       400:
+ *         description: Transição de status inválida
+ *       403:
+ *         description: Usuário não é o profissional responsável
+ *       404:
+ *         description: Agendamento não encontrado
+ *       500:
+ *         description: Erro interno do servidor
+ */
+router.post("/:id/arrived", authMiddleware, markArrivedAppointment);
+
+/**
+ * @swagger
+ * /appointments/{id}/start-service:
+ *   post:
+ *     summary: Inicia o serviço (check-in) mediante validação do código de confirmação de 4 caracteres (AB-12)
+ *     tags: [Appointments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID ou short_id do agendamento
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - code
+ *             properties:
+ *               code:
+ *                 type: string
+ *                 description: Código de confirmação fornecido pelo cliente (formato AB-12)
+ *                 example: "AB-12"
+ *     responses:
+ *       200:
+ *         description: Serviço iniciado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 appointment_id:
+ *                   type: integer
+ *                 status:
+ *                   type: string
+ *                   example: "in_progress"
+ *       400:
+ *         description: Código incorreto, ausente ou status inválido
+ *       403:
+ *         description: Acesso não autorizado (usuário não é o profissional responsável)
+ *       404:
+ *         description: Agendamento não encontrado
+ *       500:
+ *         description: Erro interno do servidor
+ */
+router.post("/:id/start-service", authMiddleware, startServiceAppointment);
+
+/**
+ * @swagger
+ * /appointments/{id}/complete-service:
+ *   post:
+ *     summary: Finaliza o serviço (check-out) mediante validação do código de confirmação de 4 caracteres (AB-12)
+ *     tags: [Appointments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID ou short_id do agendamento
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - code
+ *             properties:
+ *               code:
+ *                 type: string
+ *                 description: Código de confirmação fornecido pelo cliente (formato AB-12)
+ *                 example: "AB-12"
+ *     responses:
+ *       200:
+ *         description: Serviço finalizado com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 appointment_id:
+ *                   type: integer
+ *                 status:
+ *                   type: string
+ *                   example: "completed"
+ *       400:
+ *         description: Código incorreto, ausente ou status inválido
+ *       403:
+ *         description: Acesso não autorizado (usuário não é o profissional responsável)
+ *       404:
+ *         description: Agendamento não encontrado
+ *       500:
+ *         description: Erro interno do servidor
+ */
+router.post("/:id/complete-service", authMiddleware, completeServiceAppointment);
+
+/**
+ * @swagger
+ * /appointments/{id}/audit-trail:
+ *   get:
+ *     summary: Retorna a trilha de auditoria completa dos eventos do agendamento (CHK-05 e CHK-07)
+ *     tags: [Appointments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID ou short_id do agendamento
+ *     responses:
+ *       200:
+ *         description: Trilha de auditoria retornada com sucesso
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 appointment_id:
+ *                   type: integer
+ *                 audit_trail:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                       appointment_id:
+ *                         type: integer
+ *                       user_id:
+ *                         type: integer
+ *                       action:
+ *                         type: string
+ *                       from_status:
+ *                         type: string
+ *                       to_status:
+ *                         type: string
+ *                       metadata:
+ *                         type: string
+ *                       created_at:
+ *                         type: string
+ *                         format: date-time
+ *       401:
+ *         description: Usuário não autenticado
+ *       403:
+ *         description: Acesso negado aos logs deste agendamento
+ *       404:
+ *         description: Agendamento não encontrado
+ *       500:
+ *         description: Erro interno do servidor
+ */
+router.get("/:id/audit-trail", authMiddleware, getAppointmentAuditTrail);
+
+/**
+ * @swagger
+ * /appointments/{id}:
+ *   get:
+ *     summary: Retorna os detalhes de um agendamento pelo ID ou short_id
+ *     tags: [Appointments]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: ID ou short_id do agendamento
+ *     responses:
+ *       200:
+ *         description: Dados detalhados do agendamento
+ *       404:
+ *         description: Agendamento não encontrado
+ *       500:
+ *         description: Erro interno do servidor
  */
 router.get("/:id", authMiddleware, getAppointmentById);
 
