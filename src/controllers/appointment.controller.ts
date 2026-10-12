@@ -22,46 +22,14 @@ import {
   ScheduleConflictError,
 } from "../services/appointmentSchedule.service";
 import {
-  AppointmentAuditLogModel,
-  AuditLogAction,
-} from "../models/AppointmentAuditLog";
-import { AdminModel } from "../models/Admin";
-import { confirmationCodesMatch } from "../utils/confirmationCode.util";
-import { sequelize } from "../config/database";
-
-type AppointmentStatus = AppointmentModel["status"];
-
-/**
- * Aplica a transição de status e grava o log de auditoria na mesma transação.
- * O WHERE com o status anterior impede que duas requisições simultâneas façam a
- * mesma transição: a segunda não afeta nenhuma linha e recebe `false`.
- */
-const applyStatusTransitionWithAudit = (
-  appointmentId: number,
-  fromStatus: AppointmentStatus,
-  changes: { status: AppointmentStatus; started_at?: Date; completed_at?: Date },
-  audit: { user_id: number; action: AuditLogAction; metadata: Record<string, unknown> },
-): Promise<boolean> =>
-  sequelize.transaction(async (transaction) => {
-    const [affected] = await AppointmentModel.update(changes, {
-      where: { id: appointmentId, status: fromStatus },
-      transaction,
-    });
-    if (affected === 0) return false;
-
-    await AppointmentAuditLogModel.create(
-      {
-        appointment_id: appointmentId,
-        user_id: audit.user_id,
-        action: audit.action,
-        from_status: fromStatus,
-        to_status: changes.status,
-        metadata: JSON.stringify(audit.metadata),
-      },
-      { transaction },
-    );
-    return true;
-  });
+  AppointmentWithRelations,
+  processAppointmentArrived,
+  processAppointmentCheckin,
+  processAppointmentCheckout,
+  sendAppointmentStatusNotification,
+  canUserAccessAuditTrail,
+  fetchAppointmentAuditTrail,
+} from "../services/appointmentCheckin.service";
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -498,7 +466,7 @@ export const markInTransitAppointment = async (req: Request, res: Response) => {
     appointment.status = "in_transit";
     await appointment.save();
 
-    const apptData: any = appointment;
+    const apptData = appointment as unknown as AppointmentWithRelations;
     const clientUser = apptData.Client?.User;
     const profUser = apptData.Professional?.User;
     const service = apptData.Service;
@@ -531,7 +499,7 @@ export const markInTransitAppointment = async (req: Request, res: Response) => {
       message: "Status atualizado para em deslocamento com sucesso.",
       appointment,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logError("Erro ao marcar agendamento a caminho", error, { paramId });
     res.status(500).json({ error: "Erro ao atualizar status para em deslocamento" });
   }
@@ -829,22 +797,6 @@ export const getAppointmentInvoice = async (req: Request, res: Response) => {
   }
 };
 
-function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371000;
-  const radLat1 = (lat1 * Math.PI) / 180;
-  const radLat2 = (lat2 * Math.PI) / 180;
-  const deltaLat = ((lat2 - lat1) * Math.PI) / 180;
-  const deltaLon = ((lon2 - lon1) * Math.PI) / 180;
-
-  const a =
-    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-    Math.cos(radLat1) * Math.cos(radLat2) *
-    Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
-}
-
 export const markArrivedAppointment = async (req: Request, res: Response) => {
   const paramId = req.params.id;
   const authReq = req as AuthenticatedRequest;
@@ -883,103 +835,45 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Agendamento não encontrado" });
     }
 
-    const professional = (appointment as any).Professional;
-    if (!authReq.user || professional?.user_id !== authReq.user.id) {
-      return res.status(403).json({
-        error: "Apenas o profissional responsável pode marcar chegada.",
+    const apptData = appointment as unknown as AppointmentWithRelations;
+    const result = await processAppointmentArrived(
+      apptData,
+      authReq.user!.id,
+      Number(latitude),
+      Number(longitude),
+    );
+
+    if (!result.success) {
+      return res.status(result.status).json({
+        error: result.error,
+        distance: result.distance,
+        maxDistance: result.maxDistance,
       });
     }
 
-    if (appointment.status !== "in_transit" && appointment.status !== "arrived") {
-      return res.status(400).json({
-        error: `Não é possível marcar chegada em um agendamento com status '${appointment.status}'`,
-      });
-    }
+    const profName = apptData.Professional?.User?.name || "";
+    await sendAppointmentStatusNotification(
+      apptData,
+      "arrived",
+      "Profissional chegou no local! 🎯",
+      `O profissional ${profName} chegou! Seu código para iniciar o serviço é: ${result.code || ""}`,
+    );
 
-    const address = (appointment as any).Address;
-    if (address && address.lat != null && address.lng != null) {
-      const profLat = Number(latitude);
-      const profLng = Number(longitude);
-      const addrLat = Number(address.lat);
-      const addrLng = Number(address.lng);
+    await syncBotSessionsForAppointmentStatus(appointment);
 
-      const distanceMeters = getDistanceInMeters(profLat, profLng, addrLat, addrLng);
-      const MAX_DISTANCE_METERS = 300;
-
-      if (distanceMeters > MAX_DISTANCE_METERS) {
-        const roundedDistance = Math.round(distanceMeters);
-        return res.status(400).json({
-          error: `Você está a ${roundedDistance}m do endereço do cliente. Aproxime-se (menos de ${MAX_DISTANCE_METERS}m) para confirmar a chegada.`,
-          distance: roundedDistance,
-          maxDistance: MAX_DISTANCE_METERS,
-        });
-      }
-    }
-
-    const previousStatus = appointment.status;
-    const userId = authReq.user.id;
-    appointment.status = "arrived";
-    appointment.arrived_at = new Date();
-
-    // O save() dispara o hook beforeValidate do model, que gera o verification_code
-    // (AB-12) caso o agendamento ainda não tenha um.
-    await sequelize.transaction(async (transaction) => {
-      await appointment.save({ transaction });
-      await AppointmentAuditLogModel.create(
-        {
-          appointment_id: appointment.id,
-          user_id: userId,
-          action: "status_change",
-          from_status: previousStatus,
-          to_status: "arrived",
-          metadata: JSON.stringify({ arrived_at: appointment.arrived_at }),
-        },
-        { transaction },
-      );
-    });
-    const code = appointment.verification_code;
-
-    const apptData: any = appointment;
-    const clientUser = apptData.Client?.User;
-    const profUser = apptData.Professional?.User;
-    const service = apptData.Service;
-
-    if (clientUser) {
-      await NotificationModel.create({
-        user_id: clientUser.id,
-        title: "Profissional chegou no local! 🎯",
-        message: `O profissional ${profUser?.name || ""} chegou! Seu código para iniciar o serviço é: ${code}`,
-        notification_type: "appointment",
-        related_entity_id: appointment.id,
-        is_read: false,
-      });
-
-      await syncBotSessionsForAppointmentStatus(appointment);
-
-      emitAppointmentStatusUpdate(clientUser.id, {
-        appointment_id: appointment.id,
-        status: "arrived",
-        verification_code: code,
-        session_ids: [],
-        message: `Profissional ${profUser?.name || ""} chegou! Passe o código ${code} para ele.`,
-        payment_status: appointment.payment_intent_id ? "paid" : "pending",
-        payment_pending: !appointment.payment_intent_id,
-        paid: !!appointment.payment_intent_id,
-        updated_at: new Date().toISOString(),
-      });
-    }
-
-    const apptJson = appointment.toJSON() as any;
-    apptJson.verification_code = code;
+    const apptJson: Record<string, unknown> = appointment.toJSON
+      ? (appointment.toJSON() as unknown as Record<string, unknown>)
+      : { ...(appointment as unknown as Record<string, unknown>) };
+    apptJson.verification_code = result.code;
 
     logger.info("Appointment marcado como chegou no local", { appointmentId: appointment.id });
     res.json({
       success: true,
       message: "Chegada confirmada com sucesso! Peça o código ao cliente.",
       appointment: apptJson,
-      verification_code: code,
+      verification_code: result.code,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logError("Erro ao marcar chegada no local", error, { paramId });
     res.status(500).json({ error: "Erro ao confirmar chegada no local" });
   }
@@ -1009,101 +903,33 @@ export const startServiceAppointment = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Agendamento não encontrado" });
     }
 
-    const professional = (appointment as any).Professional;
-    if (!authReq.user || professional?.user_id !== authReq.user.id) {
-      return res.status(403).json({
-        error: "Apenas o profissional responsável pode iniciar o serviço.",
-      });
-    }
-
-    // CHK-06: Rejeitar código já utilizado
-    if (appointment.status === "in_progress" || appointment.status === "completed") {
-      await AppointmentAuditLogModel.create({
-        appointment_id: appointment.id,
-        user_id: authReq.user.id,
-        action: "check_in_failed",
-        from_status: appointment.status,
-        to_status: appointment.status,
-        metadata: JSON.stringify({ reason: "already_used", status: appointment.status }),
-      });
-      return res.status(400).json({
-        error: "Este código já foi utilizado para este agendamento.",
-      });
-    }
-
-    if (appointment.status !== "arrived") {
-      return res.status(400).json({
-        error: `Não é possível iniciar o serviço em um agendamento com status '${appointment.status}'. Confirme a chegada primeiro.`,
-      });
-    }
-
-    // CHK-03 & CHK-06: Validação case-sensitive do código e log de tentativa falha
-    if (!confirmationCodesMatch(code, appointment.verification_code)) {
-      await AppointmentAuditLogModel.create({
-        appointment_id: appointment.id,
-        user_id: authReq.user.id,
-        action: "check_in_failed",
-        from_status: appointment.status,
-        to_status: appointment.status,
-        metadata: JSON.stringify({ reason: "invalid_code", code_attempted: String(code || "").slice(0, 10) }),
-      });
-      return res.status(400).json({
-        error: "Código de confirmação incorreto. Verifique o código com o cliente.",
-      });
-    }
-
-    // CHK-05 & CHK-07: status, timestamp e log de check-in na mesma transação
-    const startedAt = new Date();
-    const transitioned = await applyStatusTransitionWithAudit(
-      appointment.id,
-      "arrived",
-      { status: "in_progress", started_at: startedAt },
-      { user_id: authReq.user.id, action: "check_in", metadata: { started_at: startedAt } },
+    const apptData = appointment as unknown as AppointmentWithRelations;
+    const result = await processAppointmentCheckin(
+      apptData,
+      authReq.user!.id,
+      code,
     );
-    if (!transitioned) {
-      return res.status(409).json({
-        error: "Este código já foi utilizado para este agendamento.",
-      });
-    }
-    appointment.status = "in_progress";
-    appointment.started_at = startedAt;
 
-    const apptData: any = appointment;
-    const clientUser = apptData.Client?.User;
-    const profUser = apptData.Professional?.User;
-    const service = apptData.Service;
-
-    if (clientUser) {
-      await NotificationModel.create({
-        user_id: clientUser.id,
-        title: "Serviço Iniciado! 🚀",
-        message: `O serviço '${service?.title || ""}' com ${profUser?.name || ""} foi iniciado com sucesso.`,
-        notification_type: "appointment",
-        related_entity_id: appointment.id,
-        is_read: false,
-      });
-
-      emitAppointmentStatusUpdate(clientUser.id, {
-        appointment_id: appointment.id,
-        status: "in_progress",
-        session_ids: [],
-        message: `Serviço iniciado por ${profUser?.name || ""}.`,
-        payment_status: appointment.payment_intent_id ? "paid" : "pending",
-        payment_pending: !appointment.payment_intent_id,
-        paid: !!appointment.payment_intent_id,
-        updated_at: new Date().toISOString(),
-      });
+    if (!result.success) {
+      return res.status(result.status).json({ error: result.error });
     }
 
-    const apptJson = appointment.toJSON() as any;
+    const profName = apptData.Professional?.User?.name || "";
+    const serviceTitle = apptData.Service?.title || "";
+    await sendAppointmentStatusNotification(
+      apptData,
+      "in_progress",
+      "Serviço Iniciado! 🚀",
+      `O serviço '${serviceTitle}' com ${profName} foi iniciado com sucesso.`,
+    );
 
     logger.info("Appointment iniciado com sucesso (check-in)", { appointmentId: appointment.id });
     res.json({
       success: true,
       message: "Check-in realizado com sucesso! Atendimento iniciado.",
-      appointment: apptJson,
+      appointment: appointment.toJSON(),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logError("Erro ao iniciar serviço", error, { paramId });
     res.status(500).json({ error: "Erro ao iniciar serviço" });
   }
@@ -1133,101 +959,33 @@ export const completeServiceAppointment = async (req: Request, res: Response) =>
       return res.status(404).json({ error: "Agendamento não encontrado" });
     }
 
-    const professional = (appointment as any).Professional;
-    if (!authReq.user || professional?.user_id !== authReq.user.id) {
-      return res.status(403).json({
-        error: "Apenas o profissional responsável pode finalizar o serviço.",
-      });
-    }
-
-    // CHK-06: Rejeitar se já concluído
-    if (appointment.status === "completed") {
-      await AppointmentAuditLogModel.create({
-        appointment_id: appointment.id,
-        user_id: authReq.user.id,
-        action: "check_out_failed",
-        from_status: appointment.status,
-        to_status: appointment.status,
-        metadata: JSON.stringify({ reason: "already_completed" }),
-      });
-      return res.status(400).json({
-        error: "Este serviço já foi concluído anteriormente.",
-      });
-    }
-
-    if (appointment.status !== "in_progress") {
-      return res.status(400).json({
-        error: `Não é possível finalizar um serviço com status '${appointment.status}'. O serviço precisa estar em andamento.`,
-      });
-    }
-
-    // CHK-04 & CHK-06: Validação case-sensitive do código para check-out e log de falha
-    if (!confirmationCodesMatch(code, appointment.verification_code)) {
-      await AppointmentAuditLogModel.create({
-        appointment_id: appointment.id,
-        user_id: authReq.user.id,
-        action: "check_out_failed",
-        from_status: appointment.status,
-        to_status: appointment.status,
-        metadata: JSON.stringify({ reason: "invalid_code", code_attempted: String(code || "").slice(0, 10) }),
-      });
-      return res.status(400).json({
-        error: "Código de confirmação incorreto. Verifique o código com o cliente.",
-      });
-    }
-
-    // CHK-05 & CHK-07: status, timestamp e log de check-out na mesma transação
-    const completedAt = new Date();
-    const transitioned = await applyStatusTransitionWithAudit(
-      appointment.id,
-      "in_progress",
-      { status: "completed", completed_at: completedAt },
-      { user_id: authReq.user.id, action: "check_out", metadata: { completed_at: completedAt } },
+    const apptData = appointment as unknown as AppointmentWithRelations;
+    const result = await processAppointmentCheckout(
+      apptData,
+      authReq.user!.id,
+      code,
     );
-    if (!transitioned) {
-      return res.status(409).json({
-        error: "Este serviço já foi concluído anteriormente.",
-      });
-    }
-    appointment.status = "completed";
-    appointment.completed_at = completedAt;
 
-    const apptData: any = appointment;
-    const clientUser = apptData.Client?.User;
-    const profUser = apptData.Professional?.User;
-    const service = apptData.Service;
-
-    if (clientUser) {
-      await NotificationModel.create({
-        user_id: clientUser.id,
-        title: "Serviço Concluído! 🎉",
-        message: `O serviço '${service?.title || ""}' foi finalizado com sucesso por ${profUser?.name || ""}.`,
-        notification_type: "appointment",
-        related_entity_id: appointment.id,
-        is_read: false,
-      });
-
-      emitAppointmentStatusUpdate(clientUser.id, {
-        appointment_id: appointment.id,
-        status: "completed",
-        session_ids: [],
-        message: `Serviço concluído por ${profUser?.name || ""}.`,
-        payment_status: appointment.payment_intent_id ? "paid" : "pending",
-        payment_pending: !appointment.payment_intent_id,
-        paid: !!appointment.payment_intent_id,
-        updated_at: new Date().toISOString(),
-      });
+    if (!result.success) {
+      return res.status(result.status).json({ error: result.error });
     }
 
-    const apptJson = appointment.toJSON() as any;
+    const profName = apptData.Professional?.User?.name || "";
+    const serviceTitle = apptData.Service?.title || "";
+    await sendAppointmentStatusNotification(
+      apptData,
+      "completed",
+      "Serviço Concluído! 🎉",
+      `O serviço '${serviceTitle}' foi finalizado com sucesso por ${profName}.`,
+    );
 
     logger.info("Appointment finalizado com sucesso (check-out)", { appointmentId: appointment.id });
     res.json({
       success: true,
       message: "Check-out realizado com sucesso! Atendimento concluído.",
-      appointment: apptJson,
+      appointment: appointment.toJSON(),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logError("Erro ao finalizar serviço", error, { paramId });
     res.status(500).json({ error: "Erro ao finalizar serviço" });
   }
@@ -1259,36 +1017,22 @@ export const getAppointmentAuditTrail = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Agendamento não encontrado" });
     }
 
-    const clientUserId = (appointment as any).Client?.user_id;
-    const profUserId = (appointment as any).Professional?.user_id;
-    const currentUserId = authReq.user.id;
-    const isUserAdmin =
-      Boolean(authReq.user.admin) ||
-      authReq.user.role === "admin" ||
-      Boolean(await AdminModel.findOne({ where: { user_id: currentUserId } }));
+    const apptData = appointment as unknown as AppointmentWithRelations;
+    const isAdmin = Boolean(authReq.user.admin) || authReq.user.role === "admin";
+    const hasAccess = await canUserAccessAuditTrail(apptData, authReq.user.id, isAdmin);
 
-    if (!isUserAdmin && currentUserId !== clientUserId && currentUserId !== profUserId) {
+    if (!hasAccess) {
       return res.status(403).json({ error: "Acesso negado aos logs deste agendamento." });
     }
 
-    const logs = await AppointmentAuditLogModel.findAll({
-      where: { appointment_id: appointment.id },
-      include: [
-        {
-          model: UserModel,
-          as: "User",
-          attributes: ["id", "name", "email", "avatar_uri"],
-        },
-      ],
-      order: [["created_at", "ASC"]],
-    });
+    const logs = await fetchAppointmentAuditTrail(appointment.id);
 
     res.json({
       success: true,
       appointment_id: appointment.id,
       audit_trail: logs,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     logError("Erro ao buscar logs de auditoria do agendamento", error, { paramId });
     res.status(500).json({ error: "Erro ao buscar logs de auditoria" });
   }
