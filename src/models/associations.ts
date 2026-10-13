@@ -19,6 +19,7 @@ import { FavoriteModel } from "./Favorite";
 import { ChatRoomModel } from "./ChatRoom";
 import { BotChatSessionModel } from "./BotChatSession";
 import { BotChatMessageModel } from "./BotChatMessage";
+import TicketModel from "./TicketModel";
 
 export function initializeAssociations() {
   // User associations
@@ -336,5 +337,35 @@ export function initializeAssociations() {
   BotChatSessionModel.belongsTo(AppointmentModel, {
     foreignKey: "appointment_id",
     as: "Appointment",
+  });
+
+  TicketModel.belongsTo(UserModel, {
+    foreignKey: "user_id",
+    as: "requester",
+  });
+
+  TicketModel.belongsTo(UserModel, {
+    foreignKey: "admin_id",
+    as: "assignee",
+  });
+
+  TicketModel.belongsTo(AppointmentModel, {
+    foreignKey: "appointment_id",
+    as: "appointment",
+  });
+
+  UserModel.hasMany(TicketModel, {
+    foreignKey: "user_id",
+    as: "openedTickets",
+  });
+
+  UserModel.hasMany(TicketModel, {
+    foreignKey: "admin_id",
+    as: "assignedTickets",
+  });
+
+  AppointmentModel.hasMany(TicketModel, {
+    foreignKey: "appointment_id",
+    as: "tickets",
   });
 }
