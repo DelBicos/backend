@@ -35,6 +35,6 @@ const ticketController = new TicketController();
  *       400: { description: Dados inválidos }
  *       403: { description: Acesso negado }
  */
-router.post("/tickets", authMiddleware, ticketController.create);
+router.post("/", authMiddleware, ticketController.create);
 
 export default router;
