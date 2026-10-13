@@ -7,8 +7,9 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "outDir": "./dist",
-    "rootDir": "./src"
+    "rootDir": ".",
+    "types": ["node", "jest"]
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "ticketCode.ts"],
   "exclude": ["node_modules", "**/*.spec.ts"]
 }
