@@ -19,7 +19,7 @@ import { FavoriteModel } from "./Favorite";
 import { ChatRoomModel } from "./ChatRoom";
 import { BotChatSessionModel } from "./BotChatSession";
 import { BotChatMessageModel } from "./BotChatMessage";
-import TicketModel from "./TicketModel";
+import TicketModel from "./Ticket";
 
 export function initializeAssociations() {
   // User associations
