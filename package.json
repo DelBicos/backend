@@ -40,7 +40,7 @@
     "test": "jest --selectProjects unit",
     "test:unit": "jest --selectProjects unit --no-coverage",
     "test:integration": "jest --selectProjects integration --no-coverage",
-    "test:all": "cross-env NODE_ENV=test jest --no-coverage --forceExit",
+    "test:all": "jest --no-coverage",
     "prepare": "node -e \"import('husky').then(h=>{const m=h.default();if(m)console.log(m)}).catch(()=>{})\"",
     "rules:sync": "node scripts/rules/sync.mjs",
     "rules:check": "node scripts/rules/sync.mjs --check"
