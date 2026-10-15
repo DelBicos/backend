@@ -2,13 +2,20 @@ import fs from "fs";
 import dotenv from "dotenv";
 import mongoose from "mongoose";
 import { Sequelize } from "sequelize";
-import pg from "pg"; // Importação essencial da POC
+import pg from "pg";
 import { connectMongoWithRetry } from "../utils/mongoConnectionRetry";
 
-// override: false — variáveis do Docker Compose têm prioridade sobre o .env copiado
 dotenv.config({ override: false });
 
-/** Ambiente Docker Compose local (Postgres no serviço "postgres"). */
+const environment =
+  process.env.ENVIRONMENT || process.env.NODE_ENV || "development";
+const isTest =
+  environment === "test" || process.env.NODE_ENV === "test";
+
+/* -------------------------------------------------------------------------- */
+/*                              DOCKER / MONGO FIX                             */
+/* -------------------------------------------------------------------------- */
+
 function isRunningInDocker(): boolean {
   return (
     process.env.SEQUELIZE_HOST === "postgres" ||
@@ -17,21 +24,13 @@ function isRunningInDocker(): boolean {
   );
 }
 
-/**
- * Dentro do container, localhost não alcança o Mongo — usa o serviço "mongo".
- * Corrige .env copiado com mongodb://localhost:27017/...
- */
 function normalizeMongoUriForRuntime(uri: string): string {
   if (!isRunningInDocker()) return uri;
 
   try {
     const url = new URL(uri);
     if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-      const previous = url.hostname;
       url.hostname = "mongo";
-      console.warn(
-        `⚠️ MongoDB: host "${previous}" substituído por "mongo" (Docker).`,
-      );
     }
     return url.toString();
   } catch {
@@ -41,128 +40,151 @@ function normalizeMongoUriForRuntime(uri: string): string {
 
 function applyDockerMongoEnvFix(): void {
   if (!isRunningInDocker()) return;
-
   for (const key of ["MONGODB_URI", "MONGODB_CHAT_URI"] as const) {
     const value = process.env[key];
     if (!value) continue;
     const normalized = normalizeMongoUriForRuntime(value);
-    if (normalized !== value) {
-      process.env[key] = normalized;
-    }
+    if (normalized !== value) process.env[key] = normalized;
   }
 }
 
 applyDockerMongoEnvFix();
 
-const environment = process.env.ENVIRONMENT || "development";
+/* -------------------------------------------------------------------------- */
+/*                              DIALECT / SSL                                  */
+/* -------------------------------------------------------------------------- */
+
 const databaseUrl = process.env.DATABASE_URL;
 
-/**
- * Determina o dialect do banco de dados
- */
 const getDialect = (): "mysql" | "postgres" => {
   if (process.env.SEQUELIZE_DIALECT) {
     return process.env.SEQUELIZE_DIALECT as "mysql" | "postgres";
   }
-  return databaseUrl?.includes("postgres") ? "postgres" : "mysql";
+  if (databaseUrl?.includes("postgres")) return "postgres";
+  return "postgres";
 };
 
 /**
- * Retorna as opções de SSL apropriadas (Aprimorado com a lógica da POC)
+ * Detecta se o host é LOCAL (Docker, localhost).
+ * Qualquer host que NÃO esteja nesta lista é considerado remoto → SSL obrigatório.
  */
-const getSSLOptions = (dialect: "mysql" | "postgres") => {
+function isLocalHost(host?: string): boolean {
+  if (!host) return false;
+  const h = host.toLowerCase();
+  return (
+    h === "localhost" ||
+    h === "127.0.0.1" ||
+    h === "::1" ||
+    h === "postgres" ||
+    h === "mongo" ||
+    h === "host.docker.internal"
+  );
+}
+
+/**
+ * SSL obrigatório para Postgres em qualquer host remoto (Neon, RDS, Supabase).
+ * Docker/local NÃO usa SSL.
+ *
+ * ⚠️ NUNCA retorna `false`/`undefined` para Neon — esse era o bug.
+ */
+const getSSLOptions = (
+  dialect: "mysql" | "postgres",
+  host?: string
+): false | { require: boolean; rejectUnauthorized: boolean } | { ssl: string } => {
   if (dialect === "postgres") {
-    if (!process.env.DATABASE_URL && environment === "development") {
-      return false; // Docker local Postgres does not support SSL
-    }
-    // SSL only when there's an external DATABASE_URL (e.g. Neon) or non-development env
+    const effectiveHost = host || process.env.SEQUELIZE_HOST;
+
+    // Neon, RDS, Supabase → SSL obrigatório
+    if (isLocalHost(effectiveHost)) return false;
+
     return {
       require: true,
-      rejectUnauthorized: false, // Necessário para o Neon
+      rejectUnauthorized: false,
     };
   }
+
+  // MySQL/RDS em produção
   if (environment !== "development") {
     return { ssl: "Amazon RDS" };
   }
-  return undefined;
+  return false;
 };
 
-/**
- * Cria a conexão com o Sequelize
- */
+/* -------------------------------------------------------------------------- */
+/*                              SEQUELIZE                                      */
+/* -------------------------------------------------------------------------- */
+
 const generateSequelizeConnection = (): Sequelize => {
   const dialect = getDialect();
 
-  // Se existir DATABASE_URL (Caso do seu Neon)
+  // Caso 1: DATABASE_URL (Neon, RDS, etc)
   if (databaseUrl) {
     return new Sequelize(databaseUrl, {
       dialect,
-      dialectModule: pg, // Injetando o driver pg como na POC
+      dialectModule: dialect === "postgres" ? pg : undefined,
       dialectOptions: {
-        ssl: getSSLOptions(dialect),
+        ssl: getSSLOptions(dialect, process.env.SEQUELIZE_HOST),
       },
       logging: process.env.DB_LOGGING === "true" ? console.log : false,
     });
   }
 
-  // Fallback para variáveis individuais (Docker/RDS)
+  // Caso 2: variáveis individuais
   return new Sequelize(
     process.env.SEQUELIZE_DB_NAME || "neondb",
     process.env.SEQUELIZE_DB_USER || "neondb_owner",
-    process.env.SEQUELIZE_DB_PASS,
+    process.env.SEQUELIZE_DB_PASS || "",
     {
       host: process.env.SEQUELIZE_HOST,
       port: Number(process.env.SEQUELIZE_PORT) || 5432,
       dialect,
       dialectModule: dialect === "postgres" ? pg : undefined,
       dialectOptions: {
-        ssl: getSSLOptions(dialect),
+        ssl: getSSLOptions(dialect, process.env.SEQUELIZE_HOST),
       },
       logging: process.env.DB_LOGGING === "true" ? console.log : false,
-    },
+    }
   );
 };
 
 export const sequelize = generateSequelizeConnection();
 
-/**
- * Autentica e Sincroniza o banco
- */
+/* -------------------------------------------------------------------------- */
+/*                              CONNECT DATABASE                               */
+/* -------------------------------------------------------------------------- */
+
 async function connectDatabase(): Promise<void> {
   try {
     await sequelize.authenticate();
 
-    // Lógica da POC: Sincronização automática de tabelas
-    // O 'alter: true' atualiza o banco sem apagar dados se você mudar o Model
-    if (environment === "development" || process.env.DB_SYNC === "true") {
+    if (isTest) {
+      console.log("✅ Conexão de teste OK (sem sync)");
+      return;
+    }
+
+    if (environment === "development" && process.env.DB_SYNC === "true") {
       await sequelize.sync({ alter: true });
-      if (databaseUrl?.includes("aws")) {
-        console.log("✅ Tabelas sincronizadas no RDS.");
-      } else if (databaseUrl?.includes("neon")) {
-        console.log("✅ Tabelas sincronizadas no Neon.");
-      } else {
-        console.log("✅ Tabelas sincronizadas no banco local.");
-      }
+      console.log("✅ Tabelas sincronizadas (dev).");
     }
 
     const dialect = getDialect();
-    console.log(
-      `✅ Database connection established [${dialect.toUpperCase()}]`,
-    );
+    console.log(`✅ Database connection established [${dialect.toUpperCase()}]`);
   } catch (error) {
     console.error("❌ Unable to connect to the database:", error);
-    // process.exit(1); // Opcional: encerra se o banco falhar
   }
 }
+
+/* -------------------------------------------------------------------------- */
+/*                              MONGODB (LOGS)                                 */
+/* -------------------------------------------------------------------------- */
 
 export async function connectMongo() {
   try {
     const rawUri = process.env.MONGODB_URI;
-    if (!rawUri)
-      return console.warn(
-        "⚠️ MONGODB_URI não definida. Logs salvos apenas localmente.",
-      );
-
+    if (!rawUri) {
+      console.warn("⚠️ MONGODB_URI não definida. Logs salvos apenas localmente.");
+      return;
+    }
     const uri = normalizeMongoUriForRuntime(rawUri);
     await connectMongoWithRetry(() => mongoose.connect(uri), "MongoDB (logs)");
     console.log("✅ Conectado ao MongoDB.");
@@ -171,12 +193,10 @@ export async function connectMongo() {
   }
 }
 
-/**
- * Resolve a URI do MongoDB do chat.
- * Prioridade: MONGODB_CHAT_URI > mesmo host de MONGODB_URI com DB delbicos_chat > localhost.
- * Assim, no Docker (MONGODB_URI=mongodb://mongo:27017/logs_db) o chat usa mongo:27017
- * mesmo sem MONGODB_CHAT_URI explícita.
- */
+/* -------------------------------------------------------------------------- */
+/*                              MONGODB (CHAT)                                 */
+/* -------------------------------------------------------------------------- */
+
 function resolveChatMongoUri(): string {
   let uri: string;
 
@@ -192,26 +212,15 @@ function resolveChatMongoUri(): string {
       const withoutDb = logsUri.replace(/\/[^/]*$/, "");
       uri = `${withoutDb}/delbicos_chat`;
     }
-    console.warn(
-      `⚠️ MONGODB_CHAT_URI não definida. Chat derivado de MONGODB_URI.`,
-    );
+    console.warn("⚠️ MONGODB_CHAT_URI não definida. Chat derivado de MONGODB_URI.");
   } else {
     uri = "mongodb://localhost:27017/delbicos_chat";
-    console.warn(
-      "⚠️ MONGODB_CHAT_URI não definida. Chat usando fallback localhost.",
-    );
+    console.warn("⚠️ MONGODB_CHAT_URI não definida. Chat usando fallback localhost.");
   }
 
   return normalizeMongoUriForRuntime(uri);
 }
 
-const chatMongoUri = resolveChatMongoUri();
-
-console.info(
-  `ℹ️ MongoDB chat: ${chatMongoUri.replace(/\/\/([^@]+@)?/, "//")}`,
-);
-
-// Mantém o mesmo objeto para os models durante todas as tentativas iniciais.
 export const chatMongoConnection = mongoose.createConnection();
 let chatConnectedOnce = false;
 
@@ -221,21 +230,31 @@ chatMongoConnection.on("connected", () => {
 });
 
 chatMongoConnection.on("error", (error) => {
-  // A rejeição inicial é registrada pelo loop; depois do primeiro sucesso,
-  // o driver administra a reconexão e os erros continuam sendo observados.
   if (chatConnectedOnce) console.error("❌ Erro MongoDB (chat):", error);
 });
 
-void connectMongoWithRetry(
-  () => chatMongoConnection.openUri(chatMongoUri),
-  "MongoDB (chat)",
-);
+/* -------------------------------------------------------------------------- */
+/*                              INICIALIZAÇÃO                                  */
+/* -------------------------------------------------------------------------- */
 
-/** Indica se a conexão dedicada do chat está pronta para operações. */
+if (!isTest) {
+  const chatMongoUri = resolveChatMongoUri();
+  console.info(
+    `ℹ️ MongoDB chat: ${chatMongoUri.replace(/\/\/([^@]+@)?/, "//")}`
+  );
+
+  void connectMongoWithRetry(
+    () => chatMongoConnection.openUri(chatMongoUri),
+    "MongoDB (chat)"
+  );
+
+  connectMongo();
+} else {
+  console.info("ℹ️ MongoDB: pulado em ambiente de teste");
+}
+
 export function isChatMongoReady(): boolean {
   return chatMongoConnection.readyState === 1;
 }
 
-// Inicialização
-connectMongo();
 connectDatabase();
