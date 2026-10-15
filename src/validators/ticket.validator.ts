@@ -26,10 +26,6 @@ export const createTicketSchema = z.object({
     { message: "Categoria inválida ou não informada" }
   ),
 
-  priority: z.enum(["BAIXA", "MEDIA", "ALTA", "CRITICA"], {
-    message: "Prioridade inválida ou não informada",
-  }),
-
   appointment_id: z
     .number({ message: "ID do agendamento deve ser um número" })
     .int("ID do agendamento deve ser um número inteiro")
