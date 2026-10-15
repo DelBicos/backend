@@ -1,44 +1,46 @@
 require("dotenv").config();
 
-/**
- * Determina o dialect do banco de dados
- * Prioridade: SEQUELIZE_DIALECT > RDS_DIALECT > "postgres"
- */
 const getDialect = () => {
-  if (process.env.SEQUELIZE_DIALECT) {
-    return process.env.SEQUELIZE_DIALECT;
-  }
-  if (process.env.RDS_DIALECT) {
-    return process.env.RDS_DIALECT;
-  }
+  if (process.env.SEQUELIZE_DIALECT) return process.env.SEQUELIZE_DIALECT;
+  if (process.env.RDS_DIALECT) return process.env.RDS_DIALECT;
   return "postgres";
 };
 
 /**
- * Retorna as opções de SSL apropriadas para o dialect
+ * Detecta se o host é local (sem SSL) ou remoto (com SSL).
+ * Neon, RDS, Supabase, etc. exigem SSL.
  */
-// No seu src/config/config.js
-const getSSLOptions = (dialect, environment) => {
-  if (dialect === "postgres") {
-    if (environment === "development" && !process.env.DATABASE_URL) {
-      return undefined;
-    }
-    return {
-      ssl: {
-        require: true,
-        rejectUnauthorized: false,
-      },
-    };
-  }
-  return undefined;
+const isLocalHost = (host) => {
+  if (!host) return true;
+  return (
+    host === "localhost" ||
+    host === "127.0.0.1" ||
+    host.startsWith("192.168.") ||
+    host.startsWith("10.") ||
+    host === "::1"
+  );
+};
+
+const getSSLOptions = (dialect, host) => {
+  if (dialect !== "postgres") return undefined;
+
+  // Se for local, não precisa SSL
+  if (isLocalHost(host)) return undefined;
+
+  // Qualquer host remoto → SSL obrigatório (Neon, RDS, etc.)
+  return {
+    ssl: {
+      require: true,
+      rejectUnauthorized: false,
+    },
+  };
 };
 
 const env = process.env.ENVIRONMENT || process.env.NODE_ENV || "development";
 const dialect = getDialect();
 
-const getDefaultPort = (currentDialect) => {
-  return currentDialect === "postgres" ? 5432 : 3306;
-};
+const getDefaultPort = (currentDialect) =>
+  currentDialect === "postgres" ? 5432 : 3306;
 
 if (process.env.__DEV__) {
   console.log("🔧 Sequelize Configuration:");
@@ -61,20 +63,18 @@ const config = {
     host: process.env.SEQUELIZE_HOST || "localhost",
     port: Number(process.env.SEQUELIZE_PORT) || getDefaultPort(dialect),
     dialect,
-    dialectOptions: getSSLOptions(dialect, "development"),
+    dialectOptions: getSSLOptions(dialect, process.env.SEQUELIZE_HOST),
     logging: process.env.DB_LOGGING === "true" ? console.log : false,
   },
   production: {
-    // Opção 1: DATABASE_URL (Neon Postgres)
     ...(process.env.DATABASE_URL ? { use_env_variable: "DATABASE_URL" } : {}),
-    // Opção 2: Variáveis individuais (AWS RDS MySQL)
     username: process.env.SEQUELIZE_DB_USER,
     password: process.env.SEQUELIZE_DB_PASS,
     database: process.env.SEQUELIZE_DB_NAME,
     host: process.env.SEQUELIZE_HOST,
     port: Number(process.env.SEQUELIZE_PORT) || getDefaultPort(dialect),
     dialect,
-    dialectOptions: getSSLOptions(dialect, env),
+    dialectOptions: getSSLOptions(dialect, process.env.SEQUELIZE_HOST),
     logging: process.env.DB_LOGGING === "true" ? console.log : false,
   },
 };
