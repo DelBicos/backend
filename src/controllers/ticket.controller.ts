@@ -27,10 +27,14 @@ export const createTicket = async (
         category: ticket.category,
         priority: ticket.priority,
         status: ticket.status,
-        created_at: ticket.createdAt,   // ✅ camelCase → API snake_case
+        created_at: ticket.createdAt,
       },
     });
   } catch (error) {
+    if (error instanceof Error && (error as any).statusCode === 400) {
+      return res.status(400).json({ error: error.message });
+    }
+
     console.error("[createTicket] Erro:", error);
     return res.status(500).json({ error: "Erro interno ao criar chamado." });
   }
