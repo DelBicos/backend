@@ -27,10 +27,13 @@ const createTicketSchema = z.object({
     { message: "Categoria inválida ou não informada" }
   ),
 
-  appointment_id: z
-    .number({ message: "ID do agendamento deve ser um número" })
-    .int("ID do agendamento deve ser um número inteiro")
-    .positive("ID do agendamento deve ser positivo")
+  // ✅ NOVO — short_id do appointment (formato alfanumérico maiúsculo)
+  appointment_short_id: z
+    .string({ message: "Código do agendamento deve ser texto" })
+    .regex(
+      /^[A-Z0-9]{4,10}$/,
+      "Código do agendamento inválido (esperado 4-10 caracteres alfanuméricos maiúsculos)"
+    )
     .optional(),
 });
 
