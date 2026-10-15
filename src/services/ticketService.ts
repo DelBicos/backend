@@ -1,5 +1,6 @@
 import Ticket, { ITicket, TicketUserType } from "../models/Ticket";
 import { ProfessionalModel } from "../models/Professional";
+import { AppointmentModel } from "../models/Appointment";
 import { generateTicketCode } from "../utils/ticketCode";
 import { CreateTicketInput } from "../middlewares/ticket.validation";
 
@@ -12,11 +13,42 @@ export const resolveUserType = async (
   return professional ? "PRESTADOR" : "CLIENTE";
 };
 
+/**
+ * Resolve o ID numérico do appointment a partir do short_id.
+ * Retorna null se não existir.
+ */
+const resolveAppointmentId = async (
+  shortId?: string
+): Promise<number | null> => {
+  if (!shortId) return null;
+
+  const appointment = await AppointmentModel.findOne({
+    where: { short_id: shortId },
+    attributes: ["id"],
+  });
+
+  return appointment ? appointment.id : null;
+};
+
 export const createTicket = async (
   data: CreateTicketInput,
   userId: number,
   userType: TicketUserType
 ): Promise<Ticket> => {
+  // ✅ Resolve o short_id → id real (FK)
+  const appointmentId = await resolveAppointmentId(
+    data.appointment_short_id
+  );
+
+  // Se o usuário informou um short_id, mas não existe → erro
+  if (data.appointment_short_id && !appointmentId) {
+    const error = new Error(
+      `Agendamento com código ${data.appointment_short_id} não encontrado.`
+    );
+    (error as any).statusCode = 400;
+    throw error;
+  }
+
   let ticketCode = generateTicketCode();
   let exists = await Ticket.findOne({
     where: { ticket_code: ticketCode },
@@ -35,7 +67,7 @@ export const createTicket = async (
     status: "ABERTO",
     user_id: userId,
     user_type: userType,
-    appointment_id: data.appointment_id ?? null,
+    appointment_id: appointmentId,
   });
 
   await ticket.reload();
@@ -45,7 +77,7 @@ export const createTicket = async (
 export const listTicketsByUser = async (userId: number): Promise<Ticket[]> => {
   return Ticket.findAll({
     where: { user_id: userId },
-    order: [["created_at", "DESC"]],
+    order: [["createdAt", "DESC"]],
   });
 };
 
