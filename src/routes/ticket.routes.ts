@@ -89,9 +89,6 @@ const router = Router();
  * /tickets:
  *   post:
  *     summary: Abre um novo chamado de suporte
- *     description: |
- *       Cria um chamado para o usuário autenticado (CLIENTE ou PRESTADOR).
- *       A prioridade **não** é informada aqui — ela é definida pelo administrador posteriormente.
  *     tags: [Tickets]
  *     security:
  *       - bearerAuth: []
@@ -100,39 +97,18 @@ const router = Router();
  *       content:
  *         application/json:
  *           schema:
- *             $ref: '#/components/schemas/CreateTicketInput'
- *     responses:
- *       201:
- *         description: Chamado criado com sucesso
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 message: { type: string, example: Chamado aberto com sucesso. }
- *                 ticket:
- *                   type: object
- *                   properties:
- *                     id: { type: integer, example: 5 }
- *                     ticket_code: { type: string, example: TKT-A7F3 }
- *                     title: { type: string }
- *                     category: { $ref: '#/components/schemas/TicketCategory' }
- *                     priority:
- *                       type: string
- *                       nullable: true
- *                       example: null
- *                     status: { $ref: '#/components/schemas/TicketStatus' }
- *                     created_at: { type: string, format: date-time }
- *       400:
- *         description: Dados inválidos
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/ErrorResponse'
- *       401:
- *         description: Não autenticado
- *       500:
- *         description: Erro interno
+ *             type: object
+ *             required: [title, description, category]
+ *             properties:
+ *               title: { type: string, minLength: 5, maxLength: 100 }
+ *               description: { type: string, minLength: 10, maxLength: 2000 }
+ *               category:
+ *                 type: string
+ *                 enum: [AGENDAMENTO, PAGAMENTO, SERVICO, PRESTADOR, CLIENTE, SUGESTAO, OUTROS]
+ *               appointment_short_id:
+ *                 type: string
+ *                 example: 6BDOKZ
+ *                 description: Código curto do agendamento (opcional)
  */
 router.post("/", authMiddleware, validateCreateTicket, createTicket);
 
