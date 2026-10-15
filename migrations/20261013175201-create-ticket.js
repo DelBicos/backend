@@ -1,4 +1,3 @@
-// src/migrations/20261013120000-create-ticket.js
 "use strict";
 
 /** @type {import('sequelize-cli').Migration} */
@@ -38,7 +37,8 @@ module.exports = {
       },
       priority: {
         type: Sequelize.ENUM("BAIXA", "MEDIA", "ALTA", "CRITICA"),
-        allowNull: false,
+        allowNull: true,
+        defaultValue: null,
       },
       status: {
         type: Sequelize.ENUM(
@@ -54,7 +54,7 @@ module.exports = {
       user_id: {
         type: Sequelize.INTEGER,
         allowNull: false,
-        references: { model: "user", key: "id" },
+        references: { model: "users", key: "id" },
         onDelete: "CASCADE",
         onUpdate: "CASCADE",
       },
@@ -65,7 +65,7 @@ module.exports = {
       admin_id: {
         type: Sequelize.INTEGER,
         allowNull: true,
-        references: { model: "user", key: "id" },
+        references: { model: "users", key: "id" },
         onDelete: "SET NULL",
         onUpdate: "CASCADE",
       },
