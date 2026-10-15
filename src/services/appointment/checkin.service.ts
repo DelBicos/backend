@@ -1,14 +1,29 @@
-import { AppointmentModel } from "../models/Appointment";
+﻿import { AppointmentModel } from "../../models/Appointment";
 import {
   AppointmentAuditLogModel,
   AuditLogAction,
-} from "../models/AppointmentAuditLog";
-import { AdminModel } from "../models/Admin";
-import { UserModel } from "../models/User";
-import { NotificationModel } from "../models/Notification";
-import { sequelize } from "../config/database";
-import { confirmationCodesMatch } from "../utils/confirmationCode.util";
-import { emitAppointmentStatusUpdate } from "../realtime/chatSocket";
+} from "../../models/AppointmentAuditLog";
+import { AdminModel } from "../../models/Admin";
+import { UserModel } from "../../models/User";
+import { NotificationModel } from "../../models/Notification";
+import { sequelize } from "../../config/database";
+import { emitAppointmentStatusUpdate } from "../../realtime/chatSocket";
+import {
+  calculateDistanceInMeters,
+  MAX_ARRIVAL_DISTANCE_METERS,
+  validateArrivedDistance,
+  validateInTransitTransition,
+  validateArrivedTransition,
+  validateCheckinTransition,
+  validateCheckoutTransition,
+  canAccessAuditTrailRule,
+} from "./checkin.rules";
+
+export {
+  calculateDistanceInMeters,
+  MAX_ARRIVAL_DISTANCE_METERS,
+  validateArrivedDistance,
+};
 
 export interface AppointmentWithRelations extends AppointmentModel {
   Client?: {
@@ -43,29 +58,6 @@ export interface AppointmentWithRelations extends AppointmentModel {
     lat?: number | null;
     lng?: number | null;
   };
-}
-
-export function calculateDistanceInMeters(
-  lat1: number,
-  lon1: number,
-  lat2: number,
-  lon2: number,
-): number {
-  const R = 6371000;
-  const radLat1 = (lat1 * Math.PI) / 180;
-  const radLat2 = (lat2 * Math.PI) / 180;
-  const deltaLat = ((lat2 - lat1) * Math.PI) / 180;
-  const deltaLon = ((lon2 - lon1) * Math.PI) / 180;
-
-  const a =
-    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
-    Math.cos(radLat1) *
-      Math.cos(radLat2) *
-      Math.sin(deltaLon / 2) *
-      Math.sin(deltaLon / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
 }
 
 /**
@@ -108,6 +100,62 @@ export const applyStatusTransitionWithAudit = (
     return true;
   });
 
+export type InTransitProcessResult =
+  | { success: true; appointment: AppointmentWithRelations }
+  | { success: false; status: 400 | 403; error: string };
+
+export async function processAppointmentInTransit(
+  appointment: AppointmentWithRelations,
+  userId: number,
+): Promise<InTransitProcessResult> {
+  const ruleCheck = validateInTransitTransition(
+    appointment.status,
+    appointment.Professional?.user_id,
+    userId,
+  );
+
+  if (!ruleCheck.valid) {
+    return {
+      success: false,
+      status: ruleCheck.status,
+      error: ruleCheck.error,
+    };
+  }
+
+  const previousStatus = appointment.status;
+  appointment.status = "in_transit";
+
+  await sequelize.transaction(async (transaction) => {
+    await appointment.save({ transaction });
+    await AppointmentAuditLogModel.create(
+      {
+        appointment_id: appointment.id,
+        user_id: userId,
+        action: "status_change",
+        from_status: previousStatus,
+        to_status: "in_transit",
+        metadata: JSON.stringify({ marked_in_transit_at: new Date() }),
+      },
+      { transaction },
+    );
+  });
+
+  const clientUser = appointment.Client?.User;
+  const profUser = appointment.Professional?.User;
+  const service = appointment.Service;
+
+  if (clientUser) {
+    await sendAppointmentStatusNotification(
+      appointment,
+      "in_transit",
+      "Profissional a caminho! 🚗",
+      `O profissional ${profUser?.name || ""} informou que está a caminho do seu local para o serviço '${service?.title || ""}'.`,
+    );
+  }
+
+  return { success: true, appointment };
+}
+
 export type ArrivedProcessResult =
   | { success: true; code: string | null | undefined }
   | {
@@ -124,47 +172,37 @@ export async function processAppointmentArrived(
   latitude: number,
   longitude: number,
 ): Promise<ArrivedProcessResult> {
-  if (appointment.Professional?.user_id !== userId) {
-    return {
-      success: false,
-      status: 403,
-      error: "Apenas o profissional responsável pode marcar chegada.",
-    };
-  }
+  const ruleCheck = validateArrivedTransition(
+    appointment.status,
+    appointment.Professional?.user_id,
+    userId,
+  );
 
-  if (appointment.status !== "in_transit" && appointment.status !== "arrived") {
+  if (!ruleCheck.valid) {
     return {
       success: false,
-      status: 400,
-      error: `Não é possível marcar chegada em um agendamento com status '${appointment.status}'`,
+      status: ruleCheck.status,
+      error: ruleCheck.error,
     };
   }
 
   const address = appointment.Address;
-  if (address && address.lat != null && address.lng != null) {
-    const profLat = Number(latitude);
-    const profLng = Number(longitude);
-    const addrLat = Number(address.lat);
-    const addrLng = Number(address.lng);
+  const distanceCheck = validateArrivedDistance(
+    latitude,
+    longitude,
+    address?.lat,
+    address?.lng,
+    MAX_ARRIVAL_DISTANCE_METERS,
+  );
 
-    const distanceMeters = calculateDistanceInMeters(
-      profLat,
-      profLng,
-      addrLat,
-      addrLng,
-    );
-    const MAX_DISTANCE_METERS = 300;
-
-    if (distanceMeters > MAX_DISTANCE_METERS) {
-      const roundedDistance = Math.round(distanceMeters);
-      return {
-        success: false,
-        status: 400,
-        error: `Você está a ${roundedDistance}m do endereço do cliente. Aproxime-se (menos de ${MAX_DISTANCE_METERS}m) para confirmar a chegada.`,
-        distance: roundedDistance,
-        maxDistance: MAX_DISTANCE_METERS,
-      };
-    }
+  if (!distanceCheck.valid) {
+    return {
+      success: false,
+      status: 400,
+      error: distanceCheck.error || "Distância além do limite permitido.",
+      distance: distanceCheck.distance,
+      maxDistance: distanceCheck.maxDistance,
+    };
   }
 
   const previousStatus = appointment.status;
@@ -198,63 +236,45 @@ export async function processAppointmentCheckin(
   userId: number,
   code: string | undefined,
 ): Promise<CheckinProcessResult> {
-  if (appointment.Professional?.user_id !== userId) {
-    return {
-      success: false,
-      status: 403,
-      error: "Apenas o profissional responsável pode iniciar o serviço.",
-    };
-  }
+  const ruleCheck = validateCheckinTransition(
+    appointment.status,
+    appointment.Professional?.user_id,
+    userId,
+    code,
+    appointment.verification_code,
+  );
 
-  // CHK-06: Rejeitar código já utilizado
-  if (
-    appointment.status === "in_progress" ||
-    appointment.status === "completed"
-  ) {
-    await AppointmentAuditLogModel.create({
-      appointment_id: appointment.id,
-      user_id: userId,
-      action: "check_in_failed",
-      from_status: appointment.status,
-      to_status: appointment.status,
-      metadata: JSON.stringify({
-        reason: "already_used",
-        status: appointment.status,
-      }),
-    });
-    return {
-      success: false,
-      status: 400,
-      error: "Este código já foi utilizado para este agendamento.",
-    };
-  }
+  if (!ruleCheck.valid) {
+    if (ruleCheck.reason === "already_used") {
+      await AppointmentAuditLogModel.create({
+        appointment_id: appointment.id,
+        user_id: userId,
+        action: "check_in_failed",
+        from_status: appointment.status,
+        to_status: appointment.status,
+        metadata: JSON.stringify({
+          reason: "already_used",
+          status: appointment.status,
+        }),
+      });
+    } else if (ruleCheck.reason === "invalid_code") {
+      await AppointmentAuditLogModel.create({
+        appointment_id: appointment.id,
+        user_id: userId,
+        action: "check_in_failed",
+        from_status: appointment.status,
+        to_status: appointment.status,
+        metadata: JSON.stringify({
+          reason: "invalid_code",
+          code_attempted: String(code || "").slice(0, 10),
+        }),
+      });
+    }
 
-  if (appointment.status !== "arrived") {
     return {
       success: false,
-      status: 400,
-      error: `Não é possível iniciar o serviço em um agendamento com status '${appointment.status}'. Confirme a chegada primeiro.`,
-    };
-  }
-
-  // CHK-03 & CHK-06: Validação case-sensitive do código e log de tentativa falha
-  if (!confirmationCodesMatch(code, appointment.verification_code)) {
-    await AppointmentAuditLogModel.create({
-      appointment_id: appointment.id,
-      user_id: userId,
-      action: "check_in_failed",
-      from_status: appointment.status,
-      to_status: appointment.status,
-      metadata: JSON.stringify({
-        reason: "invalid_code",
-        code_attempted: String(code || "").slice(0, 10),
-      }),
-    });
-    return {
-      success: false,
-      status: 400,
-      error:
-        "Código de confirmação incorreto. Verifique o código com o cliente.",
+      status: ruleCheck.status,
+      error: ruleCheck.error,
     };
   }
 
@@ -294,57 +314,42 @@ export async function processAppointmentCheckout(
   userId: number,
   code: string | undefined,
 ): Promise<CheckoutProcessResult> {
-  if (appointment.Professional?.user_id !== userId) {
-    return {
-      success: false,
-      status: 403,
-      error: "Apenas o profissional responsável pode finalizar o serviço.",
-    };
-  }
+  const ruleCheck = validateCheckoutTransition(
+    appointment.status,
+    appointment.Professional?.user_id,
+    userId,
+    code,
+    appointment.verification_code,
+  );
 
-  // CHK-06: Rejeitar se já concluído
-  if (appointment.status === "completed") {
-    await AppointmentAuditLogModel.create({
-      appointment_id: appointment.id,
-      user_id: userId,
-      action: "check_out_failed",
-      from_status: appointment.status,
-      to_status: appointment.status,
-      metadata: JSON.stringify({ reason: "already_completed" }),
-    });
-    return {
-      success: false,
-      status: 400,
-      error: "Este serviço já foi concluído anteriormente.",
-    };
-  }
+  if (!ruleCheck.valid) {
+    if (ruleCheck.reason === "already_completed") {
+      await AppointmentAuditLogModel.create({
+        appointment_id: appointment.id,
+        user_id: userId,
+        action: "check_out_failed",
+        from_status: appointment.status,
+        to_status: appointment.status,
+        metadata: JSON.stringify({ reason: "already_completed" }),
+      });
+    } else if (ruleCheck.reason === "invalid_code") {
+      await AppointmentAuditLogModel.create({
+        appointment_id: appointment.id,
+        user_id: userId,
+        action: "check_out_failed",
+        from_status: appointment.status,
+        to_status: appointment.status,
+        metadata: JSON.stringify({
+          reason: "invalid_code",
+          code_attempted: String(code || "").slice(0, 10),
+        }),
+      });
+    }
 
-  if (appointment.status !== "in_progress") {
     return {
       success: false,
-      status: 400,
-      error: `Não é possível finalizar um serviço com status '${appointment.status}'. O serviço precisa estar em andamento.`,
-    };
-  }
-
-  // CHK-04 & CHK-06: Validação case-sensitive do código para check-out e log de falha
-  if (!confirmationCodesMatch(code, appointment.verification_code)) {
-    await AppointmentAuditLogModel.create({
-      appointment_id: appointment.id,
-      user_id: userId,
-      action: "check_out_failed",
-      from_status: appointment.status,
-      to_status: appointment.status,
-      metadata: JSON.stringify({
-        reason: "invalid_code",
-        code_attempted: String(code || "").slice(0, 10),
-      }),
-    });
-    return {
-      success: false,
-      status: 400,
-      error:
-        "Código de confirmação incorreto. Verifique o código com o cliente.",
+      status: ruleCheck.status,
+      error: ruleCheck.error,
     };
   }
 
@@ -410,10 +415,16 @@ export async function canUserAccessAuditTrail(
   userId: number,
   isAdmin: boolean,
 ): Promise<boolean> {
-  if (isAdmin) return true;
-  const clientUserId = appointment.Client?.user_id;
-  const profUserId = appointment.Professional?.user_id;
-  if (userId === clientUserId || userId === profUserId) return true;
+  if (
+    canAccessAuditTrailRule(
+      appointment.Client?.user_id,
+      appointment.Professional?.user_id,
+      userId,
+      isAdmin,
+    )
+  ) {
+    return true;
+  }
   const adminRecord = await AdminModel.findOne({ where: { user_id: userId } });
   return Boolean(adminRecord);
 }

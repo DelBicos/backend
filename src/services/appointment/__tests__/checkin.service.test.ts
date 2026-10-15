@@ -1,39 +1,40 @@
-jest.mock("../../config/database", () => {
+﻿jest.mock("../../../config/database", () => {
   const { Sequelize } = require("sequelize");
   const sequelize = new Sequelize({ dialect: "postgres", logging: false });
   sequelize.transaction = jest.fn(async (cb: (t: object) => unknown) => cb({}));
   return { sequelize };
 });
-jest.mock("../../models/Appointment");
-jest.mock("../../models/AppointmentAuditLog", () => ({
+jest.mock("../../../models/Appointment");
+jest.mock("../../../models/AppointmentAuditLog", () => ({
   AppointmentAuditLogModel: {
     create: jest.fn().mockResolvedValue({}),
     findAll: jest.fn().mockResolvedValue([]),
   },
 }));
-jest.mock("../../models/Admin");
-jest.mock("../../models/Notification", () => ({
+jest.mock("../../../models/Admin");
+jest.mock("../../../models/Notification", () => ({
   NotificationModel: {
     create: jest.fn().mockResolvedValue({}),
   },
 }));
-jest.mock("../../realtime/chatSocket", () => ({
+jest.mock("../../../realtime/chatSocket", () => ({
   emitAppointmentStatusUpdate: jest.fn(),
 }));
 
 import {
   calculateDistanceInMeters,
   canUserAccessAuditTrail,
+  processAppointmentInTransit,
   processAppointmentCheckin,
   processAppointmentCheckout,
   processAppointmentArrived,
   AppointmentWithRelations,
-} from "../appointmentCheckin.service";
-import { AppointmentModel } from "../../models/Appointment";
-import { AppointmentAuditLogModel } from "../../models/AppointmentAuditLog";
-import { AdminModel } from "../../models/Admin";
+} from "../checkin.service";
+import { AppointmentModel } from "../../../models/Appointment";
+import { AppointmentAuditLogModel } from "../../../models/AppointmentAuditLog";
+import { AdminModel } from "../../../models/Admin";
 
-describe("appointmentCheckin.service", () => {
+describe("appointment/checkin.service", () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
@@ -84,6 +85,54 @@ describe("appointmentCheckin.service", () => {
       (AdminModel.findOne as jest.Mock).mockResolvedValue(null);
       const allowed = await canUserAccessAuditTrail(mockAppt, 999, false);
       expect(allowed).toBe(false);
+    });
+  });
+
+  describe("processAppointmentInTransit", () => {
+    it("deve retornar 403 se o solicitante não for o profissional responsável", async () => {
+      const mockAppt = {
+        id: 1,
+        status: "confirmed",
+        Professional: { user_id: 20 },
+      } as unknown as AppointmentWithRelations;
+
+      const res = await processAppointmentInTransit(mockAppt, 99);
+      expect(res.success).toBe(false);
+      if (!res.success) {
+        expect(res.status).toBe(403);
+      }
+    });
+
+    it("deve retornar 400 se o status não for confirmed nem in_transit", async () => {
+      const mockAppt = {
+        id: 1,
+        status: "pending",
+        Professional: { user_id: 20 },
+      } as unknown as AppointmentWithRelations;
+
+      const res = await processAppointmentInTransit(mockAppt, 20);
+      expect(res.success).toBe(false);
+      if (!res.success) {
+        expect(res.status).toBe(400);
+      }
+    });
+
+    it("deve atualizar status para in_transit e registrar auditoria", async () => {
+      const saveMock = jest.fn().mockResolvedValue(true);
+      const mockAppt = {
+        id: 1,
+        status: "confirmed",
+        Professional: { user_id: 20, User: { name: "Carlos" } },
+        Client: { User: { id: 10 } },
+        Service: { title: "Pintura" },
+        save: saveMock,
+      } as unknown as AppointmentWithRelations;
+
+      const res = await processAppointmentInTransit(mockAppt, 20);
+      expect(res.success).toBe(true);
+      expect(mockAppt.status).toBe("in_transit");
+      expect(saveMock).toHaveBeenCalled();
+      expect(AppointmentAuditLogModel.create).toHaveBeenCalled();
     });
   });
 

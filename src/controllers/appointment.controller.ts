@@ -23,13 +23,14 @@ import {
 } from "../services/appointmentSchedule.service";
 import {
   AppointmentWithRelations,
+  processAppointmentInTransit,
   processAppointmentArrived,
   processAppointmentCheckin,
   processAppointmentCheckout,
   sendAppointmentStatusNotification,
   canUserAccessAuditTrail,
   fetchAppointmentAuditTrail,
-} from "../services/appointmentCheckin.service";
+} from "../services/appointment/checkin.service";
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -450,47 +451,15 @@ export const markInTransitAppointment = async (req: Request, res: Response) => {
       return res.status(404).json({ error: "Agendamento não encontrado" });
     }
 
-    const professional = (appointment as any).Professional;
-    if (!authReq.user || professional?.user_id !== authReq.user.id) {
-      return res.status(403).json({
-        error: "Apenas o profissional responsável pode informar que está a caminho.",
-      });
+    if (!authReq.user) {
+      return res.status(401).json({ error: "Usuário não autenticado." });
     }
-
-    if (appointment.status !== "confirmed" && appointment.status !== "in_transit") {
-      return res.status(400).json({
-        error: `Não é possível marcar a caminho um agendamento com status '${appointment.status}'`,
-      });
-    }
-
-    appointment.status = "in_transit";
-    await appointment.save();
 
     const apptData = appointment as unknown as AppointmentWithRelations;
-    const clientUser = apptData.Client?.User;
-    const profUser = apptData.Professional?.User;
-    const service = apptData.Service;
+    const result = await processAppointmentInTransit(apptData, authReq.user.id);
 
-    if (clientUser) {
-      await NotificationModel.create({
-        user_id: clientUser.id,
-        title: "Profissional a caminho! 🚗",
-        message: `O profissional ${profUser?.name || ""} informou que está a caminho do seu local para o serviço '${service?.title || ""}'.`,
-        notification_type: "appointment",
-        related_entity_id: appointment.id,
-        is_read: false,
-      });
-
-      emitAppointmentStatusUpdate(clientUser.id, {
-        appointment_id: appointment.id,
-        status: "in_transit",
-        session_ids: [],
-        message: `Profissional ${profUser?.name || ""} está a caminho!`,
-        payment_status: appointment.payment_intent_id ? "paid" : "pending",
-        payment_pending: !appointment.payment_intent_id,
-        paid: !!appointment.payment_intent_id,
-        updated_at: new Date().toISOString(),
-      });
+    if (!result.success) {
+      return res.status(result.status).json({ error: result.error });
     }
 
     logger.info("Appointment marcado como em deslocamento", { appointmentId: appointment.id });
