@@ -34,9 +34,7 @@ module.exports = {
       roots: ["<rootDir>/src"],
       testMatch: ["**/integration/**/*.test.ts"],
       testPathIgnorePatterns: [
-        "/node_modules/",
-        // ✅ Ignora teste de outro PR que exige Postgres local isolado
-        "appointmentSchedule.test.ts",
+        "/node_modules/"
       ],
       clearMocks: true,
       // ✅ Setup global (conecta/desconecta do Neon)
