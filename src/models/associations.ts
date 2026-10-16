@@ -20,6 +20,7 @@ import { ChatRoomModel } from "./ChatRoom";
 import { BotChatSessionModel } from "./BotChatSession";
 import { BotChatMessageModel } from "./BotChatMessage";
 import TicketModel from "./Ticket";
+import TicketMessageModel from "./TicketMessage";
 
 export function initializeAssociations() {
   // User associations
@@ -367,5 +368,20 @@ export function initializeAssociations() {
   AppointmentModel.hasMany(TicketModel, {
     foreignKey: "appointment_id",
     as: "tickets",
+  });
+
+  TicketModel.hasMany(TicketMessageModel, {
+    foreignKey: "ticket_id",
+    as: "messages",
+  });
+
+  TicketMessageModel.belongsTo(TicketModel, {
+    foreignKey: "ticket_id",
+    as: "ticket",
+  });
+
+  TicketMessageModel.belongsTo(UserModel, {
+    foreignKey: "author_id",
+    as: "author",
   });
 }
