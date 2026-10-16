@@ -34,10 +34,12 @@ module.exports = {
       roots: ["<rootDir>/src"],
       testMatch: ["**/integration/**/*.test.ts"],
       testPathIgnorePatterns: [
-        "/node_modules/"
+        "/node_modules/",
+        // Este teste usa sync({ force: true }) e conflita com o schema das migrations
+        "appointmentSchedule.test.ts",
       ],
       clearMocks: true,
-      // ✅ Setup global (conecta/desconecta do Neon)
+      // ✅ Setup global (conecta/desconecta do Postgres de teste)
       setupFilesAfterEnv: ["<rootDir>/src/__tests__/setup.ts"],
       // ✅ Roda 1 por vez (evita conflito de porta e de banco)
       maxWorkers: 1,

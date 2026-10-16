@@ -42,6 +42,7 @@ import chatRoutes from "./src/routes/chat.routes";
 import emailRoutes from "./src/routes/email.routes";
 import voiceRoutes from "./src/routes/voice.routes";
 import { initChatSocket } from "./src/realtime/chatSocket";
+import ticketRoutes from "./src/routes/ticket.routes";
 
 dotenv.config({ override: false });
 
@@ -116,6 +117,7 @@ app.use("/api/proxy-upload", proxyUploadRoutes);
 app.use("/api/chat", chatRoutes);
 app.use("/api/voice", voiceRoutes);
 app.use("/api/utilities", emailRoutes);
+app.use("/api/tickets", ticketRoutes);
 
 const isServerless = process.env.IS_SERVERLESS == "true";
 
