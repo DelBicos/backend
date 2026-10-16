@@ -1,6 +1,6 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../interfaces/authentication.interface";
-import * as ticketService from "../services/ticket/ticketService";
+import * as ticketService from "../services/ticket/ticket.service";
 
 /**
  * POST /api/tickets
