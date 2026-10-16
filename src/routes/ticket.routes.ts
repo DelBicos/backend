@@ -5,6 +5,7 @@ import {
   createTicket,
   listTickets,
   showTicket,
+  showTicketMessages
 } from "../controllers/ticket.controller";
 
 const router = Router();
@@ -177,5 +178,67 @@ router.get("/", authMiddleware, listTickets);
  *         description: Erro interno
  */
 router.get("/:id", authMiddleware, showTicket);
+
+/**
+ * @swagger
+ * /tickets/{id}/messages:
+ *   get:
+ *     summary: Lista o histórico de interações do chamado
+ *     description: |
+ *       Retorna todas as mensagens trocadas no chamado, em ordem cronológica.
+ *       O usuário só pode ver as mensagens dos próprios chamados.
+ *     tags: [Tickets]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID do chamado
+ *         example: 42
+ *     responses:
+ *       200:
+ *         description: Lista de mensagens do chamado
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 messages:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id: { type: integer, example: 1 }
+ *                       ticket_id: { type: integer, example: 42 }
+ *                       author:
+ *                         type: object
+ *                         properties:
+ *                           id: { type: integer, example: 31 }
+ *                           type:
+ *                             type: string
+ *                             enum: [CLIENTE, PRESTADOR, ADMIN]
+ *                             example: CLIENTE
+ *                           name: { type: string, example: "Douglas Wenzel" }
+ *                           avatar_uri:
+ *                             type: string
+ *                             nullable: true
+ *                             example: "https://.../avatar.jpg"
+ *                       content: { type: string, example: "Alguma observação sobre o chamado." }
+ *                       attachment_url:
+ *                         type: string
+ *                         nullable: true
+ *                         example: null
+ *                       created_at: { type: string, format: date-time }
+ *       400:
+ *         description: ID inválido
+ *       401:
+ *         description: Não autenticado
+ *       500:
+ *         description: Erro interno
+ */
+router.get("/:id/messages", authMiddleware, showTicketMessages);
 
 export default router;
