@@ -705,7 +705,7 @@ describe("markArrivedAppointment", () => {
     });
   });
 
-  it("deve retornar verification_code no JSON de resposta para o profissional (CHK-02)", async () => {
+  it("não deve retornar verification_code no JSON de resposta para o profissional (CHK-02)", async () => {
     const mockAppt = {
       id: 100,
       status: "in_transit",
@@ -724,8 +724,8 @@ describe("markArrivedAppointment", () => {
     expect(saveMock).toHaveBeenCalled();
     const result = jsonMock.mock.calls[0][0];
     expect(result.success).toBe(true);
-    expect(result.appointment).toHaveProperty("verification_code");
-    expect(result).toHaveProperty("verification_code");
+    expect(result.appointment).not.toHaveProperty("verification_code");
+    expect(result).not.toHaveProperty("verification_code");
   });
 });
 
@@ -763,7 +763,7 @@ describe("getAppointmentById", () => {
     expect(jsonMock).toHaveBeenCalledWith({ error: "Acesso negado a este agendamento" });
   });
 
-  it("deve incluir verification_code quando a requisição for feita pelo profissional (CHK-02)", async () => {
+  it("não deve incluir verification_code quando a requisição for feita pelo profissional (CHK-02)", async () => {
     req.user = { id: 2 };
     (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
       id: 100,
@@ -776,7 +776,7 @@ describe("getAppointmentById", () => {
     await getAppointmentById(req as Request, res as Response);
 
     const result = jsonMock.mock.calls[0][0];
-    expect(result).toHaveProperty("verification_code", "9876");
+    expect(result).not.toHaveProperty("verification_code");
   });
 
   it("deve incluir verification_code quando a requisição for feita pelo cliente (CHK-02)", async () => {

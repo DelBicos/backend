@@ -380,6 +380,12 @@ export const getAllAppointments = async (req: Request, res: Response) => {
         json.payment_method = json.payment_intent_id
           ? "Cartão de Crédito"
           : "Cartão de Crédito";
+
+        // Apenas clientes visualizam o código de verificação
+        if (role === "professional") {
+          delete json.verification_code;
+        }
+
         return json;
       },
     );
@@ -833,14 +839,13 @@ export const markArrivedAppointment = async (req: Request, res: Response) => {
     const apptJson: Record<string, unknown> = appointment.toJSON
       ? (appointment.toJSON() as unknown as Record<string, unknown>)
       : { ...(appointment as unknown as Record<string, unknown>) };
-    apptJson.verification_code = result.code;
+    delete apptJson.verification_code;
 
     logger.info("Appointment marcado como chegou no local", { appointmentId: appointment.id });
     res.json({
       success: true,
       message: "Chegada confirmada com sucesso! Peça o código ao cliente.",
       appointment: apptJson,
-      verification_code: result.code,
     });
   } catch (error: unknown) {
     logError("Erro ao marcar chegada no local", error, { paramId });
@@ -1071,6 +1076,11 @@ export const getAppointmentById = async (req: Request, res: Response) => {
     }
 
     const json = appointment.toJSON() as any;
+
+    // Apenas o cliente do agendamento pode visualizar o código de verificação
+    if (currentUserId !== clientUserId) {
+      delete json.verification_code;
+    }
 
     res.json(json);
   } catch (error: any) {
