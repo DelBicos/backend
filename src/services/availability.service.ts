@@ -50,7 +50,7 @@ export function appointmentOverlapWhere(
 ) {
   return {
     professional_id: professionalId,
-    status: { [Op.in]: ["confirmed", "pending"] },
+    status: { [Op.in]: ["confirmed", "pending", "in_transit", "arrived", "in_progress"] },
     start_time: { [Op.lt]: end },
     end_time: { [Op.gt]: start },
     ...(excludeAppointmentId ? { id: { [Op.ne]: excludeAppointmentId } } : {}),

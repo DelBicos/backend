@@ -15,6 +15,7 @@ import {
   syncChatRoomStatusForAppointment,
 } from "../utils/chatRoom";
 import { syncBotSessionsForAppointmentStatus } from "../services/botAppointmentStatus.service";
+import { emitAppointmentStatusUpdate } from "../realtime/chatSocket";
 import {
   createAppointmentWithScheduleLock,
   changePendingAppointmentStatus,
@@ -99,11 +100,9 @@ export const createAppointment = async (req: Request, res: Response) => {
     today.setHours(0, 0, 0, 0);
     const minAdvanceDate = new Date(today);
     minAdvanceDate.setDate(minAdvanceDate.getDate() + 2);
-
     if (startDate < minAdvanceDate) {
       return res.status(400).json({
-        error:
-          "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
+        error: "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
       });
     }
 
@@ -387,7 +386,7 @@ export const confirmAppointment = async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthenticatedRequest;
     let appointment = await AppointmentModel.findOne({
-      where: { short_id: id },
+      where: { short_id: id }
     });
     if (!appointment && !isNaN(Number(id))) {
       appointment = await AppointmentModel.findByPk(Number(id));
@@ -400,13 +399,10 @@ export const confirmAppointment = async (req: Request, res: Response) => {
         error: `Não é possível aceitar um agendamento com status '${appointment.status}'`,
       });
     }
-    const professional = await ProfessionalModel.findByPk(
-      appointment.professional_id,
-    );
+    const professional = await ProfessionalModel.findByPk(appointment.professional_id);
     if (!authReq.user || professional?.user_id !== authReq.user.id) {
       return res.status(403).json({
-        error:
-          "Apenas o profissional respons\u00e1vel pode aceitar este agendamento",
+        error: "Apenas o profissional respons\u00e1vel pode aceitar este agendamento",
       });
     }
 
@@ -418,6 +414,85 @@ export const confirmAppointment = async (req: Request, res: Response) => {
     logError("Erro ao confirmar agendamento", error, { appointmentId: id });
     if (error instanceof ScheduleConflictError) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: "Erro ao confirmar agendamento" });
+  }
+};
+
+export const markInTransitAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ServiceModel, as: "Service" },
+        { model: AddressModel, as: "Address" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const professional = (appointment as any).Professional;
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional responsável pode informar que está a caminho.",
+      });
+    }
+
+    if (appointment.status !== "confirmed" && appointment.status !== "in_transit") {
+      return res.status(400).json({
+        error: `Não é possível marcar a caminho um agendamento com status '${appointment.status}'`,
+      });
+    }
+
+    appointment.status = "in_transit";
+    await appointment.save();
+
+    const apptData: any = appointment;
+    const clientUser = apptData.Client?.User;
+    const profUser = apptData.Professional?.User;
+    const service = apptData.Service;
+
+    if (clientUser) {
+      await NotificationModel.create({
+        user_id: clientUser.id,
+        title: "Profissional a caminho! 🚗",
+        message: `O profissional ${profUser?.name || ""} informou que está a caminho do seu local para o serviço '${service?.title || ""}'.`,
+        notification_type: "appointment",
+        related_entity_id: appointment.id,
+        is_read: false,
+      });
+
+      emitAppointmentStatusUpdate(clientUser.id, {
+        appointment_id: appointment.id,
+        status: "in_transit",
+        session_ids: [],
+        message: `Profissional ${profUser?.name || ""} está a caminho!`,
+        payment_status: appointment.payment_intent_id ? "paid" : "pending",
+        payment_pending: !appointment.payment_intent_id,
+        paid: !!appointment.payment_intent_id,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    logger.info("Appointment marcado como em deslocamento", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Status atualizado para em deslocamento com sucesso.",
+      appointment,
+    });
+  } catch (error: any) {
+    logError("Erro ao marcar agendamento a caminho", error, { paramId });
+    res.status(500).json({ error: "Erro ao atualizar status para em deslocamento" });
   }
 };
 
@@ -441,12 +516,12 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
         {
           model: ClientModel,
           as: "Client",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         {
           model: ProfessionalModel,
           as: "Professional",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         { model: ServiceModel, as: "Service" },
       ],
@@ -459,8 +534,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
     const appointmentProfessional = (appointment as any).Professional;
     if (!authReq.user || appointmentProfessional?.user_id !== authReq.user.id) {
       return res.status(403).json({
-        error:
-          "Apenas o profissional respons\u00e1vel pode alterar este agendamento",
+        error: "Apenas o profissional respons\u00e1vel pode alterar este agendamento",
       });
     }
 
@@ -507,9 +581,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
 
     await syncBotSessionsForAppointmentStatus(appointment);
 
-    logger.info(`Appointment status updated to ${status}`, {
-      appointmentId: id,
-    });
+    logger.info(`Appointment status updated to ${status}`, { appointmentId: id });
     res.json(appointment);
   } catch (error: any) {
     logError("Erro ao atualizar status do agendamento", error, {
@@ -550,7 +622,7 @@ export const reviewAppointment = async (req: Request, res: Response) => {
         {
           model: ClientModel,
           as: "Client",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
       ],
     });
@@ -656,12 +728,12 @@ export const getAppointmentInvoice = async (req: Request, res: Response) => {
         {
           model: ClientModel,
           as: "Client",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         {
           model: ProfessionalModel,
           as: "Professional",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         {
           model: AddressModel,
@@ -713,5 +785,315 @@ export const getAppointmentInvoice = async (req: Request, res: Response) => {
     res
       .status(500)
       .json({ error: "Erro ao gerar invoice", details: error.message });
+  }
+};
+
+function getDistanceInMeters(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000;
+  const radLat1 = (lat1 * Math.PI) / 180;
+  const radLat2 = (lat2 * Math.PI) / 180;
+  const deltaLat = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLon = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaLat / 2) * Math.sin(deltaLat / 2) +
+    Math.cos(radLat1) * Math.cos(radLat2) *
+    Math.sin(deltaLon / 2) * Math.sin(deltaLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
+}
+
+export const markArrivedAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+  const { latitude, longitude } = req.body;
+
+  try {
+    if (
+      latitude === undefined ||
+      latitude === null ||
+      longitude === undefined ||
+      longitude === null ||
+      !Number.isFinite(Number(latitude)) ||
+      !Number.isFinite(Number(longitude))
+    ) {
+      return res.status(400).json({
+        error: "Coordenadas (latitude e longitude) são obrigatórias para confirmar a chegada.",
+      });
+    }
+
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ServiceModel, as: "Service" },
+        { model: AddressModel, as: "Address" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const professional = (appointment as any).Professional;
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional responsável pode marcar chegada.",
+      });
+    }
+
+    if (appointment.status !== "in_transit" && appointment.status !== "arrived") {
+      return res.status(400).json({
+        error: `Não é possível marcar chegada em um agendamento com status '${appointment.status}'`,
+      });
+    }
+
+    const address = (appointment as any).Address;
+    if (address && address.lat != null && address.lng != null) {
+      const profLat = Number(latitude);
+      const profLng = Number(longitude);
+      const addrLat = Number(address.lat);
+      const addrLng = Number(address.lng);
+
+      const distanceMeters = getDistanceInMeters(profLat, profLng, addrLat, addrLng);
+      const MAX_DISTANCE_METERS = 300;
+
+      if (distanceMeters > MAX_DISTANCE_METERS) {
+        const roundedDistance = Math.round(distanceMeters);
+        return res.status(400).json({
+          error: `Você está a ${roundedDistance}m do endereço do cliente. Aproxime-se (menos de ${MAX_DISTANCE_METERS}m) para confirmar a chegada.`,
+          distance: roundedDistance,
+          maxDistance: MAX_DISTANCE_METERS,
+        });
+      }
+    }
+
+    let code = appointment.verification_code;
+    if (!code) {
+      code = Math.floor(1000 + Math.random() * 9000).toString();
+      appointment.verification_code = code;
+    }
+
+    appointment.status = "arrived";
+    appointment.arrived_at = new Date();
+    await appointment.save();
+
+    const apptData: any = appointment;
+    const clientUser = apptData.Client?.User;
+    const profUser = apptData.Professional?.User;
+    const service = apptData.Service;
+
+    if (clientUser) {
+      await NotificationModel.create({
+        user_id: clientUser.id,
+        title: "Profissional chegou no local! 🎯",
+        message: `O profissional ${profUser?.name || ""} chegou! Seu código para iniciar o serviço é: ${code}`,
+        notification_type: "appointment",
+        related_entity_id: appointment.id,
+        is_read: false,
+      });
+
+      await syncBotSessionsForAppointmentStatus(appointment);
+
+      emitAppointmentStatusUpdate(clientUser.id, {
+        appointment_id: appointment.id,
+        status: "arrived",
+        verification_code: code,
+        session_ids: [],
+        message: `Profissional ${profUser?.name || ""} chegou! Passe o código ${code} para ele.`,
+        payment_status: appointment.payment_intent_id ? "paid" : "pending",
+        payment_pending: !appointment.payment_intent_id,
+        paid: !!appointment.payment_intent_id,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    const apptJson = appointment.toJSON() as any;
+    delete apptJson.verification_code;
+
+    logger.info("Appointment marcado como chegou no local", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Chegada confirmada com sucesso! Peça o código de 4 dígitos ao cliente.",
+      appointment: apptJson,
+    });
+  } catch (error: any) {
+    logError("Erro ao marcar chegada no local", error, { paramId });
+    res.status(500).json({ error: "Erro ao confirmar chegada no local" });
+  }
+};
+
+export const startServiceAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+  const { code } = req.body;
+
+  try {
+    if (!code || String(code).trim().length !== 4) {
+      return res.status(400).json({ error: "Informe o código de 4 dígitos." });
+    }
+
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ServiceModel, as: "Service" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const professional = (appointment as any).Professional;
+    if (!authReq.user || professional?.user_id !== authReq.user.id) {
+      return res.status(403).json({
+        error: "Apenas o profissional responsável pode iniciar o serviço.",
+      });
+    }
+
+    if (appointment.status !== "arrived" && appointment.status !== "in_progress") {
+      return res.status(400).json({
+        error: `Não é possível iniciar o serviço em um agendamento com status '${appointment.status}'`,
+      });
+    }
+
+    if (String(appointment.verification_code).trim() !== String(code).trim()) {
+      return res.status(400).json({
+        error: "Código de verificação incorreto. Peça novamente ao cliente.",
+      });
+    }
+
+    appointment.status = "in_progress";
+    appointment.started_at = new Date();
+    await appointment.save();
+
+    const apptData: any = appointment;
+    const clientUser = apptData.Client?.User;
+    const profUser = apptData.Professional?.User;
+    const service = apptData.Service;
+
+    if (clientUser) {
+      await NotificationModel.create({
+        user_id: clientUser.id,
+        title: "Serviço Iniciado! 🚀",
+        message: `O serviço '${service?.title || ""}' com ${profUser?.name || ""} foi iniciado com sucesso.`,
+        notification_type: "appointment",
+        related_entity_id: appointment.id,
+        is_read: false,
+      });
+
+      emitAppointmentStatusUpdate(clientUser.id, {
+        appointment_id: appointment.id,
+        status: "in_progress",
+        session_ids: [],
+        message: `Serviço iniciado por ${profUser?.name || ""}.`,
+        payment_status: appointment.payment_intent_id ? "paid" : "pending",
+        payment_pending: !appointment.payment_intent_id,
+        paid: !!appointment.payment_intent_id,
+        updated_at: new Date().toISOString(),
+      });
+    }
+
+    const apptJson = appointment.toJSON() as any;
+    delete apptJson.verification_code;
+
+    logger.info("Appointment iniciado", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Serviço iniciado com sucesso!",
+      appointment: apptJson,
+    });
+  } catch (error: any) {
+    logError("Erro ao iniciar serviço", error, { paramId });
+    res.status(500).json({ error: "Erro ao iniciar serviço" });
+  }
+};
+
+export const getAppointmentById = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+
+  if (!authReq.user) {
+    return res.status(401).json({ error: "Usuário não autenticado" });
+  }
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: ServiceModel,
+          as: "Service",
+        },
+        {
+          model: ClientModel,
+          as: "Client",
+          include: [
+            {
+              model: UserModel,
+              as: "User",
+              attributes: ["id", "name", "avatar_uri", "phone", "email"],
+            },
+          ],
+        },
+        {
+          model: ProfessionalModel,
+          as: "Professional",
+          include: [
+            {
+              model: UserModel,
+              as: "User",
+              attributes: ["id", "name", "avatar_uri", "phone", "email"],
+            },
+          ],
+        },
+        {
+          model: AddressModel,
+          as: "Address",
+        },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const apptData = appointment as any;
+    const clientUserId = apptData.Client?.User?.id;
+    const profUserId = apptData.Professional?.User?.id;
+    const currentUserId = authReq.user.id;
+
+    if (currentUserId !== clientUserId && currentUserId !== profUserId) {
+      return res.status(403).json({ error: "Acesso negado a este agendamento" });
+    }
+
+    const json = appointment.toJSON() as any;
+    if (currentUserId === profUserId) {
+      delete json.verification_code;
+    }
+
+    res.json(json);
+  } catch (error: any) {
+    logError("Erro ao buscar agendamento por ID", error, { paramId });
+    res.status(500).json({ error: "Erro interno ao buscar agendamento" });
   }
 };
