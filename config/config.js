@@ -55,6 +55,41 @@ if (process.env.__DEV__) {
   });
 }
 
+const testUrl = process.env.PR2_TEST_DATABASE_URL;
+let testConfig = null;
+
+if (testUrl) {
+  try {
+    const url = new URL(testUrl);
+    testConfig = {
+      username: decodeURIComponent(url.username),
+      password: decodeURIComponent(url.password),
+      database: url.pathname.replace(/^\//, ""),
+      host: url.hostname,
+      port: Number(url.port) || getDefaultPort(dialect),
+      dialect,
+      dialectOptions: getSSLOptions(dialect, url.hostname),
+      logging: false,
+    };
+  } catch (err) {
+    console.warn("⚠️ PR2_TEST_DATABASE_URL inválida:", err.message);
+  }
+}
+
+if (!testConfig) {
+  testConfig = {
+    username: "delbicos_test",
+    password: "test123",
+    database: "pr2_test",
+    host: "localhost",
+    port: 5433,
+    dialect: "postgres",
+    dialectOptions: undefined,
+    logging: false,
+  };
+}
+
+
 const config = {
   development: {
     username: process.env.SEQUELIZE_DB_USER || "root",
@@ -77,6 +112,18 @@ const config = {
     dialectOptions: getSSLOptions(dialect, process.env.SEQUELIZE_HOST),
     logging: process.env.DB_LOGGING === "true" ? console.log : false,
   },
+  test: testConfig,
+  production: {
+    ...(process.env.DATABASE_URL ? { use_env_variable: "DATABASE_URL" } : {}),
+    username: process.env.SEQUELIZE_DB_USER,
+    password: process.env.SEQUELIZE_DB_PASS,
+    database: process.env.SEQUELIZE_DB_NAME,
+    host: process.env.SEQUELIZE_HOST,
+    port: Number(process.env.SEQUELIZE_PORT) || getDefaultPort(dialect),
+    dialect,
+    dialectOptions: getSSLOptions(dialect, process.env.SEQUELIZE_HOST),
+    logging: process.env.DB_LOGGING === "true" ? console.log : false,
+  }
 };
 
 module.exports = config;
