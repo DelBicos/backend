@@ -1,7 +1,8 @@
 import { BotChatSessionModel, BotSessionContext } from "../../../models/BotChatSession";
 import { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
-import { cancelBotAppointment, createBotAppointment, rescheduleBotAppointment } from "./appointmentActions";
+import { BotAddressValidationError, cancelBotAppointment, createBotAppointment, rescheduleBotAppointment } from "./appointmentActions.service";
+import { collectBookingDetails, requestBookingAddress } from "./bookingDetails.service";
 import { formatDatePtBR } from "../../../utils/date.util";
 import { logError } from "../../../utils/logger";
 
@@ -15,6 +16,13 @@ export class ConfirmacaoState implements BotStateNode {
   ): Promise<HandlerResult> {
     const ctx = (session.context ?? {}) as BotSessionContext;
     const lower = userMessage.toLowerCase().trim();
+    const pendingAction = ctx.pendingAction ?? "CREATE";
+    if (pendingAction === "CREATE" &&
+        (ctx.bookingDetailsStep === "ADDRESS" ||
+         /^(?:trocar|mudar|outro|alterar)(?: o)? endere[cç]o[.!?]?$/.test(lower)) &&
+        !/^(?:n[aã]o|cancelar|desistir|voltar)[.!?]?$/.test(lower)) {
+      return collectBookingDetails(userMessage, ctx, userId);
+    }
     const confirmed = /\b(sim|s|yes|confirmar|confirmo|ok|pode|vamos)\b/.test(lower);
     const denied = /\b(n[aã]o|nao|no|cancelar|desistir|voltar)\b/.test(lower);
 
@@ -36,12 +44,11 @@ export class ConfirmacaoState implements BotStateNode {
             ? "Ok, o cancelamento foi descartado. Posso ajudá-lo com mais alguma coisa?"
             : "Ok, agendamento descartado. Gostaria de escolher outra data ou horário?",
         nextState: ctx.pendingAction === "CANCEL" ? "FINALIZADO" : "COLETANDO_DATA",
-        contextUpdate: { time: undefined, newTime: undefined },
+        contextUpdate: { time: undefined, newTime: undefined, bookingDetailsStep: undefined,
+          addressId: undefined, addressLabel: undefined, addressOptions: undefined },
         finalize: ctx.pendingAction === "CANCEL",
       };
     }
-
-    const pendingAction = ctx.pendingAction ?? "CREATE";
 
     try {
       if (pendingAction === "CANCEL") {
@@ -82,33 +89,44 @@ export class ConfirmacaoState implements BotStateNode {
       }
 
       // CREATE
+      if (ctx.bookingDetailsStep !== "REVIEW" || !ctx.addressId) {
+        return requestBookingAddress(userId);
+      }
       const appointment = await createBotAppointment(userId, ctx, selectedTimeIso);
       return {
         reply:
-          `✅ Agendamento pré-criado com sucesso!\n\n` +
+          `✅ Agendamento criado com sucesso!\n\n` +
           `ID: ${appointment.id}\n` +
           `Serviço: ${ctx.serviceName}\n` +
           `Data: ${formatDatePtBR(ctx.date!)}\n` +
-          `Horário: ${ctx.time}\n\n` +
-          `Efetue o pagamento via Stripe para concluir o pedido. Após a confirmação do pagamento, o agendamento aguardará o aceite do profissional.`,
+          `Horário: ${ctx.time}\n` +
+          `Endereço: ${ctx.addressLabel}\n` +
+          `O agendamento ficará pendente até a resposta do profissional. Você poderá fazer o pagamento pelo aplicativo enquanto aguarda.`,
         nextState: "AGUARDANDO_CONFIRMACAO",
         contextUpdate: {
           appointmentId: appointment.id,
           appointmentStatus: "pending",
           appointmentPaid: false,
-          serviceOptions: ["Pagar Agora"],
+          serviceOptions: [],
+          bookingDetailsStep: undefined,
         },
         appointmentId: appointment.id,
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       logError("Bot: erro ao executar ação de confirmação", error, { userId });
+      if (error instanceof BotAddressValidationError) {
+        const result = await requestBookingAddress(userId);
+        return { ...result, reply: `${error.message}\n\n${result.reply}` };
+      }
       return {
-        reply: `❌ ${error.message ?? "Ocorreu um erro. Por favor, tente novamente."}`,
+        reply: `❌ ${error instanceof Error ? error.message : "Ocorreu um erro. Por favor, tente novamente."}`,
         nextState: pendingAction === "CREATE" || pendingAction === "RESCHEDULE"
           ? "COLETANDO_HORARIO"
           : "INICIO",
-        contextUpdate: { time: undefined, newTime: undefined },
+        contextUpdate: { time: undefined, newTime: undefined, bookingDetailsStep: undefined,
+          addressId: undefined, addressLabel: undefined },
       };
     }
   }
 }
+

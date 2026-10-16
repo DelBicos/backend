@@ -6,7 +6,7 @@ import {
 import { BotChatMessageModel } from "../../models/BotChatMessage";
 import { AppointmentModel } from "../../models/Appointment";
 import { BotState } from "../../constants/botStates";
-import type { BotSessionHistory } from "../botConversation.service";
+import type { BotSessionHistory } from "./botConversation.service";
 import { migrateLegacyServiceOptions } from "./serviceChoice.helpers";
 
 const configuredSessionTtlHours = Number(

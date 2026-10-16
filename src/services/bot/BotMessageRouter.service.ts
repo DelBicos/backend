@@ -2,15 +2,17 @@ import { BotState } from "../../constants/botStates";
 import { BotChatSessionModel } from "../../models/BotChatSession";
 import { isSchedulingActionWord, NluResult } from "../nlu.service";
 import { BotStateNode, HandlerResult } from "./BotStateNode";
-import { InicioState } from "./states/InicioState";
+import { InicioState } from "./states/InicioState.service";
 import { ColetandoServicoState } from "./states/ColetandoServicoState";
 import { ColetandoDataState } from "./states/ColetandoDataState";
 import { ColetandoHorarioState } from "./states/ColetandoHorarioState";
-import { ConfirmacaoState } from "./states/ConfirmacaoState";
+import { ConfirmacaoState } from "./states/ConfirmacaoState.service";
 import { AguardandoIdAgendamentoState } from "./states/AguardandoIdAgendamentoState";
 import { AguardandoConfirmacaoState } from "./states/AguardandoConfirmacaoState";
 import { SelecionandoProfissionalState } from "./states/SelecionandoProfissionalState";
 import { normalizeText } from "../../utils/nlp.util";
+import { requestBookingAddress } from "./states/bookingDetails.service";
+import { buildConfirmationResponse } from "./states/stateHelpers.rules";
 
 const stateNodes: Record<BotState, BotStateNode> = {
   [BotState.INICIO]: new InicioState(),
@@ -20,6 +22,7 @@ const stateNodes: Record<BotState, BotStateNode> = {
   [BotState.COLETANDO_HORARIO]: new ColetandoHorarioState(),
   [BotState.VERIFICANDO_DISPONIBILIDADE]: new ColetandoHorarioState(), // Roteia para horário
   [BotState.CONFIRMACAO]: new ConfirmacaoState(),
+  [BotState.COLETANDO_ENDERECO]: new ConfirmacaoState(),
   [BotState.AGUARDANDO_CONFIRMACAO]: new AguardandoConfirmacaoState(),
   [BotState.AGUARDANDO_ID_AGENDAMENTO]: new AguardandoIdAgendamentoState(),
   [BotState.FINALIZADO]: new InicioState(),
@@ -206,6 +209,39 @@ export class BotMessageRouter {
       );
     }
 
+    // A escolha do profissional inicia a coleta restante, nunca cria a reserva.
+    // A confirmação final só é mostrada depois da escolha do endereço.
+    const context = { ...(session.context ?? {}), ...result.contextUpdate };
+    if (result.nextState === BotState.CONFIRMACAO &&
+        (context.pendingAction ?? "CREATE") === "CREATE" &&
+        context.bookingDetailsStep === "REVIEW" &&
+        state !== BotState.CONFIRMACAO) {
+      const confirmation = buildConfirmationResponse(
+        context,
+        context.date ?? "",
+        context.time ?? "",
+        context,
+      );
+      return {
+        ...confirmation,
+        reply: buildConfirmationResponse(
+          context,
+          context.date ?? "",
+          context.time ?? "",
+          confirmation.contextUpdate,
+        ).reply,
+        contextUpdate: { ...context, ...confirmation.contextUpdate },
+      };
+    }
+    if (result.nextState === BotState.CONFIRMACAO &&
+        (context.pendingAction ?? "CREATE") === "CREATE" &&
+        context.bookingDetailsStep !== "REVIEW") {
+      const addressPrompt = await requestBookingAddress(userId);
+      return {
+        ...addressPrompt,
+        contextUpdate: { ...result.contextUpdate, ...addressPrompt.contextUpdate },
+      };
+    }
     return result;
   }
 }
