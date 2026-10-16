@@ -1,8 +1,8 @@
-import Ticket, { ITicket, TicketUserType } from "../models/Ticket";
-import { ProfessionalModel } from "../models/Professional";
-import { AppointmentModel } from "../models/Appointment";
-import { generateTicketCode } from "../utils/ticketCode";
-import { CreateTicketInput } from "../middlewares/ticket.validation";
+import Ticket, { ITicket, TicketUserType } from "../../models/Ticket";
+import { ProfessionalModel } from "../../models/Professional";
+import { AppointmentModel } from "../../models/Appointment";
+import { generateTicketCode } from "../../utils/ticketCode";
+import { CreateTicketInput } from "../../middlewares/ticket.validation";
 
 export const resolveUserType = async (
   userId: number
