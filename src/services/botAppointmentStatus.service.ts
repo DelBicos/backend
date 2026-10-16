@@ -23,7 +23,7 @@ export async function syncBotSessionsForAppointmentStatus(
   ]);
   if (!client) return null;
 
-  const sessions = await BotChatSessionModel.findAll({
+  let sessions = await BotChatSessionModel.findAll({
     where: {
       user_id: client.user_id,
       appointment_id: appointment.id,
@@ -32,9 +32,32 @@ export async function syncBotSessionsForAppointmentStatus(
     order: [["id", "DESC"]],
   });
 
+  if (sessions.length === 0) {
+    const [newSession] = await BotChatSessionModel.findOrCreate({
+      where: {
+        user_id: client.user_id,
+        appointment_id: appointment.id,
+      },
+      defaults: {
+        user_id: client.user_id,
+        appointment_id: appointment.id,
+        auth_session_id: `session_${client.user_id}_${appointment.id}`,
+        channel: "app",
+        status: "active",
+        state: BotState.INICIO,
+        context: {
+          appointmentId: appointment.id,
+          appointmentStatus: appointment.status,
+          appointmentPaid: Boolean(appointment.payment_intent_id),
+        },
+      },
+    });
+    sessions = [newSession];
+  }
+
   const paid = Boolean(appointment.payment_intent_id);
   const paymentStatus = getAppointmentPaymentStatus(appointment);
-  const message = getAppointmentStatusMessage(appointment.status, paid);
+  const message = getAppointmentStatusMessage(appointment.status, paid, appointment.verification_code);
 
   for (const session of sessions) {
     const context = (session.context ?? {}) as BotSessionContext;

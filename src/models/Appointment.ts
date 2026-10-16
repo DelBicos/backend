@@ -1,6 +1,7 @@
-import { DataTypes, Model, Optional, Transaction } from "sequelize";
+import { DataTypes, Model, Op, Optional, Transaction } from "sequelize";
 import { sequelize } from "../config/database";
 import { customAlphabet } from 'nanoid';
+import { generateConfirmationCode } from "../utils/confirmationCode.util";
 
 const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 export const generateShortId = customAlphabet(alphabet, 6);
@@ -38,10 +39,13 @@ export interface IAppointment {
   start_time: Date;
   end_time: Date;
   completed_at?: Date;
+  arrived_at?: Date;
+  started_at?: Date;
+  verification_code?: string;
   final_price?: number;
   rating?: number;
   review?: string;
-  status?: "pending" | "confirmed" | "completed" | "canceled";
+  status?: "pending" | "confirmed" | "completed" | "canceled" | "in_transit" | "arrived" | "in_progress";
   payment_intent_id?: string | null;
   createdAt?: Date;
   updatedAt?: Date;
@@ -62,10 +66,13 @@ export class AppointmentModel extends Model<
   public start_time!: Date;
   public end_time!: Date;
   public completed_at?: Date;
+  public arrived_at?: Date;
+  public started_at?: Date;
+  public verification_code?: string;
   public final_price?: number;
   public rating?: number;
   public review?: string;
-  public status!: "pending" | "confirmed" | "completed" | "canceled";
+  public status!: "pending" | "confirmed" | "completed" | "canceled" | "in_transit" | "arrived" | "in_progress";
   public created_at!: Date;
   public payment_intent_id?: string | null;
   public readonly createdAt!: Date;
@@ -130,6 +137,18 @@ AppointmentModel.init(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    arrived_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    started_at: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    verification_code: {
+      type: DataTypes.STRING(6),
+      allowNull: true,
+    },
     final_price: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: true,
@@ -143,7 +162,7 @@ AppointmentModel.init(
       allowNull: false,
     },
     status: {
-      type: DataTypes.ENUM("pending", "confirmed", "completed", "canceled"),
+      type: DataTypes.ENUM("pending", "confirmed", "completed", "canceled", "in_transit", "arrived", "in_progress"),
       defaultValue: "pending",
     },
     payment_intent_id: {
@@ -181,6 +200,7 @@ AppointmentModel.init(
     timestamps: true,
     hooks: {
       beforeValidate: async (appointment: AppointmentModel, options) => {
+        const tx = (options as { transaction?: Transaction }).transaction;
         if (!appointment.short_id) {
           let shortId: string;
           let attempts = 0;
@@ -191,9 +211,36 @@ AppointmentModel.init(
             if (attempts > 100) {
               throw new Error('Não foi possível gerar short_id único após 100 tentativas');
             }
-            const existing = await AppointmentModel.findOne({ where: { short_id: shortId }, transaction: (options as { transaction?: Transaction }).transaction });
+            const existing = await AppointmentModel.findOne({ where: { short_id: shortId }, transaction: tx });
             if (!existing) {
               appointment.short_id = shortId;
+              unique = true;
+            }
+          }
+        }
+
+        // O código só precisa ser único entre agendamentos ativos: são apenas 67.600
+        // combinações (AB-12), e checar o histórico inteiro esgotaria o espaço com o tempo.
+        if (!appointment.verification_code) {
+          let code: string;
+          let attempts = 0;
+          let unique = false;
+          while (!unique) {
+            code = generateConfirmationCode();
+            attempts++;
+            if (attempts > 100) {
+              throw new Error('Não foi possível gerar verification_code único após 100 tentativas');
+            }
+            const existing = await AppointmentModel.findOne({
+              where: {
+                verification_code: code,
+                status: { [Op.notIn]: ["completed", "canceled"] },
+              },
+              attributes: ["id"],
+              transaction: tx,
+            });
+            if (!existing) {
+              appointment.verification_code = code;
               unique = true;
             }
           }

@@ -5,6 +5,12 @@ import {
   createAppointment,
   getAllAppointments,
   reviewAppointment,
+  markInTransitAppointment,
+  markArrivedAppointment,
+  startServiceAppointment,
+  completeServiceAppointment,
+  getAppointmentAuditTrail,
+  getAppointmentById,
 } from "../appointment.controller";
 import { AppointmentModel } from "../../models/Appointment";
 import { UserModel } from "../../models/User";
@@ -14,11 +20,20 @@ import { ServiceModel } from "../../models/Service";
 import { AddressModel } from "../../models/Address";
 import { NotificationModel } from "../../models/Notification";
 import { ensureChatRoomForAppointment } from "../../utils/chatRoom";
+import { AppointmentAuditLogModel } from "../../models/AppointmentAuditLog";
+import { AdminModel } from "../../models/Admin";
 
 jest.mock("../../config/database", () => {
   const { Sequelize } = require("sequelize");
+  const sequelize = new Sequelize({ dialect: "postgres", logging: false });
+  // Sem banco nos testes unitários: a transação só executa o callback.
+  sequelize.transaction = jest.fn(async (cb: (t: object) => unknown) => cb({}));
   return {
-    sequelize: new Sequelize({ dialect: "postgres", logging: false }),
+    sequelize,
+    chatMongoConnection: {
+      model: jest.fn().mockReturnValue({}),
+      on: jest.fn(),
+    },
   };
 });
 jest.mock("../../models/Appointment");
@@ -29,6 +44,13 @@ jest.mock("../../models/Address");
 jest.mock("../../models/Service");
 jest.mock("../../models/Subcategory");
 jest.mock("../../models/Notification");
+jest.mock("../../models/Admin");
+jest.mock("../../models/AppointmentAuditLog", () => ({
+  AppointmentAuditLogModel: {
+    create: jest.fn().mockResolvedValue({}),
+    findAll: jest.fn().mockResolvedValue([]),
+  },
+}));
 jest.mock("../../services/payment.service", () => ({ PaymentService: {} }));
 jest.mock("../../utils/chatRoom", () => ({
   ensureChatRoomForAppointment: jest.fn(),
@@ -638,3 +660,421 @@ describe("Caixa preta — avaliação do agendamento (reviewAppointment)", () =>
     expect(save).not.toHaveBeenCalled();
   });
 });
+
+describe("markArrivedAppointment", () => {
+  let req: any;
+  let res: Partial<Response>;
+  let jsonMock: jest.Mock;
+  let statusMock: jest.Mock;
+  let saveMock: jest.Mock;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jsonMock = jest.fn();
+    statusMock = jest.fn().mockReturnValue({ json: jsonMock });
+    saveMock = jest.fn();
+    req = {
+      user: { id: 2 },
+      params: { id: "100" },
+      body: { latitude: -23.5505, longitude: -46.6333 },
+    };
+    res = { status: statusMock, json: jsonMock };
+  });
+
+  it("deve recusar se coordenadas latitude e longitude não forem informadas", async () => {
+    req.body = {};
+    await markArrivedAppointment(req as Request, res as Response);
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "Coordenadas (latitude e longitude) são obrigatórias para confirmar a chegada.",
+    });
+  });
+
+  it("deve recusar se o agendamento não estiver em status in_transit ou arrived", async () => {
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      status: "canceled",
+      Professional: { user_id: 2 },
+      Address: { lat: -23.5505, lng: -46.6333 },
+    });
+
+    await markArrivedAppointment(req as Request, res as Response);
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "Não é possível marcar chegada em um agendamento com status 'canceled'",
+    });
+  });
+
+  it("não deve retornar verification_code no JSON de resposta para o profissional (CHK-02)", async () => {
+    const mockAppt = {
+      id: 100,
+      status: "in_transit",
+      verification_code: "1234",
+      Professional: { user_id: 2, User: { id: 2, name: "Prof" } },
+      Client: { User: { id: 1, name: "Cli" } },
+      Service: { title: "Serviço" },
+      Address: { lat: -23.5505, lng: -46.6333 },
+      save: saveMock,
+      toJSON: () => ({ id: 100, status: "arrived", verification_code: "1234" }),
+    };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue(mockAppt);
+
+    await markArrivedAppointment(req as Request, res as Response);
+
+    expect(saveMock).toHaveBeenCalled();
+    const result = jsonMock.mock.calls[0][0];
+    expect(result.success).toBe(true);
+    expect(result.appointment).not.toHaveProperty("verification_code");
+    expect(result).not.toHaveProperty("verification_code");
+  });
+});
+
+describe("getAppointmentById", () => {
+  let req: any;
+  let res: Partial<Response>;
+  let jsonMock: jest.Mock;
+  let statusMock: jest.Mock;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jsonMock = jest.fn();
+    statusMock = jest.fn().mockReturnValue({ json: jsonMock });
+    req = { user: { id: 1 }, params: { id: "100" } };
+    res = { status: statusMock, json: jsonMock };
+  });
+
+  it("deve retornar 401 se usuário não estiver autenticado", async () => {
+    req.user = undefined;
+    await getAppointmentById(req as Request, res as Response);
+    expect(statusMock).toHaveBeenCalledWith(401);
+  });
+
+  it("deve retornar 403 se o usuário não for nem cliente nem profissional do agendamento", async () => {
+    req.user = { id: 99 };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      Client: { User: { id: 1 } },
+      Professional: { User: { id: 2 } },
+    });
+
+    await getAppointmentById(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(403);
+    expect(jsonMock).toHaveBeenCalledWith({ error: "Acesso negado a este agendamento" });
+  });
+
+  it("não deve incluir verification_code quando a requisição for feita pelo profissional (CHK-02)", async () => {
+    req.user = { id: 2 };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      verification_code: "9876",
+      Client: { User: { id: 1 } },
+      Professional: { User: { id: 2 } },
+      toJSON: () => ({ id: 100, verification_code: "9876" }),
+    });
+
+    await getAppointmentById(req as Request, res as Response);
+
+    const result = jsonMock.mock.calls[0][0];
+    expect(result).not.toHaveProperty("verification_code");
+  });
+
+  it("deve incluir verification_code quando a requisição for feita pelo cliente (CHK-02)", async () => {
+    req.user = { id: 1 };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      verification_code: "9876",
+      Client: { User: { id: 1 } },
+      Professional: { User: { id: 2 } },
+      toJSON: () => ({ id: 100, verification_code: "9876" }),
+    });
+
+    await getAppointmentById(req as Request, res as Response);
+
+    const result = jsonMock.mock.calls[0][0];
+    expect(result).toHaveProperty("verification_code", "9876");
+  });
+});
+
+describe("startServiceAppointment (CHK-03 e CHK-06)", () => {
+  let req: any;
+  let res: Partial<Response>;
+  let jsonMock: jest.Mock;
+  let statusMock: jest.Mock;
+  let saveMock: jest.Mock;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jsonMock = jest.fn();
+    statusMock = jest.fn().mockReturnValue({ json: jsonMock });
+    saveMock = jest.fn().mockResolvedValue(true);
+    req = { user: { id: 2 }, params: { id: "100" }, body: { code: "AB-12" } };
+    res = { status: statusMock, json: jsonMock };
+  });
+
+  it("deve rejeitar se o código já tiver sido utilizado (CHK-06)", async () => {
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      status: "in_progress",
+      verification_code: "AB-12",
+      Professional: { user_id: 2 },
+    });
+
+    await startServiceAppointment(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "Este código já foi utilizado para este agendamento.",
+    });
+  });
+
+  it("deve rejeitar se o código for inválido ou incorreto (CHK-06)", async () => {
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      status: "arrived",
+      verification_code: "AB-12",
+      Professional: { user_id: 2 },
+    });
+    req.body = { code: "XX-99" };
+
+    await startServiceAppointment(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "Código de confirmação incorreto. Verifique o código com o cliente.",
+    });
+  });
+
+  it("deve recusar código com letras minúsculas (validação case-sensitive)", async () => {
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      status: "arrived",
+      verification_code: "AB-12",
+      Professional: { user_id: 2 },
+    });
+    req.body = { code: "ab-12" };
+
+    await startServiceAppointment(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(AppointmentModel.update).not.toHaveBeenCalled();
+  });
+
+  it("deve realizar check-in com sucesso quando código conferir (CHK-03)", async () => {
+    (AppointmentModel.update as jest.Mock).mockResolvedValue([1]);
+    const mockAppt = {
+      id: 100,
+      status: "arrived",
+      verification_code: "AB-12",
+      Professional: { user_id: 2, User: { id: 2, name: "Profissional" } },
+      Client: { User: { id: 1, name: "Cliente" } },
+      Service: { title: "Pintura" },
+      save: saveMock,
+      toJSON: () => ({ id: 100, status: "in_progress", verification_code: "AB-12" }),
+    };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue(mockAppt);
+
+    await startServiceAppointment(req as Request, res as Response);
+
+    expect(AppointmentModel.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "in_progress", started_at: expect.any(Date) }),
+      expect.objectContaining({ where: { id: 100, status: "arrived" } }),
+    );
+    expect(AppointmentAuditLogModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "check_in", from_status: "arrived", to_status: "in_progress" }),
+      expect.objectContaining({ transaction: expect.anything() }),
+    );
+    expect(mockAppt.status).toBe("in_progress");
+    const result = jsonMock.mock.calls[0][0];
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Check-in realizado com sucesso");
+  });
+
+  it("deve retornar 409 se outra requisição fizer o check-in antes (concorrência)", async () => {
+    (AppointmentModel.update as jest.Mock).mockResolvedValue([0]);
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      status: "arrived",
+      verification_code: "AB-12",
+      Professional: { user_id: 2 },
+    });
+
+    await startServiceAppointment(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(409);
+    expect(AppointmentAuditLogModel.create).not.toHaveBeenCalledWith(
+      expect.objectContaining({ action: "check_in" }),
+      expect.anything(),
+    );
+  });
+});
+
+describe("completeServiceAppointment (CHK-04 e CHK-06)", () => {
+  let req: any;
+  let res: Partial<Response>;
+  let jsonMock: jest.Mock;
+  let statusMock: jest.Mock;
+  let saveMock: jest.Mock;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jsonMock = jest.fn();
+    statusMock = jest.fn().mockReturnValue({ json: jsonMock });
+    saveMock = jest.fn().mockResolvedValue(true);
+    req = { user: { id: 2 }, params: { id: "100" }, body: { code: "AB-12" } };
+    res = { status: statusMock, json: jsonMock };
+  });
+
+  it("deve rejeitar se o serviço já estiver concluído (CHK-06)", async () => {
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      status: "completed",
+      verification_code: "AB-12",
+      Professional: { user_id: 2 },
+    });
+
+    await completeServiceAppointment(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "Este serviço já foi concluído anteriormente.",
+    });
+  });
+
+  it("deve rejeitar se o código para check-out estiver incorreto (CHK-06)", async () => {
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      status: "in_progress",
+      verification_code: "AB-12",
+      Professional: { user_id: 2 },
+    });
+    req.body = { code: "WR-00" };
+
+    await completeServiceAppointment(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "Código de confirmação incorreto. Verifique o código com o cliente.",
+    });
+  });
+
+  it("deve realizar check-out com sucesso quando código conferir (CHK-04)", async () => {
+    (AppointmentModel.update as jest.Mock).mockResolvedValue([1]);
+    const mockAppt = {
+      id: 100,
+      status: "in_progress",
+      verification_code: "AB-12",
+      Professional: { user_id: 2, User: { id: 2, name: "Profissional" } },
+      Client: { User: { id: 1, name: "Cliente" } },
+      Service: { title: "Pintura" },
+      save: saveMock,
+      toJSON: () => ({ id: 100, status: "completed", verification_code: "AB-12" }),
+    };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue(mockAppt);
+
+    await completeServiceAppointment(req as Request, res as Response);
+
+    expect(AppointmentModel.update).toHaveBeenCalledWith(
+      expect.objectContaining({ status: "completed", completed_at: expect.any(Date) }),
+      expect.objectContaining({ where: { id: 100, status: "in_progress" } }),
+    );
+    expect(AppointmentAuditLogModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "check_out", from_status: "in_progress", to_status: "completed" }),
+      expect.objectContaining({ transaction: expect.anything() }),
+    );
+    expect(mockAppt.status).toBe("completed");
+    const result = jsonMock.mock.calls[0][0];
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("Check-out realizado com sucesso");
+  });
+
+  it("deve retornar 409 se outra requisição fizer o check-out antes (concorrência)", async () => {
+    (AppointmentModel.update as jest.Mock).mockResolvedValue([0]);
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      status: "in_progress",
+      verification_code: "AB-12",
+      Professional: { user_id: 2 },
+    });
+
+    await completeServiceAppointment(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(409);
+  });
+});
+
+describe("getAppointmentAuditTrail (CHK-05 e CHK-07)", () => {
+  let req: any;
+  let res: Partial<Response>;
+  let jsonMock: jest.Mock;
+  let statusMock: jest.Mock;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jsonMock = jest.fn();
+    statusMock = jest.fn().mockReturnValue({ json: jsonMock });
+    req = { user: { id: 1 }, params: { id: "100" } };
+    res = { status: statusMock, json: jsonMock };
+    (AdminModel.findOne as jest.Mock).mockResolvedValue(null);
+  });
+
+  it("deve retornar 403 se usuário não fizer parte do agendamento", async () => {
+    req.user = { id: 99 };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      Client: { user_id: 1 },
+      Professional: { user_id: 2 },
+    });
+
+    await getAppointmentAuditTrail(req as Request, res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(403);
+  });
+
+  it("deve retornar os registros de auditoria ordenados para o cliente (CHK-07)", async () => {
+    req.user = { id: 1 };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      Client: { user_id: 1 },
+      Professional: { user_id: 2 },
+    });
+
+    await getAppointmentAuditTrail(req as Request, res as Response);
+
+    const result = jsonMock.mock.calls[0][0];
+    expect(result.success).toBe(true);
+    expect(result).toHaveProperty("audit_trail");
+  });
+
+  it("deve permitir que administradores acessem os registros de auditoria mesmo sem ser cliente ou profissional", async () => {
+    req.user = { id: 99, role: "admin" };
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      Client: { user_id: 1 },
+      Professional: { user_id: 2 },
+    });
+
+    await getAppointmentAuditTrail(req as Request, res as Response);
+
+    const result = jsonMock.mock.calls[0][0];
+    expect(result.success).toBe(true);
+    expect(result).toHaveProperty("audit_trail");
+  });
+
+  it("deve permitir acesso se o registro de admin for encontrado no banco de dados", async () => {
+    req.user = { id: 99 };
+    (AdminModel.findOne as jest.Mock).mockResolvedValue({ id: 1, user_id: 99 });
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
+      id: 100,
+      Client: { user_id: 1 },
+      Professional: { user_id: 2 },
+    });
+
+    await getAppointmentAuditTrail(req as Request, res as Response);
+
+    const result = jsonMock.mock.calls[0][0];
+    expect(result.success).toBe(true);
+    expect(result).toHaveProperty("audit_trail");
+  });
+});
+

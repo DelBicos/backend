@@ -15,11 +15,22 @@ import {
   syncChatRoomStatusForAppointment,
 } from "../utils/chatRoom";
 import { syncBotSessionsForAppointmentStatus } from "../services/botAppointmentStatus.service";
+import { emitAppointmentStatusUpdate } from "../realtime/chatSocket";
 import {
   createAppointmentWithScheduleLock,
   changePendingAppointmentStatus,
   ScheduleConflictError,
 } from "../services/appointmentSchedule.service";
+import {
+  AppointmentWithRelations,
+  processAppointmentInTransit,
+  processAppointmentArrived,
+  processAppointmentCheckin,
+  processAppointmentCheckout,
+  sendAppointmentStatusNotification,
+  canUserAccessAuditTrail,
+  fetchAppointmentAuditTrail,
+} from "../services/appointment/checkin.service";
 
 const formatDate = (dateStr: string | Date) =>
   new Date(dateStr).toLocaleDateString("pt-BR");
@@ -99,11 +110,9 @@ export const createAppointment = async (req: Request, res: Response) => {
     today.setHours(0, 0, 0, 0);
     const minAdvanceDate = new Date(today);
     minAdvanceDate.setDate(minAdvanceDate.getDate() + 2);
-
     if (startDate < minAdvanceDate) {
       return res.status(400).json({
-        error:
-          "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
+        error: "Os agendamentos precisam ser feitos com no mínimo 48 horas (2 dias) de antecedência.",
       });
     }
 
@@ -371,6 +380,12 @@ export const getAllAppointments = async (req: Request, res: Response) => {
         json.payment_method = json.payment_intent_id
           ? "Cartão de Crédito"
           : "Cartão de Crédito";
+
+        // Apenas clientes visualizam o código de verificação
+        if (role === "professional") {
+          delete json.verification_code;
+        }
+
         return json;
       },
     );
@@ -387,7 +402,7 @@ export const confirmAppointment = async (req: Request, res: Response) => {
   try {
     const authReq = req as AuthenticatedRequest;
     let appointment = await AppointmentModel.findOne({
-      where: { short_id: id },
+      where: { short_id: id }
     });
     if (!appointment && !isNaN(Number(id))) {
       appointment = await AppointmentModel.findByPk(Number(id));
@@ -400,13 +415,10 @@ export const confirmAppointment = async (req: Request, res: Response) => {
         error: `Não é possível aceitar um agendamento com status '${appointment.status}'`,
       });
     }
-    const professional = await ProfessionalModel.findByPk(
-      appointment.professional_id,
-    );
+    const professional = await ProfessionalModel.findByPk(appointment.professional_id);
     if (!authReq.user || professional?.user_id !== authReq.user.id) {
       return res.status(403).json({
-        error:
-          "Apenas o profissional respons\u00e1vel pode aceitar este agendamento",
+        error: "Apenas o profissional respons\u00e1vel pode aceitar este agendamento",
       });
     }
 
@@ -418,6 +430,53 @@ export const confirmAppointment = async (req: Request, res: Response) => {
     logError("Erro ao confirmar agendamento", error, { appointmentId: id });
     if (error instanceof ScheduleConflictError) return res.status(409).json({ error: error.message });
     res.status(500).json({ error: "Erro ao confirmar agendamento" });
+  }
+};
+
+export const markInTransitAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ServiceModel, as: "Service" },
+        { model: AddressModel, as: "Address" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    if (!authReq.user) {
+      return res.status(401).json({ error: "Usuário não autenticado." });
+    }
+
+    const apptData = appointment as unknown as AppointmentWithRelations;
+    const result = await processAppointmentInTransit(apptData, authReq.user.id);
+
+    if (!result.success) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    logger.info("Appointment marcado como em deslocamento", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Status atualizado para em deslocamento com sucesso.",
+      appointment,
+    });
+  } catch (error: unknown) {
+    logError("Erro ao marcar agendamento a caminho", error, { paramId });
+    res.status(500).json({ error: "Erro ao atualizar status para em deslocamento" });
   }
 };
 
@@ -441,12 +500,12 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
         {
           model: ClientModel,
           as: "Client",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         {
           model: ProfessionalModel,
           as: "Professional",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         { model: ServiceModel, as: "Service" },
       ],
@@ -459,8 +518,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
     const appointmentProfessional = (appointment as any).Professional;
     if (!authReq.user || appointmentProfessional?.user_id !== authReq.user.id) {
       return res.status(403).json({
-        error:
-          "Apenas o profissional respons\u00e1vel pode alterar este agendamento",
+        error: "Apenas o profissional respons\u00e1vel pode alterar este agendamento",
       });
     }
 
@@ -507,9 +565,7 @@ export const updateAppointmentStatus = async (req: Request, res: Response) => {
 
     await syncBotSessionsForAppointmentStatus(appointment);
 
-    logger.info(`Appointment status updated to ${status}`, {
-      appointmentId: id,
-    });
+    logger.info(`Appointment status updated to ${status}`, { appointmentId: id });
     res.json(appointment);
   } catch (error: any) {
     logError("Erro ao atualizar status do agendamento", error, {
@@ -550,7 +606,7 @@ export const reviewAppointment = async (req: Request, res: Response) => {
         {
           model: ClientModel,
           as: "Client",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
       ],
     });
@@ -656,12 +712,12 @@ export const getAppointmentInvoice = async (req: Request, res: Response) => {
         {
           model: ClientModel,
           as: "Client",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         {
           model: ProfessionalModel,
           as: "Professional",
-          include: [{ model: UserModel, as: "User" }],
+          include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }],
         },
         {
           model: AddressModel,
@@ -713,5 +769,322 @@ export const getAppointmentInvoice = async (req: Request, res: Response) => {
     res
       .status(500)
       .json({ error: "Erro ao gerar invoice", details: error.message });
+  }
+};
+
+export const markArrivedAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+  const { latitude, longitude } = req.body;
+
+  try {
+    if (
+      latitude === undefined ||
+      latitude === null ||
+      longitude === undefined ||
+      longitude === null ||
+      !Number.isFinite(Number(latitude)) ||
+      !Number.isFinite(Number(longitude))
+    ) {
+      return res.status(400).json({
+        error: "Coordenadas (latitude e longitude) são obrigatórias para confirmar a chegada.",
+      });
+    }
+
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ServiceModel, as: "Service" },
+        { model: AddressModel, as: "Address" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const apptData = appointment as unknown as AppointmentWithRelations;
+    const result = await processAppointmentArrived(
+      apptData,
+      authReq.user!.id,
+      Number(latitude),
+      Number(longitude),
+    );
+
+    if (!result.success) {
+      return res.status(result.status).json({
+        error: result.error,
+        distance: result.distance,
+        maxDistance: result.maxDistance,
+      });
+    }
+
+    const profName = apptData.Professional?.User?.name || "";
+    await sendAppointmentStatusNotification(
+      apptData,
+      "arrived",
+      "Profissional chegou no local! 🎯",
+      `O profissional ${profName} chegou! Seu código para iniciar o serviço é: ${result.code || ""}`,
+    );
+
+    await syncBotSessionsForAppointmentStatus(appointment);
+
+    const apptJson: Record<string, unknown> = appointment.toJSON
+      ? (appointment.toJSON() as unknown as Record<string, unknown>)
+      : { ...(appointment as unknown as Record<string, unknown>) };
+    delete apptJson.verification_code;
+
+    logger.info("Appointment marcado como chegou no local", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Chegada confirmada com sucesso! Peça o código ao cliente.",
+      appointment: apptJson,
+    });
+  } catch (error: unknown) {
+    logError("Erro ao marcar chegada no local", error, { paramId });
+    res.status(500).json({ error: "Erro ao confirmar chegada no local" });
+  }
+};
+
+export const startServiceAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+  const { code } = req.body;
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ServiceModel, as: "Service" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const apptData = appointment as unknown as AppointmentWithRelations;
+    const result = await processAppointmentCheckin(
+      apptData,
+      authReq.user!.id,
+      code,
+    );
+
+    if (!result.success) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    const profName = apptData.Professional?.User?.name || "";
+    const serviceTitle = apptData.Service?.title || "";
+    await sendAppointmentStatusNotification(
+      apptData,
+      "in_progress",
+      "Serviço Iniciado! 🚀",
+      `O serviço '${serviceTitle}' com ${profName} foi iniciado com sucesso.`,
+    );
+
+    logger.info("Appointment iniciado com sucesso (check-in)", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Check-in realizado com sucesso! Atendimento iniciado.",
+      appointment: appointment.toJSON(),
+    });
+  } catch (error: unknown) {
+    logError("Erro ao iniciar serviço", error, { paramId });
+    res.status(500).json({ error: "Erro ao iniciar serviço" });
+  }
+};
+
+export const completeServiceAppointment = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+  const { code } = req.body;
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ProfessionalModel, as: "Professional", include: [{ model: UserModel, as: "User", attributes: ["id", "name", "avatar_uri", "phone", "email"] }] },
+        { model: ServiceModel, as: "Service" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const apptData = appointment as unknown as AppointmentWithRelations;
+    const result = await processAppointmentCheckout(
+      apptData,
+      authReq.user!.id,
+      code,
+    );
+
+    if (!result.success) {
+      return res.status(result.status).json({ error: result.error });
+    }
+
+    const profName = apptData.Professional?.User?.name || "";
+    const serviceTitle = apptData.Service?.title || "";
+    await sendAppointmentStatusNotification(
+      apptData,
+      "completed",
+      "Serviço Concluído! 🎉",
+      `O serviço '${serviceTitle}' foi finalizado com sucesso por ${profName}.`,
+    );
+
+    logger.info("Appointment finalizado com sucesso (check-out)", { appointmentId: appointment.id });
+    res.json({
+      success: true,
+      message: "Check-out realizado com sucesso! Atendimento concluído.",
+      appointment: appointment.toJSON(),
+    });
+  } catch (error: unknown) {
+    logError("Erro ao finalizar serviço", error, { paramId });
+    res.status(500).json({ error: "Erro ao finalizar serviço" });
+  }
+};
+
+export const getAppointmentAuditTrail = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+
+  if (!authReq.user) {
+    return res.status(401).json({ error: "Usuário não autenticado" });
+  }
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        { model: ClientModel, as: "Client" },
+        { model: ProfessionalModel, as: "Professional" },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const apptData = appointment as unknown as AppointmentWithRelations;
+    const isAdmin = Boolean(authReq.user.admin) || authReq.user.role === "admin";
+    const hasAccess = await canUserAccessAuditTrail(apptData, authReq.user.id, isAdmin);
+
+    if (!hasAccess) {
+      return res.status(403).json({ error: "Acesso negado aos logs deste agendamento." });
+    }
+
+    const logs = await fetchAppointmentAuditTrail(appointment.id);
+
+    res.json({
+      success: true,
+      appointment_id: appointment.id,
+      audit_trail: logs,
+    });
+  } catch (error: unknown) {
+    logError("Erro ao buscar logs de auditoria do agendamento", error, { paramId });
+    res.status(500).json({ error: "Erro ao buscar logs de auditoria" });
+  }
+};
+
+export const getAppointmentById = async (req: Request, res: Response) => {
+  const paramId = req.params.id;
+  const authReq = req as AuthenticatedRequest;
+
+  if (!authReq.user) {
+    return res.status(401).json({ error: "Usuário não autenticado" });
+  }
+
+  try {
+    const isNumeric = /^\d+$/.test(paramId);
+    const whereClause = isNumeric
+      ? { id: Number(paramId) }
+      : { short_id: paramId };
+
+    const appointment = await AppointmentModel.findOne({
+      where: whereClause,
+      include: [
+        {
+          model: ServiceModel,
+          as: "Service",
+        },
+        {
+          model: ClientModel,
+          as: "Client",
+          include: [
+            {
+              model: UserModel,
+              as: "User",
+              attributes: ["id", "name", "avatar_uri", "phone", "email"],
+            },
+          ],
+        },
+        {
+          model: ProfessionalModel,
+          as: "Professional",
+          include: [
+            {
+              model: UserModel,
+              as: "User",
+              attributes: ["id", "name", "avatar_uri", "phone", "email"],
+            },
+          ],
+        },
+        {
+          model: AddressModel,
+          as: "Address",
+        },
+      ],
+    });
+
+    if (!appointment) {
+      return res.status(404).json({ error: "Agendamento não encontrado" });
+    }
+
+    const apptData = appointment as any;
+    const clientUserId = apptData.Client?.User?.id;
+    const profUserId = apptData.Professional?.User?.id;
+    const currentUserId = authReq.user.id;
+
+    if (currentUserId !== clientUserId && currentUserId !== profUserId) {
+      return res.status(403).json({ error: "Acesso negado a este agendamento" });
+    }
+
+    const json = appointment.toJSON() as any;
+
+    // Apenas o cliente do agendamento pode visualizar o código de verificação
+    if (currentUserId !== clientUserId) {
+      delete json.verification_code;
+    }
+
+    res.json(json);
+  } catch (error: any) {
+    logError("Erro ao buscar agendamento por ID", error, { paramId });
+    res.status(500).json({ error: "Erro interno ao buscar agendamento" });
   }
 };

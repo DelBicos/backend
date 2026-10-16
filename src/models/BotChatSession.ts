@@ -93,7 +93,7 @@ export interface BotSessionContext {
   newTime?: string; // HH:MM (para ALTERAR)
   newTimePeriod?: TimePeriod;
   appointmentId?: number;
-  appointmentStatus?: "pending" | "confirmed" | "completed" | "canceled";
+  appointmentStatus?: "pending" | "confirmed" | "completed" | "canceled" | "in_transit" | "arrived" | "in_progress";
   appointmentPaid?: boolean;
   suggestedSlots?: string[];
   serviceOptions?: string[];
