@@ -4,78 +4,108 @@ import Ticket from '../../../models/Ticket';
 import { ProfessionalModel } from '../../../models/Professional';
 import { UserModel } from '../../../models/User';
 import jwt from 'jsonwebtoken';
+import { resetSchema } from '../../../__tests__/helpers/resetSchema';
 
 describe('TICKET-01 — Criação de Chamado', () => {
-  let clientToken: string;
-  let professionalToken: string;
-  let clientId: number;
-  let professionalId: number;
+  let clientToken!: string;
+  let professionalToken!: string;
+  let clientId!: number;
+  let professionalId!: number;
 
   const uniqueSuffix = Date.now().toString(36);
 
   beforeAll(async () => {
-    await Ticket.destroy({ where: {} });
+    console.log('🚀 [ticket.test.ts] beforeAll iniciando');
+    console.log('🚀 [ticket.test.ts] chamando resetSchema...');
+    try {
+      await resetSchema();
+      console.log('✅ [ticket.test.ts] resetSchema concluído — schema completo');
 
-    const client = await UserModel.create({
-      name: 'Cliente Teste',
-      email: `cliente-test-${uniqueSuffix}@delbicos.local`,
-      phone: '11999999999',
-      password: 'senha123',
-    });
-    clientId = client.id;
+      console.log('🚀 [ticket.test.ts] limpando tickets anteriores...');
+      await Ticket.destroy({ where: {} });
 
-    const professionalUser = await UserModel.create({
-      name: 'Prestador Teste',
-      email: `prestador-test-${uniqueSuffix}@delbicos.local`,
-      phone: '11988888888',
-      password: 'senha123',
-    });
-    professionalId = professionalUser.id;
+      console.log('🚀 [ticket.test.ts] criando CLIENTE de teste...');
+      const client = await UserModel.create({
+        name: 'Cliente Teste',
+        email: `cliente-test-${uniqueSuffix}@delbicos.local`,
+        phone: '11999999999',
+        password: 'senha123',
+      });
+      clientId = client.id;
+      console.log(`✅ [ticket.test.ts] Cliente criado: id=${clientId}`);
 
-    const uniqueCpf = String(Date.now()).padStart(11, '0').slice(-11);
+      console.log('🚀 [ticket.test.ts] criando PRESTADOR de teste...');
+      const professionalUser = await UserModel.create({
+        name: 'Prestador Teste',
+        email: `prestador-test-${uniqueSuffix}@delbicos.local`,
+        phone: '11988888888',
+        password: 'senha123',
+      });
+      professionalId = professionalUser.id;
+      console.log(`✅ [ticket.test.ts] Prestador user criado: id=${professionalId}`);
 
-    await ProfessionalModel.create({
-      user_id: professionalId,
-      cpf: uniqueCpf,
-      description: 'Prestador de teste',
-    });
+      const uniqueCpf = String(Date.now()).padStart(11, '0').slice(-11);
+      console.log(`🚀 [ticket.test.ts] criando Professional com cpf=${uniqueCpf}...`);
 
-    const secret = process.env.SECRET_KEY || 'secret';
+      await ProfessionalModel.create({
+        user_id: professionalId,
+        cpf: uniqueCpf,
+        description: 'Prestador de teste',
+      });
+      console.log(`✅ [ticket.test.ts] Professional criado`);
 
-    clientToken = jwt.sign(
-      {
-        user: {
-          id: clientId,
-          name: 'Cliente Teste',
-          email: client.email,
-          phone: '11999999999',
+      console.log('🚀 [ticket.test.ts] gerando tokens JWT...');
+      const secret = process.env.SECRET_KEY || 'secret';
+
+      clientToken = jwt.sign(
+        {
+          user: {
+            id: clientId,
+            name: 'Cliente Teste',
+            email: client.email,
+            phone: '11999999999',
+          },
         },
-      },
-      secret,
-      { expiresIn: '1h' },
-    );
+        secret,
+        { expiresIn: '1h' },
+      );
 
-    professionalToken = jwt.sign(
-      {
-        user: {
-          id: professionalId,
-          name: 'Prestador Teste',
-          email: professionalUser.email,
-          phone: '11988888888',
+      professionalToken = jwt.sign(
+        {
+          user: {
+            id: professionalId,
+            name: 'Prestador Teste',
+            email: professionalUser.email,
+            phone: '11988888888',
+          },
         },
-      },
-      secret,
-      { expiresIn: '1h' },
-    );
+        secret,
+        { expiresIn: '1h' },
+      );
 
-    console.log(`Cliente: id=${clientId}, email=${client.email}`);
-    console.log(`Prestador: id=${professionalId}, email=${professionalUser.email}`);
+      console.log(`✅ [ticket.test.ts] Tokens gerados — beforeAll concluído`);
+      console.log(`✅ Cliente: id=${clientId}, email=${client.email}`);
+      console.log(`✅ Prestador: id=${professionalId}, email=${professionalUser.email}`);
+    } catch (err) {
+      console.error('❌ [ticket.test.ts] ERRO NO BEFOREALL:');
+      console.error('   message:', (err as any)?.message);
+      console.error('   sql:', (err as any)?.sql);
+      console.error('   parent:', (err as any)?.parent?.message);
+      console.error('   original:', (err as any)?.original?.message);
+      throw err;
+    }
   });
 
   afterAll(async () => {
+    console.log('🧹 [ticket.test.ts] afterAll iniciando');
+    if (!clientId || !professionalId) {
+      console.warn('⚠️ [ticket.test.ts] beforeAll falhou — pulando limpeza');
+      return;
+    }
     await Ticket.destroy({ where: { user_id: [clientId, professionalId] } });
     await ProfessionalModel.destroy({ where: { user_id: professionalId } });
     await UserModel.destroy({ where: { id: [clientId, professionalId] } });
+    console.log('✅ [ticket.test.ts] limpeza concluída');
   });
 
   const validPayload = {
@@ -83,6 +113,10 @@ describe('TICKET-01 — Criação de Chamado', () => {
     description: 'Não consigo agendar um serviço de limpeza para amanhã.',
     category: 'AGENDAMENTO' as const,
   };
+
+  /* ============================================================
+   *  SUCESSO
+   * ============================================================ */
 
   it('deve criar chamado para cliente autenticado', async () => {
     const response = await request(app)
@@ -126,6 +160,10 @@ describe('TICKET-01 — Criação de Chamado', () => {
     expect(ticket).not.toBeNull();
     expect(ticket?.priority).toBeNull();
   });
+
+  /* ============================================================
+   *  VALIDAÇÃO (400)
+   * ============================================================ */
 
   it('deve rejeitar título com menos de 5 caracteres', async () => {
     const response = await request(app)
@@ -203,6 +241,10 @@ describe('TICKET-01 — Criação de Chamado', () => {
     expect(ticket?.priority).toBeNull();
   });
 
+  /* ============================================================
+   *  AUTENTICAÇÃO (401 / 403)
+   * ============================================================ */
+
   it('deve retornar 401 quando não houver token', async () => {
     const response = await request(app).post('/api/tickets').send(validPayload);
 
@@ -219,6 +261,9 @@ describe('TICKET-01 — Criação de Chamado', () => {
     expect(response.status).toBe(403);
   });
 
+  /* ============================================================
+   *  LISTAGEM (GET /api/tickets)
+   * ============================================================ */
 
   it('deve listar chamados do cliente autenticado', async () => {
     await request(app)
@@ -264,6 +309,10 @@ describe('TICKET-01 — Criação de Chamado', () => {
       expect(dbTicket?.user_id).toBe(professionalId);
     }
   });
+
+  /* ============================================================
+   *  DETALHES (GET /api/tickets/:id)
+   * ============================================================ */
 
   it('deve retornar detalhes de um chamado do próprio usuário', async () => {
     const created = await request(app)
@@ -311,6 +360,9 @@ describe('TICKET-01 — Criação de Chamado', () => {
     expect(response.status).toBe(400);
   });
 
+  /* ============================================================
+   *  REGRA DE NEGÓCIO
+   * ============================================================ */
 
   it('deve marcar user_type como CLIENTE para usuário sem professional', async () => {
     const response = await request(app)
