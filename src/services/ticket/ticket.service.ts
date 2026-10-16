@@ -3,6 +3,8 @@ import { ProfessionalModel } from "../../models/Professional";
 import { AppointmentModel } from "../../models/Appointment";
 import { generateTicketCode } from "../../utils/ticketCode";
 import { CreateTicketInput } from "../../middlewares/ticket.validation";
+import TicketMessageModel from "../../models/TicketMessage";
+import { UserModel } from "../../models/User";
 
 export const resolveUserType = async (
   userId: number
@@ -90,5 +92,30 @@ export const findTicketByIdForUser = async (
       id: ticketId,
       user_id: userId,
     },
+  });
+};
+
+export const listMessagesByTicket = async (
+  ticketId: number,
+  userId: number
+): Promise<TicketMessageModel[]> => {
+  // 1. Garante ownership
+  const ticket = await Ticket.findOne({
+    where: { id: ticketId, user_id: userId },
+  });
+
+  if (!ticket) return [];
+
+  // 2. Busca mensagens com dados do autor
+  return TicketMessageModel.findAll({
+    where: { ticket_id: ticketId },
+    order: [["createdAt", "ASC"]],
+    include: [
+      {
+        model: UserModel,
+        as: "author",
+        attributes: ["id", "name", "avatar_uri"],
+      },
+    ],
   });
 };
