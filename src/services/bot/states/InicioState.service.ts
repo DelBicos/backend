@@ -1,3 +1,4 @@
+import { AguardandoIdAgendamentoState } from "./AguardandoIdAgendamentoState.service";
 import { Op } from "sequelize";
 import { AppointmentModel } from "../../../models/Appointment";
 import { ClientModel } from "../../../models/Client";
@@ -8,13 +9,14 @@ import type {
 } from "../../../models/BotChatSession";
 import type { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
+import { queryBotAppointments } from "../appointmentQuery.service";
 
 export class InicioState implements BotStateNode {
   public async handle(
     userMessage: string,
     nlu: NluResult,
     session: BotChatSessionModel,
-    userId: number
+    userId: number,
   ): Promise<HandlerResult> {
     const ctx = (session.context ?? {}) as BotSessionContext;
     const normalizedReply = userMessage
@@ -24,9 +26,10 @@ export class InicioState implements BotStateNode {
       .trim();
 
     if (ctx.pendingPrompt === "OFFER_CREATE_AFTER_EMPTY_QUERY") {
-      const confirmed = /\b(sim|s|claro|quero|pode|vamos|bora|ok|beleza)\b/.test(
-        normalizedReply,
-      );
+      const confirmed =
+        /\b(sim|s|claro|quero|pode|vamos|bora|ok|beleza)\b/.test(
+          normalizedReply,
+        );
       const denied = /\b(nao|n|agora nao|depois|cancelar|voltar)\b/.test(
         normalizedReply,
       );
@@ -61,8 +64,7 @@ export class InicioState implements BotStateNode {
 
       if (nlu.intent === "FALLBACK") {
         return {
-          reply:
-            'Deseja iniciar um agendamento? Responda com "sim" ou "não".',
+          reply: 'Deseja iniciar um agendamento? Responda com "sim" ou "não".',
           nextState: "INICIO",
           contextUpdate: {},
         };
@@ -92,13 +94,13 @@ export class InicioState implements BotStateNode {
         }
         if (nlu.entities.date) newCtx.date = nlu.entities.date;
         if (nlu.entities.time) newCtx.time = nlu.entities.time;
-        if (nlu.entities.time_period) newCtx.timePeriod = nlu.entities.time_period;
+        if (nlu.entities.time_period)
+          newCtx.timePeriod = nlu.entities.time_period;
 
         return {
-          reply:
-            nlu.entities.service
-              ? `Ótimo! Você quer agendar "${nlu.entities.service}". Vou localizar esse serviço...`
-              : "Ótimo! Qual serviço você gostaria de agendar? (Ex: corte de cabelo, pintura, limpeza...)",
+          reply: nlu.entities.service
+            ? `Ótimo! Você quer agendar "${nlu.entities.service}". Vou localizar esse serviço...`
+            : "Ótimo! Qual serviço você gostaria de agendar? (Ex: corte de cabelo, pintura, limpeza...)",
           nextState: "COLETANDO_SERVICO",
           contextUpdate: newCtx,
         };
@@ -109,9 +111,35 @@ export class InicioState implements BotStateNode {
         const action = nlu.intent === "CANCELAR" ? "CANCEL" : "RESCHEDULE";
         const actionText = nlu.intent === "CANCELAR" ? "cancelar" : "reagendar";
         const intentName = nlu.intent;
+        const explicitCode = userMessage.match(/#([a-z0-9]{1,6})\b/i)?.[1];
+        // O NLU também pode extrair números da data; só usa ID de remarcação
+        // quando estiver ligado ao verbo ou a uma referência explícita.
+        const numericReference = userMessage.match(
+          /\b(?:id|agendamento|n[uú]mero|alterar|altere|reagendar|reagende|remarcar|remarque)\s+(\d+)\b(?![/:h\d])/i,
+        )?.[1];
+        const reference = explicitCode ?? (action === "CANCEL"
+          ? nlu.entities.appointment_id
+          : numericReference);
+        if (reference !== undefined) {
+          const result = await new AguardandoIdAgendamentoState().handle(
+            explicitCode ? `#${explicitCode}` : String(reference),
+            { ...nlu, entities: {} },
+            { ...session, context: { pendingAction: action } } as BotChatSessionModel,
+            userId,
+          );
+          return {
+            ...result,
+            contextUpdate: { intent: intentName, pendingAction: action, ...result.contextUpdate },
+          };
+        }
 
-        const clientRecord = await ClientModel.findOne({ where: { user_id: userId } });
-        let activeAppointments: any[] = [];
+
+        const clientRecord = await ClientModel.findOne({
+          where: { user_id: userId },
+        });
+        let activeAppointments: Array<
+          AppointmentModel & { Service?: ServiceModel }
+        > = [];
 
         if (clientRecord) {
           activeAppointments = await AppointmentModel.findAll({
@@ -128,13 +156,23 @@ export class InicioState implements BotStateNode {
 
         if (activeAppointments.length > 0) {
           const optionLabels: string[] = [];
-          const appointmentList: Array<{ index: number; id: number; shortId?: string }> = [];
+          const appointmentList: Array<{
+            index: number;
+            id: number;
+            shortId?: string;
+          }> = [];
 
-          const lines = activeAppointments.map((a: any, i: number) => {
+          const lines = activeAppointments.map((a, i) => {
             const idx = i + 1;
             const d = new Date(a.start_time);
-            const dateStr = d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
-            const timeStr = d.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
+            const dateStr = d.toLocaleDateString("pt-BR", {
+              timeZone: "America/Sao_Paulo",
+            });
+            const timeStr = d.toLocaleTimeString("pt-BR", {
+              timeZone: "America/Sao_Paulo",
+              hour: "2-digit",
+              minute: "2-digit",
+            });
             const svcTitle = a.Service?.title ?? "Serviço";
             const label = `${idx}. ${svcTitle} (${dateStr})`;
 
@@ -161,58 +199,17 @@ export class InicioState implements BotStateNode {
           };
         }
 
-        const defaultWord = nlu.intent === "CANCELAR" ? "cancelar" : "reagendar";
+        const defaultWord =
+          nlu.intent === "CANCELAR" ? "cancelar" : "reagendar";
         return {
-          reply:
-            `Para ${defaultWord}, preciso do ID do agendamento. Você pode encontrá-lo na seção "Meus Agendamentos" do app.\n\nDigite o número do ID do agendamento:`,
+          reply: `Para ${defaultWord}, preciso do ID do agendamento. Você pode encontrá-lo na seção "Meus Agendamentos" do app.\n\nDigite o número do ID do agendamento:`,
           nextState: "AGUARDANDO_ID_AGENDAMENTO",
           contextUpdate: { intent: intentName, pendingAction: action },
         };
       }
 
-      case "CONSULTAR": {
-        const clientRecord = await ClientModel.findOne({ where: { user_id: userId } });
-        if (!clientRecord) {
-          return {
-            reply: "Você ainda não possui perfil de cliente. Acesse o app para completar seu cadastro.",
-            nextState: "FINALIZADO",
-            contextUpdate: {},
-            finalize: true,
-          };
-        }
-        const upcoming = await AppointmentModel.findAll({
-          where: {
-            client_id: clientRecord.id,
-            status: { [Op.in]: ["pending", "confirmed"] },
-            start_time: { [Op.gte]: new Date() },
-          },
-          include: [{ model: ServiceModel, as: "Service" }],
-          order: [["start_time", "ASC"]],
-          limit: 5,
-        });
-        if (upcoming.length === 0) {
-          return {
-            reply: "Você não possui agendamentos futuros. Deseja agendar um serviço?",
-            nextState: "INICIO",
-            contextUpdate: {
-              intent: "CONSULTAR",
-              pendingAction: undefined,
-              pendingPrompt: "OFFER_CREATE_AFTER_EMPTY_QUERY",
-            },
-          };
-        }
-        const lines = upcoming.map((a: any, i: number) => {
-          const d = new Date(a.start_time);
-          const dateStr = d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
-          const timeStr = d.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
-          return `${i + 1}. ID ${a.id} — ${a.Service?.title ?? "serviço"} — ${dateStr} às ${timeStr} (${a.status})`;
-        });
-        return {
-          reply: `Seus próximos agendamentos:\n\n${lines.join("\n")}\n\nPosso ajudá-lo com mais alguma coisa?`,
-          nextState: "INICIO",
-          contextUpdate: {},
-        };
-      }
+      case "CONSULTAR":
+        return queryBotAppointments(userId, userMessage, ctx);
 
       default:
         return {

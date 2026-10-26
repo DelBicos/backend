@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { cancelBotAppointment } from "../../services/bot/states/appointmentActions";
+import { cancelBotAppointment } from "../../services/bot/states/appointmentActions.service";
 import {
   cancelClientAppointment,
   createAppointment,
@@ -40,7 +40,7 @@ jest.mock("../../utils/logger", () => ({
   logError: jest.fn(),
   logDatabase: jest.fn(),
 }));
-jest.mock("../../services/bot/states/appointmentActions", () => ({
+jest.mock("../../services/bot/states/appointmentActions.service", () => ({
   cancelBotAppointment: jest.fn(),
 }));
 jest.mock("../../services/botAppointmentStatus.service", () => ({

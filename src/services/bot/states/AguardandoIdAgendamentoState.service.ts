@@ -17,7 +17,8 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
   ): Promise<HandlerResult> {
     const ctx = (session.context ?? {}) as BotSessionContext;
 
-    const trimmedMsg = userMessage.trim();
+    const explicitShortId = userMessage.trim().startsWith("#");
+    const trimmedMsg = userMessage.trim().replace(/^#/, "");
     const clientRecord = await ClientModel.findOne({ where: { user_id: userId } });
     if (!clientRecord) {
       return {
@@ -31,10 +32,10 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
     let appointmentIdToUse: number | undefined;
 
     // 1. Tenta identificar se o usuário selecionou um índice da lista (ex: "1", "2")
-    const parsedNum = parseInt(trimmedMsg, 10);
+    const parsedNum = /^\d+(?:\.\s.*)?$/.test(trimmedMsg) ? parseInt(trimmedMsg, 10) : NaN;
     const appointmentList = (ctx.userAppointmentList as Array<{ index: number; id: number; shortId?: string }>) ?? [];
 
-    if (!isNaN(parsedNum) && appointmentList.length > 0) {
+    if (!explicitShortId && !isNaN(parsedNum) && appointmentList.length > 0) {
       const foundByIndex = appointmentList.find((item) => item.index === parsedNum);
       if (foundByIndex) {
         appointmentIdToUse = foundByIndex.id;
@@ -42,8 +43,8 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
     }
 
     // 2. Se não foi pelo índice, tenta buscar pelo ID direto (nlu ou número direto)
-    if (!appointmentIdToUse) {
-      const rawId = nlu.entities.appointment_id ?? (isNaN(parsedNum) ? undefined : parsedNum);
+    if (!explicitShortId && !appointmentIdToUse) {
+      const rawId = /^[a-z0-9]*[a-z][a-z0-9]*$/i.test(trimmedMsg) ? undefined : nlu.entities.appointment_id ?? (isNaN(parsedNum) ? undefined : parsedNum);
       if (typeof rawId === "number" && rawId > 0) {
         appointmentIdToUse = rawId;
       }
@@ -103,7 +104,10 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
       };
     }
 
-    const apptData: any = appointment;
+    const apptData = appointment as AppointmentModel & {
+      Service?: ServiceModel;
+      Professional?: ProfessionalModel & { User?: UserModel };
+    };
     const svcTitle = apptData.Service?.title ?? "Serviço";
     const profName = apptData.Professional?.User?.name ?? "Profissional";
     const startDate = new Date(appointment.start_time);
@@ -123,6 +127,8 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
         nextState: "CONFIRMACAO",
         contextUpdate: {
           appointmentId: appointment.id,
+          intent: "CANCELAR",
+          pendingAction: "CANCEL",
           serviceId: appointment.service_id,
           professionalId: appointment.professional_id,
           serviceOptions: ["Sim, confirmar", "Não, voltar"],
@@ -139,7 +145,7 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
         `• Serviço: ${svcTitle}\n` +
         `• Profissional: ${profName}\n` +
         `• Data atual: ${dateStr} às ${timeStr}\n\n` +
-        `Qual nova data você prefere?`,
+        `Qual nova data você prefere? Se quiser alterar só o horário, diga "manter a data".`,
       nextState: "COLETANDO_DATA",
       contextUpdate: {
         appointmentId: appointment.id,

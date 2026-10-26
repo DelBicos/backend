@@ -5,13 +5,13 @@ jest.mock("../../services/voiceTranscription.service", () => ({
   VoiceTranscriptionProviderError: class VoiceTranscriptionProviderError extends Error {},
 }));
 
-jest.mock("../../services/botConversation.service", () => ({
+jest.mock("../../services/bot/botConversation.service", () => ({
   processMessage: jest.fn(),
 }));
 
 import { processVoiceCommand } from "../voice.controller";
 import { transcribeVoiceAudio } from "../../services/voiceTranscription.service";
-import { processMessage } from "../../services/botConversation.service";
+import { processMessage } from "../../services/bot/botConversation.service";
 
 function createResponse() {
   const response = {
