@@ -12,6 +12,10 @@ import {
   getAppointmentPaymentStatus,
   getAppointmentStatusMessage,
 } from "../services/botAppointmentStatus.helpers";
+import {
+  botMessageIdempotencyStore,
+  getBotMessageIdempotencyKey,
+} from "../services/botMessageIdempotency.service";
 
 /**
  * POST /api/chat/bot/message
@@ -30,13 +34,24 @@ export const sendBotMessage = async (
     return res.status(401).json({ error: "Usuário não autenticado" });
   }
 
-  const { message, session_id, channel, selected_time, timezone } = req.body as {
+  const { message, session_id, channel, selected_time, timezone, idempotency_key } = req.body as {
     message?: unknown;
     session_id?: unknown;
     channel?: unknown;
     selected_time?: unknown;
     timezone?: unknown;
+    idempotency_key?: unknown;
   };
+
+  const idempotencyKey = getBotMessageIdempotencyKey(
+    req.header("idempotency-key"),
+    idempotency_key,
+  );
+  if (idempotencyKey === null) {
+    return res.status(400).json({
+      error: "Idempotency-Key inválido; use de 8 a 128 caracteres seguros",
+    });
+  }
 
   if (!message || typeof message !== "string" || message.trim().length === 0) {
     return res.status(400).json({ error: "O campo 'message' é obrigatório e não pode estar vazio" });
@@ -62,29 +77,46 @@ export const sendBotMessage = async (
       : undefined;
 
   try {
-    const result = await processMessage(
-      req.user.id,
-      req.authSessionId,
-      cleanMessage,
-      sessionId,
-      channelStr,
-      selectedTimeIso,
-      typeof timezone === "string" ? timezone : undefined,
-    );
+    const executeMessage = async () => {
+      const result = await processMessage(
+        req.user!.id,
+        req.authSessionId,
+        cleanMessage,
+        sessionId,
+        channelStr,
+        selectedTimeIso,
+        typeof timezone === "string" ? timezone : undefined,
+      );
 
-    logger.info("Bot: mensagem processada", {
-      userId: req.user.id,
-      sessionId: result.sessionId,
-      state: result.state,
-    });
+      logger.info("Bot: mensagem processada", {
+        userId: req.user!.id,
+        sessionId: result.sessionId,
+        state: result.state,
+      });
 
-    return res.json({
-      session_id: result.sessionId,
-      message: result.message,
-      state: result.state,
-      context: result.context,
-      clear_history: result.clearHistory === true,
-    });
+      return {
+        session_id: result.sessionId,
+        message: result.message,
+        state: result.state,
+        context: result.context,
+        clear_history: result.clearHistory === true,
+      };
+    };
+
+    const execution = idempotencyKey
+      ? await botMessageIdempotencyStore.execute(req.user.id, idempotencyKey, executeMessage)
+      : { result: await executeMessage(), replayed: false };
+
+    res.setHeader("Cache-Control", "no-store");
+    if (execution.replayed) {
+      res.setHeader("Idempotency-Replayed", "true");
+      logger.info("Bot: resposta idempotente reutilizada", {
+        userId: req.user.id,
+        sessionId: execution.result.session_id,
+      });
+    }
+
+    return res.json(execution.result);
   } catch (error: any) {
     logError("Bot: erro ao processar mensagem", error, {
       userId: req.user.id,
