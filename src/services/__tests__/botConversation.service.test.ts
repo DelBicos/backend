@@ -9,20 +9,45 @@ jest.mock("../bot/BotSessionManager", () => ({
     saveSession: jest.fn(),
   },
 }));
-jest.mock("../bot/BotMessageRouter", () => ({
+jest.mock("../bot/BotMessageRouter.service", () => ({
   BotMessageRouter: { route: jest.fn() },
 }));
 jest.mock("../../utils/logger", () => ({
   logError: jest.fn(),
 }));
 
-import { BotMessageRouter } from "../bot/BotMessageRouter";
+import { BotMessageRouter } from "../bot/BotMessageRouter.service";
 import { BotSessionManager } from "../bot/BotSessionManager";
-import { processMessage } from "../botConversation.service";
+import { processMessage } from "../bot/botConversation.service";
 import { analyzeMessage } from "../nlu.service";
 
 describe("processMessage - saudação global", () => {
   beforeEach(() => jest.clearAllMocks());
+
+  it.each(["sim", "Sim, confirmar", "confirmar cancelamento", "Não, voltar", "não"])(
+    "resposta de cancelamento '%s' não depende do classificador", async (answer) => {
+      const session = { id: 99, state: "CONFIRMACAO", status: "active", channel: "web",
+        context: { appointmentId: 92, pendingAction: "CANCEL" } };
+      (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(session);
+      (BotMessageRouter.route as jest.Mock).mockResolvedValue({ reply: "Resposta", nextState: "CONFIRMACAO", contextUpdate: {} });
+      await processMessage(6, "auth", answer, 99);
+      expect(analyzeMessage).not.toHaveBeenCalled();
+      expect(BotMessageRouter.route).toHaveBeenCalledWith("CONFIRMACAO", answer,
+        expect.objectContaining({ intent: "FALLBACK" }), session, 6, undefined);
+    },
+  );
+
+  it("código por e-mail não vai ao NLU nem é persistido em texto no histórico", async () => {
+    const session = { id: 99, state: "CONFIRMACAO", status: "active", channel: "web",
+      context: { appointmentId: 92, pendingAction: "CANCEL", cancellationChallengeId: "challenge" } };
+    (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(session);
+    (BotMessageRouter.route as jest.Mock).mockResolvedValue({ reply: "Código incorreto", nextState: "CONFIRMACAO", contextUpdate: {} });
+    await processMessage(6, "auth", "123456", 99);
+    expect(analyzeMessage).not.toHaveBeenCalled();
+    expect(JSON.stringify((BotSessionManager.createMessage as jest.Mock).mock.calls)).not.toContain("123456");
+    expect(BotMessageRouter.route).toHaveBeenCalledWith("CONFIRMACAO", "123456",
+      expect.objectContaining({ intent: "FALLBACK" }), session, 6, undefined);
+  });
 
   it("responde oi e preserva um agendamento que aguardava a data", async () => {
     const session = {

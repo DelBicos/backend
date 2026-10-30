@@ -41,21 +41,21 @@ jest.mock("../states/ColetandoDataState", () => ({
     }
   },
 }));
-jest.mock("../states/ColetandoHorarioState", () => ({
+jest.mock("../states/ColetandoHorarioState.service", () => ({
   ColetandoHorarioState: class ColetandoHorarioState {
     public async handle(...args: unknown[]) {
       return mockColetandoHorarioHandle(...args);
     }
   },
 }));
-jest.mock("../states/ConfirmacaoState", () => ({
+jest.mock("../states/ConfirmacaoState.service", () => ({
   ConfirmacaoState: class ConfirmacaoState {
     public async handle() {
       throw new Error("ConfirmacaoState não deveria ser chamado neste teste");
     }
   },
 }));
-jest.mock("../states/AguardandoIdAgendamentoState", () => ({
+jest.mock("../states/AguardandoIdAgendamentoState.service", () => ({
   AguardandoIdAgendamentoState: class AguardandoIdAgendamentoState {
     public async handle() {
       throw new Error(
@@ -91,7 +91,7 @@ import { ServiceModel } from "../../../models/Service";
 import { SubCategoryModel } from "../../../models/Subcategory";
 import { rankSemanticCandidates } from "../../semanticSearch.service";
 import type { NluResult } from "../../nlu.service";
-import { BotMessageRouter } from "../BotMessageRouter";
+import { BotMessageRouter } from "../BotMessageRouter.service";
 
 function serviceFixture(
   id: number,

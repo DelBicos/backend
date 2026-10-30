@@ -37,6 +37,13 @@ export function buildGreetingReply(
       return `${greeting}\n\nVamos continuar seu agendamento. Qual horário você prefere?`;
 
     case "CONFIRMACAO":
+    case "COLETANDO_ENDERECO":
+      if (context.bookingDetailsStep === "ADDRESS") {
+        return `${greeting}\n\nVamos continuar: escolha um dos endereços exibidos pelo número ou diga ‘continuar’ para atualizar a lista.`;
+      }
+      if (context.bookingDetailsStep === "REVIEW") {
+        return `${greeting}\n\nConfira o resumo do agendamento e responda com sim para confirmar ou não para cancelar.`;
+      }
       return `${greeting}\n\nO agendamento está pronto para confirmação. Responda com sim para confirmar ou não para cancelar.`;
 
     case "AGUARDANDO_ID_AGENDAMENTO":
