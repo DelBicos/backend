@@ -1,4 +1,5 @@
 import { ClientModel } from "../../../models/Client";
+import { AddressModel } from "../../../models/Address";
 import { ProfessionalModel } from "../../../models/Professional";
 import { ServiceModel } from "../../../models/Service";
 import { AppointmentModel } from "../../../models/Appointment";
@@ -13,6 +14,8 @@ import { getAvailableSlots } from "../../availability.service";
 import { withProfessionalScheduleLock } from "../../appointmentSchedule.service";
 import { ensureChatRoomForAppointment } from "../../../utils/chatRoom";
 import logger from "../../../utils/logger";
+
+export class BotAddressValidationError extends Error {}
 
 export function resolveBotAppointmentStart(
   date: string,
@@ -81,10 +84,21 @@ export async function createBotAppointment(
   );
   const endTime = new Date(startTime.getTime() + service.duration * 60000);
 
-  const addressId = clientRecord.main_address_id ?? 1; // fallback
+  const addressId = ctx.addressId;
+  if (!addressId || !Number.isInteger(addressId)) {
+    throw new BotAddressValidationError("Escolha o endereço do atendimento antes de confirmar.");
+  }
   const appointment = await withProfessionalScheduleLock(
     professionalId,
     async (transaction) => {
+      const address = await AddressModel.findOne({
+        where: { id: addressId, user_id: userId, active: true },
+        transaction,
+        lock: transaction.LOCK.UPDATE,
+      });
+      if (!address) {
+        throw new BotAddressValidationError("O endereço escolhido não está mais disponível. Escolha outro endereço.");
+      }
       const currentService = await ServiceModel.findByPk(serviceId, {
         transaction,
       });

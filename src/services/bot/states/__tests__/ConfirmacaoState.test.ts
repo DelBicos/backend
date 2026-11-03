@@ -1,15 +1,18 @@
-jest.mock("../appointmentActions", () => ({
+jest.mock("../appointmentActions.service", () => ({
+  BotAddressValidationError: class BotAddressValidationError extends Error {},
   createBotAppointment: jest.fn(),
   cancelBotAppointment: jest.fn(),
   rescheduleBotAppointment: jest.fn(),
 }));
+jest.mock("../../../../models/Address", () => ({ AddressModel: { findAll: jest.fn(), findOne: jest.fn() } }));
 jest.mock("../../../../utils/logger", () => ({ logError: jest.fn() }));
-import { ConfirmacaoState } from "../ConfirmacaoState";
+import { ConfirmacaoState } from "../ConfirmacaoState.service";
+import type { BotChatSessionModel } from "../../../../models/BotChatSession";
 import {
   cancelBotAppointment,
   createBotAppointment,
   rescheduleBotAppointment,
-} from "../appointmentActions";
+} from "../appointmentActions.service";
 
 const context = {
   pendingAction: "RESCHEDULE",
@@ -30,8 +33,8 @@ it("remarca mantendo ID e pagamento, sem cancelar ou criar substituto", async ()
   });
   const result = await new ConfirmacaoState().handle(
     "sim",
-    {} as any,
-    { context } as any,
+    { intent: "FALLBACK", entities: {}, confidence: 1 },
+    { context } as BotChatSessionModel,
     1,
     "2030-01-08T13:00:00Z",
   );
@@ -55,8 +58,8 @@ it("permite nova escolha após falha sem cancelar a reserva", async () => {
   );
   const result = await new ConfirmacaoState().handle(
     "sim",
-    {} as any,
-    { context } as any,
+    { intent: "FALLBACK", entities: {}, confidence: 1 },
+    { context } as BotChatSessionModel,
     1,
   );
   expect(result.nextState).toBe("COLETANDO_HORARIO");

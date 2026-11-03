@@ -9,16 +9,16 @@ jest.mock("../bot/BotSessionManager", () => ({
     saveSession: jest.fn(),
   },
 }));
-jest.mock("../bot/BotMessageRouter", () => ({
+jest.mock("../bot/BotMessageRouter.service", () => ({
   BotMessageRouter: { route: jest.fn() },
 }));
 jest.mock("../../utils/logger", () => ({
   logError: jest.fn(),
 }));
 
-import { BotMessageRouter } from "../bot/BotMessageRouter";
+import { BotMessageRouter } from "../bot/BotMessageRouter.service";
 import { BotSessionManager } from "../bot/BotSessionManager";
-import { processMessage } from "../botConversation.service";
+import { processMessage } from "../bot/botConversation.service";
 import { analyzeMessage } from "../nlu.service";
 
 describe("processMessage - saudação global", () => {
