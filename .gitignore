@@ -16,3 +16,7 @@ avatarBucket
 
 ## Build Output ##
 dist/
+## Arquivos locais de debug (podem conter tokens/credenciais) ##
+login.json
+prof.json
+query.js

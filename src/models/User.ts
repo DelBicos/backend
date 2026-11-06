@@ -24,11 +24,12 @@ export interface IUser {
   active?: boolean;
   avatar_uri?: string;
   banner_uri?: string;
+  mfa_enabled?: boolean;
 }
 
 type UserCreationalAttributes = Optional<
   IUser,
-  "id" | "active" | "avatar_uri" | "banner_uri"
+  "id" | "active" | "avatar_uri" | "banner_uri" | "mfa_enabled"
 >;
 
 export class UserModel extends Model<IUser, UserCreationalAttributes> {
@@ -40,6 +41,7 @@ export class UserModel extends Model<IUser, UserCreationalAttributes> {
   public active?: boolean;
   public avatar_uri?: string;
   public banner_uri?: string;
+  public mfa_enabled?: boolean;
 
   // Timestamps
   public readonly createdAt!: Date;
@@ -83,6 +85,11 @@ UserModel.init(
     banner_uri: {
       type: DataTypes.STRING(255),
       allowNull: true,
+    },
+    mfa_enabled: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
     },
   },
   {

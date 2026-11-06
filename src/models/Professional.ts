@@ -22,11 +22,13 @@ export interface IProfessional {
   cnpj?: string;
   description?: string;
   service_radius_km?: number;
+  cancellations_count?: number;
+  identity_verified_at?: Date | null;
 }
 
 type ProfessionalCreationalAttributes = Optional<
   IProfessional,
-  "id" | "main_address_id" | "cnpj" | "description"
+  "id" | "main_address_id" | "cnpj" | "description" | "identity_verified_at"
 >;
 
 export class ProfessionalModel extends Model<
@@ -40,6 +42,8 @@ export class ProfessionalModel extends Model<
   public cnpj?: string;
   public description?: string;
   public service_radius_km?: number;
+  public cancellations_count!: number;
+  public identity_verified_at!: Date | null;
 
   // Timestamps
   public readonly createdAt!: Date;
@@ -82,6 +86,15 @@ ProfessionalModel.init(
     },
     description: {
       type: DataTypes.STRING(1500),
+      allowNull: true,
+    },
+    cancellations_count: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 0,
+    },
+    identity_verified_at: {
+      type: DataTypes.DATE,
       allowNull: true,
     },
     service_radius_km: {

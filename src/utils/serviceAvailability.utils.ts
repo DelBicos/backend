@@ -27,12 +27,13 @@ export function validateAvailabilities(items: unknown[]): AvailabilityError[] {
   const errors: AvailabilityError[] = [];
 
   for (let i = 0; i < items.length; i++) {
-    const item = items[i] as any;
+    const raw = items[i];
 
-    if (typeof item !== "object" || item === null) {
+    if (typeof raw !== "object" || raw === null) {
       errors.push({ index: i, message: "Item inválido (deve ser objeto)" });
       continue;
     }
+    const item = raw as Record<string, unknown>;
 
     const day = Number(item.day);
     if (!Number.isInteger(day) || day < 0 || day > 6) {
@@ -42,12 +43,12 @@ export function validateAvailabilities(items: unknown[]): AvailabilityError[] {
       });
     }
 
-    if (!item.start || !HH_MM_REGEX.test(item.start)) {
+    if (typeof item.start !== "string" || !HH_MM_REGEX.test(item.start)) {
       errors.push({ index: i, message: "start deve estar no formato HH:MM" });
       continue;
     }
 
-    if (!item.end || !HH_MM_REGEX.test(item.end)) {
+    if (typeof item.end !== "string" || !HH_MM_REGEX.test(item.end)) {
       errors.push({ index: i, message: "end deve estar no formato HH:MM" });
       continue;
     }

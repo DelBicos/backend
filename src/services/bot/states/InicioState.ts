@@ -8,7 +8,9 @@ import type {
 } from "../../../models/BotChatSession";
 import type { NluResult } from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
+import { DEFAULT_BOT_TIME_ZONE } from "../../../utils/date.util";
 
+import type { AppointmentWithRelations } from "../../appointment/appointment.types";
 export class InicioState implements BotStateNode {
   public async handle(
     userMessage: string,
@@ -111,10 +113,10 @@ export class InicioState implements BotStateNode {
         const intentName = nlu.intent;
 
         const clientRecord = await ClientModel.findOne({ where: { user_id: userId } });
-        let activeAppointments: any[] = [];
+        let activeAppointments: AppointmentWithRelations[] = [];
 
         if (clientRecord) {
-          activeAppointments = await AppointmentModel.findAll({
+          activeAppointments = (await AppointmentModel.findAll({
             where: {
               client_id: clientRecord.id,
               status: { [Op.in]: ["pending", "confirmed"] },
@@ -123,18 +125,18 @@ export class InicioState implements BotStateNode {
             include: [{ model: ServiceModel, as: "Service" }],
             order: [["start_time", "ASC"]],
             limit: 5,
-          });
+          })) as AppointmentWithRelations[];
         }
 
         if (activeAppointments.length > 0) {
           const optionLabels: string[] = [];
           const appointmentList: Array<{ index: number; id: number; shortId?: string }> = [];
 
-          const lines = activeAppointments.map((a: any, i: number) => {
+          const lines = activeAppointments.map((a, i) => {
             const idx = i + 1;
             const d = new Date(a.start_time);
-            const dateStr = d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
-            const timeStr = d.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
+            const dateStr = d.toLocaleDateString("pt-BR", { timeZone: DEFAULT_BOT_TIME_ZONE });
+            const timeStr = d.toLocaleTimeString("pt-BR", { timeZone: DEFAULT_BOT_TIME_ZONE, hour: "2-digit", minute: "2-digit" });
             const svcTitle = a.Service?.title ?? "Serviço";
             const label = `${idx}. ${svcTitle} (${dateStr})`;
 
@@ -180,7 +182,7 @@ export class InicioState implements BotStateNode {
             finalize: true,
           };
         }
-        const upcoming = await AppointmentModel.findAll({
+        const upcoming = (await AppointmentModel.findAll({
           where: {
             client_id: clientRecord.id,
             status: { [Op.in]: ["pending", "confirmed"] },
@@ -189,7 +191,7 @@ export class InicioState implements BotStateNode {
           include: [{ model: ServiceModel, as: "Service" }],
           order: [["start_time", "ASC"]],
           limit: 5,
-        });
+        })) as AppointmentWithRelations[];
         if (upcoming.length === 0) {
           return {
             reply: "Você não possui agendamentos futuros. Deseja agendar um serviço?",
@@ -201,10 +203,10 @@ export class InicioState implements BotStateNode {
             },
           };
         }
-        const lines = upcoming.map((a: any, i: number) => {
+        const lines = upcoming.map((a, i) => {
           const d = new Date(a.start_time);
-          const dateStr = d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
-          const timeStr = d.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
+          const dateStr = d.toLocaleDateString("pt-BR", { timeZone: DEFAULT_BOT_TIME_ZONE });
+          const timeStr = d.toLocaleTimeString("pt-BR", { timeZone: DEFAULT_BOT_TIME_ZONE, hour: "2-digit", minute: "2-digit" });
           return `${i + 1}. ID ${a.id} — ${a.Service?.title ?? "serviço"} — ${dateStr} às ${timeStr} (${a.status})`;
         });
         return {

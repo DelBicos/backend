@@ -8,7 +8,7 @@ const router = Router();
  * @swagger
  * /uploads:
  *   post:
- *     summary: Gera presigned URL para upload de arquivo no S3
+ *     summary: Gera URL temporária (SAS) para upload direto no Azure Blob Storage
  *     tags: [Uploads]
  *     security:
  *       - bearerAuth: []

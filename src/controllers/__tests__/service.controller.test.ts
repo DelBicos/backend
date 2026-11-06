@@ -1,7 +1,10 @@
 import { Request, Response } from "express";
 import { Op } from "sequelize";
-import { listAllServices } from "../service.controller";
+import { listAllServices as listAllServicesHandler } from "../service.controller";
+import { settled } from "./handlerTestUtils";
 import { ServiceModel } from "../../models/Service";
+
+const listAllServices = settled(listAllServicesHandler);
 
 jest.mock("../../config/database", () => {
   const { Sequelize } = require("sequelize");

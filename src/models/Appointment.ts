@@ -41,8 +41,15 @@ export interface IAppointment {
   final_price?: number;
   rating?: number;
   review?: string;
-  status?: "pending" | "confirmed" | "completed" | "canceled";
+  status?: "pending" | "confirmed" | "completed" | "canceled" | "no_show";
   payment_intent_id?: string | null;
+  canceled_by?: "client" | "professional" | "system" | null;
+  canceled_at?: Date | null;
+  cancellation_reason?: string | null;
+  retained_cents?: number | null;
+  refunded_cents?: number | null;
+  reschedule_requested_start?: Date | null;
+  reschedule_requested_by?: "client" | "professional" | null;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -65,9 +72,16 @@ export class AppointmentModel extends Model<
   public final_price?: number;
   public rating?: number;
   public review?: string;
-  public status!: "pending" | "confirmed" | "completed" | "canceled";
+  public status!: "pending" | "confirmed" | "completed" | "canceled" | "no_show";
   public created_at!: Date;
   public payment_intent_id?: string | null;
+  public canceled_by?: "client" | "professional" | "system" | null;
+  public canceled_at?: Date | null;
+  public cancellation_reason?: string | null;
+  public retained_cents?: number | null;
+  public refunded_cents?: number | null;
+  public reschedule_requested_start?: Date | null;
+  public reschedule_requested_by?: "client" | "professional" | null;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
 }
@@ -143,13 +157,26 @@ AppointmentModel.init(
       allowNull: false,
     },
     status: {
-      type: DataTypes.ENUM("pending", "confirmed", "completed", "canceled"),
+      type: DataTypes.ENUM("pending", "confirmed", "completed", "canceled", "no_show"),
       defaultValue: "pending",
     },
     payment_intent_id: {
       type: DataTypes.STRING,
       allowNull: true,
       unique: true,
+    },
+    canceled_by: {
+      type: DataTypes.ENUM("client", "professional", "system"),
+      allowNull: true,
+    },
+    canceled_at: { type: DataTypes.DATE, allowNull: true },
+    cancellation_reason: { type: DataTypes.STRING(500), allowNull: true },
+    retained_cents: { type: DataTypes.INTEGER, allowNull: true },
+    refunded_cents: { type: DataTypes.INTEGER, allowNull: true },
+    reschedule_requested_start: { type: DataTypes.DATE, allowNull: true },
+    reschedule_requested_by: {
+      type: DataTypes.ENUM("client", "professional"),
+      allowNull: true,
     },
   },
   {

@@ -9,6 +9,7 @@ import {
 } from "../controllers/voice.controller";
 import { ALLOWED_AUDIO_MIME_TYPES } from "../services/voiceTranscription.service";
 
+import { asHandler } from "../utils/asHandler";
 const voiceRouter = Router();
 const isProduction = (process.env.ENVIRONMENT || process.env.NODE_ENV) === "production";
 
@@ -48,7 +49,7 @@ voiceRouter.post(
   authMiddleware,
   voiceTranscriptionRateLimit,
   voiceAudioParser,
-  transcribeVoice as any,
+  asHandler(transcribeVoice),
 );
 
 voiceRouter.post(
@@ -56,11 +57,12 @@ voiceRouter.post(
   authMiddleware,
   voiceTranscriptionRateLimit,
   voiceAudioParser,
-  processVoiceCommand as any,
+  asHandler(processVoiceCommand),
 );
 
-voiceRouter.use((error: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-  if (error?.type === "entity.too.large" || error?.status === 413) {
+voiceRouter.use((error: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const { type, status } = (error ?? {}) as { type?: unknown; status?: unknown };
+  if (type === "entity.too.large" || status === 413) {
     return res.status(413).json({ error: "Áudio excede o limite de 10 MB" });
   }
   return next(error);

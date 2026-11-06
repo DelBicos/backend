@@ -103,7 +103,7 @@ export async function assertParticipant(
   return null;
 }
 
-const mapMessage = (doc: IChatMessage & { _id: any }): ChatMessageDTO => ({
+const mapMessage = (doc: IChatMessage & { _id: unknown }): ChatMessageDTO => ({
   id: String(doc._id),
   room_id: doc.room_id,
   client_message_uuid: doc.client_message_uuid,
@@ -146,6 +146,13 @@ function scheduleChatRoomsSync(userId: number): void {
 /**
  * Lista as salas de chat do usuário com dados do correspondente e última mensagem.
  */
+type ParticipantUser = { id: number; name: string; avatar_uri?: string | null };
+type RoomWithParticipants = ChatRoomModel & {
+  Service?: { title: string };
+  Client?: { User?: ParticipantUser };
+  Professional?: { User?: ParticipantUser };
+};
+
 export async function listRooms(
   userId: number,
   options?: { limit?: number },
@@ -159,7 +166,7 @@ export async function listRooms(
 
   const limit = normalizeRoomsLimit(options?.limit);
 
-  const orConditions: any[] = [];
+  const orConditions: Record<string, number>[] = [];
   if (clientId !== null) orConditions.push({ client_id: clientId });
   if (professionalId !== null)
     orConditions.push({ professional_id: professionalId });
@@ -204,8 +211,8 @@ export async function listRooms(
     limit,
   });
 
-  return rooms.map((room) => {
-    const data: any = room;
+  return (rooms as RoomWithParticipants[]).map((room) => {
+    const data = room;
     const isClient = clientId !== null && room.client_id === clientId;
     // O correspondente é o "outro lado" da conversa
     const correspondentUser = isClient
@@ -241,7 +248,7 @@ export async function getMessages(
 ): Promise<{ messages: ChatMessageDTO[]; nextCursor: string | null }> {
   assertChatMongoReady();
 
-  const query: any = { room_id: roomId };
+  const query: { room_id: number; sent_at?: { $lt: Date } } = { room_id: roomId };
   if (cursor) {
     const cursorDate = new Date(cursor);
     if (!isNaN(cursorDate.getTime())) {
@@ -252,7 +259,7 @@ export async function getMessages(
   const docs = await ChatMessage.find(query)
     .sort({ sent_at: -1, _id: -1 })
     .limit(limit)
-    .lean<(IChatMessage & { _id: any })[]>();
+    .lean<(IChatMessage & { _id: unknown })[]>();
 
   const messages = docs.map(mapMessage);
   const nextCursor =
@@ -280,7 +287,7 @@ export async function persistMessage(params: {
 
   const existing = await ChatMessage.findOne({
     client_message_uuid: clientMessageUuid,
-  }).lean<(IChatMessage & { _id: any }) | null>();
+  }).lean<(IChatMessage & { _id: unknown }) | null>();
 
   if (existing) {
     return { message: mapMessage(existing), isNew: false };
@@ -306,7 +313,7 @@ export async function persistMessage(params: {
   );
 
   return {
-    message: mapMessage(created.toObject() as IChatMessage & { _id: any }),
+    message: mapMessage(created.toObject() as IChatMessage & { _id: unknown }),
     isNew: true,
   };
 }

@@ -4,8 +4,6 @@ dotenv.config();
 import winston from "winston";
 import { Logtail } from "@logtail/node";
 import { LogtailTransport } from "@logtail/winston";
-import WinstonCloudWatch from "winston-cloudwatch";
-import os from "os";
 
 // Inicializar Logtail se token estiver configurado
 const environment = process.env.ENVIRONMENT || "development";
@@ -54,61 +52,8 @@ if (logtail) {
   transports.push(new LogtailTransport(logtail));
 }
 
-/**
- * CloudWatch Logs — ativado fora de development OU com flag ENABLE_CLOUDWATCH=true.
- * Erros críticos são enviados imediatamente (flushOnWrite para level 'error').
- */
-const shouldEnableCloudWatch =
-  environment !== "development" || process.env.ENABLE_CLOUDWATCH === "true";
-
-if (shouldEnableCloudWatch && process.env.AWS_ACCESS_KEY_ID_CW) {
-  const cloudWatchTransport = new WinstonCloudWatch({
-    logGroupName: "/fatec/projeto-pi/backend",
-    logStreamName: `${os.hostname()}-${new Date().toISOString().split("T")[0]}`,
-    awsOptions: {
-      region: process.env.AWS_REGION_CW || "us-east-1",
-    },
-    messageFormatter: ({ level, message, ...meta }) =>
-      JSON.stringify({ level, message, ...meta }),
-    // Envia imediatamente logs de nível 'error' para o CloudWatch
-    level: "error",
-    uploadRate: 2000,
-  });
-
-  // Listener de erro interno para não derrubar a API se o CloudWatch estiver fora
-  cloudWatchTransport.on("error", (err) => {
-    console.error("⚠️ CloudWatch transport error (non-fatal):", err.message);
-  });
-
-  transports.push(cloudWatchTransport);
-
-  // Segundo transporte para logs info+ (upload em batch, não imediato)
-  const cloudWatchInfoTransport = new WinstonCloudWatch({
-    logGroupName: "/fatec/projeto-pi/backend",
-    logStreamName: `${os.hostname()}-${new Date().toISOString().split("T")[0]}-info`,
-    awsOptions: {
-      region: process.env.AWS_REGION_CW || "us-east-1",
-    },
-    messageFormatter: ({ level, message, ...meta }) =>
-      JSON.stringify({ level, message, ...meta }),
-    level: "info",
-    // Upload a cada 10 segundos para não sobrecarregar as chamadas da AWS (produção)
-    uploadRate: 10000,
-  });
-
-  cloudWatchInfoTransport.on("error", (err) => {
-    console.error(
-      "⚠️ CloudWatch info transport error (non-fatal):",
-      err.message,
-    );
-  });
-
-  transports.push(cloudWatchInfoTransport);
-
-  console.log(
-    `✅ CloudWatch Logs habilitado [grupo: /fatec/projeto-pi/backend | região: ${process.env.AWS_REGION_CW || "us-east-1"}]`,
-  );
-}
+// No Azure App Service o stdout/stderr do Console transport ja vai para o
+// Log Stream e para o Application Insights (configurado no proprio App Service).
 
 // Criar logger
 const logger = winston.createLogger({
@@ -193,7 +138,7 @@ export const logDatabase = (
 export const logError = (
   message: string,
   error: Error | unknown,
-  context?: Record<string, any>,
+  context?: Record<string, unknown>,
 ) => {
   const errorData = {
     type: "error",

@@ -13,6 +13,8 @@ import { ProfessionalGalleryModel } from "./ProfessionalGallery";
 import { ProfessionalAvailabilityModel } from "./ProfessionalAvailability";
 import { ProfessionalAvailabilityLockModel } from "./ProfessionalAvailabilityLock";
 import { AppointmentModel } from "./Appointment";
+import { DisputeModel } from "./Dispute";
+import { IdentityVerificationModel } from "./IdentityVerification";
 import { AdminServiceOrderModel } from "./AdminServiceOrder";
 import { UserTokenModel } from "./UserToken";
 import { FavoriteModel } from "./Favorite";
@@ -21,6 +23,18 @@ import { BotChatSessionModel } from "./BotChatSession";
 import { BotChatMessageModel } from "./BotChatMessage";
 
 export function initializeAssociations() {
+  AppointmentModel.hasOne(DisputeModel, { foreignKey: "appointment_id", as: "Dispute" });
+  DisputeModel.belongsTo(AppointmentModel, { foreignKey: "appointment_id", as: "Appointment" });
+
+  ProfessionalModel.hasMany(IdentityVerificationModel, {
+    foreignKey: "professional_id",
+    as: "IdentityVerifications",
+  });
+  IdentityVerificationModel.belongsTo(ProfessionalModel, {
+    foreignKey: "professional_id",
+    as: "Professional",
+  });
+
   // User associations
   UserModel.hasOne(ClientModel, {
     foreignKey: "user_id",
