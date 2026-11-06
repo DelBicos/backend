@@ -1,48 +1,34 @@
-name: 04 - Deploy do backend no Azure App Service
+name: Deploy Backend to Azure App Service
 
-# Gatilho: dispara direto quando um PR e fechado/mergeado contra a stag,
-# independente do pipeline do time principal (workflows 01/02, que so reagem
-# a PRs da stag para a main).
-# O Azure App Service (Free F1) usa deploy nativo (Oryx), sem Docker.
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches:
       - stag
+  workflow_dispatch:
 
 jobs:
-  tests:
-    name: Testes antes do deploy
-    if: github.event.pull_request.merged == true
-    uses: ./.github/workflows/tests.yml
-
-  deploy:
-    name: Build e deploy no Azure App Service (delbicos-backend-edu)
+  build-and-deploy:
     runs-on: ubuntu-latest
-    needs: tests
-    if: github.event.pull_request.merged == true
-
     steps:
-      - name: Checkout do repositório
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configurar Node.js
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20.x"
+          node-version: '20.x'
 
-      - name: Instalar dependências (com devDependencies, necessárias para o build)
-        run: npm ci
+      - name: Install dependencies
+        run: npm install
 
-      - name: Buildar TypeScript
+      - name: Build project
         run: npm run build
 
-      - name: Remover devDependencies antes do deploy (reduz o pacote e a superfície de ataque)
+      - name: Prune dev dependencies
         run: npm prune --omit=dev
 
-      - name: Deploy no Azure App Service
+      - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: delbicos-backend-edu
+          app-name: 'delbicos-backend-dg'
           publish-profile: ${{ secrets.AZURE_BACKEND_PUBLISH_PROFILE }}
           package: .
