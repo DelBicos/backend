@@ -8,6 +8,8 @@ import {
   persistMessage,
 } from "../services/chat.service";
 import logger from "../utils/logger";
+import type { AppointmentStatusValue } from "../models/Appointment";
+import { registerLocationTracking } from "./locationTracking";
 
 interface AuthedSocket extends Socket {
   userId?: number;
@@ -28,7 +30,9 @@ type SocketAck = (resp: { ok: boolean; [key: string]: unknown }) => void;
 
 export interface AppointmentStatusSocketPayload {
   appointment_id: number;
-  status: "pending" | "confirmed" | "completed" | "canceled" | "no_show";
+  status: AppointmentStatusValue;
+  /** Código de início do atendimento: enviado apenas ao cliente. */
+  verification_code?: string;
   session_ids: number[];
   message: string;
   payment_status: "not_available" | "pending" | "paid";
@@ -83,6 +87,8 @@ export function initChatSocket(httpServer: HttpServer): Server {
     if (socket.userId) {
       socket.join(userChannel(socket.userId));
     }
+
+    registerLocationTracking(io as Server, socket);
 
     // Entrar numa sala (valida participação)
     socket.on("room:join", async (roomId: number, ack?: SocketAck) => {

@@ -5,15 +5,11 @@
 import { HttpError } from "../../errors/HttpError";
 import { MIN_ADVANCE_HOURS } from "../../constants/booking";
 import { distanceKm, toCoordinate } from "../../utils/geo.util";
+import type { AppointmentStatusValue } from "../../models/Appointment";
 
 export const MAX_REVIEW_LENGTH = 500;
 
-export type AppointmentStatus =
-  | "pending"
-  | "confirmed"
-  | "completed"
-  | "canceled"
-  | "no_show";
+export type AppointmentStatus = AppointmentStatusValue;
 
 /** Agendamentos exigem no minimo 12 horas de antecedencia. */
 export function assertMinimumAdvance(start: Date, now: Date = new Date()): void {

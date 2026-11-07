@@ -3,6 +3,7 @@ import { sequelize } from "../config/database";
 
 import { BotState } from "../constants/botStates";
 import type { TimePeriod } from "../utils/date.util";
+import type { AppointmentStatusValue } from "./Appointment";
 
 export type BotSessionState = `${BotState}`;
 
@@ -93,7 +94,7 @@ export interface BotSessionContext {
   newTime?: string; // HH:MM (para ALTERAR)
   newTimePeriod?: TimePeriod;
   appointmentId?: number;
-  appointmentStatus?: "pending" | "confirmed" | "completed" | "canceled" | "no_show";
+  appointmentStatus?: AppointmentStatusValue;
   appointmentPaid?: boolean;
   suggestedSlots?: string[];
   serviceOptions?: string[];

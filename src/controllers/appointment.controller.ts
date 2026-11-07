@@ -5,6 +5,7 @@ import { asyncHandler } from "../utils/asyncHandler";
 import * as AppointmentService from "../services/appointment/appointment.service";
 import * as Lifecycle from "../services/appointment/lifecycle.rules";
 import * as Disputes from "../services/appointment/dispute.service";
+import * as HomeVisit from "../services/appointment/homeVisit.service";
 
 /** Controllers finos: extraem dados do HTTP e delegam ao AppointmentService. */
 
@@ -141,5 +142,44 @@ export const getDispute = asyncHandler<AuthenticatedRequest>(
 export const listRescheduleSlots = asyncHandler<AuthenticatedRequest>(
   async (req, res: Response) => {
     res.json(await Lifecycle.listRescheduleSlots(requireUserId(req), req.params.id, req.query.date));
+  },
+);
+
+// --- Atendimento em domicilio: deslocamento, chegada, inicio e conclusao ---
+
+export const getAppointmentDetails = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(await HomeVisit.getVisitDetails(requireUserId(req), req.params.id));
+  },
+);
+
+export const markInTransit = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(await HomeVisit.markInTransit(requireUserId(req), req.params.id));
+  },
+);
+
+export const markArrived = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(await HomeVisit.markArrived(requireUserId(req), req.params.id, req.body ?? {}));
+  },
+);
+
+export const startService = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(await HomeVisit.startService(requireUserId(req), req.params.id, req.body?.code));
+  },
+);
+
+export const completeService = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    res.json(await HomeVisit.completeService(requireUserId(req), req.params.id, req.body?.code));
+  },
+);
+
+export const getAuditTrail = asyncHandler<AuthenticatedRequest>(
+  async (req, res: Response) => {
+    // Admin e verificado no servico pela tabela de administradores.
+    res.json(await HomeVisit.getAuditTrail(requireUserId(req), req.params.id, false));
   },
 );

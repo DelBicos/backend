@@ -61,6 +61,9 @@ export class AguardandoConfirmacaoState implements BotStateNode {
       canceled: `\u274c O agendamento ID ${appointment.id} foi recusado ou cancelado. Posso ajud\u00e1-lo a escolher outra op\u00e7\u00e3o.`,
       completed: `\u2705 O agendamento ID ${appointment.id} foi conclu\u00eddo. Posso ajud\u00e1-lo com mais alguma coisa?`,
       no_show: `\u274c O agendamento ID ${appointment.id} foi encerrado por n\u00e3o comparecimento. Posso ajud\u00e1-lo a marcar outro?`,
+      in_transit: `O profissional est\u00e1 a caminho para o agendamento ID ${appointment.id}.`,
+      arrived: `O profissional chegou ao local do agendamento ID ${appointment.id}.`,
+      in_progress: `O atendimento do agendamento ID ${appointment.id} est\u00e1 em andamento.`,
     } as const;
 
     return {

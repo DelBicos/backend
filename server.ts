@@ -5,6 +5,7 @@ import { assertRequiredEnv } from "./src/config/env";
 import { connectDatabase, connectMongo } from "./src/config/database";
 import { initializeAssociations } from "./src/models/associations";
 import { startAppointmentCron } from "./src/jobs/appointmentCron";
+import { startUpcomingServicesJob } from "./src/jobs/checkUpcomingServicesJob";
 import { initChatSocket } from "./src/realtime/chatSocket";
 import { createApp } from "./src/app";
 
@@ -19,7 +20,8 @@ void connectMongo();
 void connectDatabase();
 
 startAppointmentCron();
-logger.info("Cron jobs iniciados");
+startUpcomingServicesJob();
+logger.info("Cron jobs e aviso de 1 hora antes do atendimento iniciados");
 
 const app = createApp();
 

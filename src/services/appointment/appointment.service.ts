@@ -48,7 +48,8 @@ import type { AppointmentWithRelations } from "./appointment.types";
 const USER_PUBLIC_ATTRIBUTES = ["id", "name", "avatar_uri", "phone", "email"];
 
 /** Statuses que ocupam a agenda do profissional. */
-const BLOCKING_STATUSES = ["pending", "confirmed"];
+// Status que ocupam o horario do profissional (inclui as etapas do atendimento em andamento).
+const BLOCKING_STATUSES = ["pending", "confirmed", "in_transit", "arrived", "in_progress"];
 
 // ---------------------------------------------------------------------------
 // Helpers de busca e autorizacao
@@ -110,8 +111,12 @@ async function requireResponsibleProfessional(
 }
 
 /** No app, o "id" do agendamento e o short_id. */
-export function toPublicAppointment(appointment: AppointmentModel) {
+export function toPublicAppointment(appointment: AppointmentModel, viewerUserId?: number) {
   const json = { ...appointment.toJSON() } as Record<string, unknown>;
+  // O codigo de inicio do atendimento e so do cliente: o profissional o recebe
+  // pessoalmente no local, entao ele nunca sai da API para outra pessoa.
+  const clientUserId = (json.Client as { user_id?: number } | undefined)?.user_id;
+  if (viewerUserId === undefined || viewerUserId !== clientUserId) delete json.verification_code;
   json.id = json.short_id;
   delete json.short_id;
   json.payment_method = "Cartão de Crédito";
@@ -317,7 +322,7 @@ export async function listAppointmentsForUser(
     order: [["start_time", "ASC"]],
   });
 
-  return appointments.map(toPublicAppointment);
+  return appointments.map((appointment) => toPublicAppointment(appointment, authUserId));
 }
 
 /**
