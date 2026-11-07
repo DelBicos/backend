@@ -117,6 +117,8 @@ export function toPublicAppointment(appointment: AppointmentModel, viewerUserId?
   // pessoalmente no local, entao ele nunca sai da API para outra pessoa.
   const clientUserId = (json.Client as { user_id?: number } | undefined)?.user_id;
   if (viewerUserId === undefined || viewerUserId !== clientUserId) delete json.verification_code;
+  // id publico e o short_id; o numerico fica em numeric_id para a sala de rastreamento do socket.
+  json.numeric_id = json.id;
   json.id = json.short_id;
   delete json.short_id;
   json.payment_method = "Cartão de Crédito";
