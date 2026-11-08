@@ -25,11 +25,14 @@ export interface IUser {
   avatar_uri?: string;
   banner_uri?: string;
   mfa_enabled?: boolean;
+  location_consent_accepted?: boolean;
+  location_consent_at?: Date | null;
+  location_consent_revoked_at?: Date | null;
 }
 
 type UserCreationalAttributes = Optional<
   IUser,
-  "id" | "active" | "avatar_uri" | "banner_uri" | "mfa_enabled"
+  "id" | "active" | "avatar_uri" | "banner_uri" | "mfa_enabled" | "location_consent_accepted" | "location_consent_at" | "location_consent_revoked_at"
 >;
 
 export class UserModel extends Model<IUser, UserCreationalAttributes> {
@@ -42,6 +45,9 @@ export class UserModel extends Model<IUser, UserCreationalAttributes> {
   public avatar_uri?: string;
   public banner_uri?: string;
   public mfa_enabled?: boolean;
+  public location_consent_accepted?: boolean;
+  public location_consent_at?: Date | null;
+  public location_consent_revoked_at?: Date | null;
 
   // Timestamps
   public readonly createdAt!: Date;
@@ -91,6 +97,14 @@ UserModel.init(
       allowNull: false,
       defaultValue: false,
     },
+    // Consentimento LGPD para o rastreamento da localização durante o atendimento.
+    location_consent_accepted: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    location_consent_at: { type: DataTypes.DATE, allowNull: true },
+    location_consent_revoked_at: { type: DataTypes.DATE, allowNull: true },
   },
   {
     sequelize,

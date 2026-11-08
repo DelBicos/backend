@@ -439,3 +439,28 @@ describe("trava da agenda ao responder", () => {
     expect(PaymentService.capturePayment).not.toHaveBeenCalled();
   });
 });
+
+describe("toPublicAppointment: codigo de inicio do atendimento", () => {
+  const fakeAppointment = () =>
+    ({
+      toJSON: () => ({
+        id: 10,
+        short_id: "ABC123",
+        verification_code: "AB-12",
+        Client: { id: 1, user_id: 100 },
+        Professional: { id: 2, user_id: 200 },
+      }),
+    }) as unknown as Parameters<typeof service.toPublicAppointment>[0];
+
+  it("mostra o codigo ao cliente do agendamento", () => {
+    expect(service.toPublicAppointment(fakeAppointment(), 100).verification_code).toBe("AB-12");
+  });
+
+  it("esconde o codigo do profissional", () => {
+    expect(service.toPublicAppointment(fakeAppointment(), 200)).not.toHaveProperty("verification_code");
+  });
+
+  it("esconde o codigo quando nao ha usuario identificado", () => {
+    expect(service.toPublicAppointment(fakeAppointment())).not.toHaveProperty("verification_code");
+  });
+});

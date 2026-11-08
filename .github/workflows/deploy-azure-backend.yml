@@ -1,5 +1,11 @@
 name: Deploy Backend to Azure App Service
 
+# Publica a stag em cada conta Azure configurada. Cada conta precisa de:
+#   - secret   AZURE_PUBLISH_PROFILE_<CONTA>  (perfil de publicação do App Service)
+#   - variável AZURE_APP_NAME_<CONTA>         (nome do App Service)
+# Conta sem os dois configurados é pulada, sem falhar o workflow.
+# A ordem de prioridade entre as contas fica no Worker da Cloudflare, não aqui.
+
 on:
   push:
     branches:
@@ -9,26 +15,49 @@ on:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        account: [ISA, FER, DOUG]
     steps:
+      - name: Conferir se a conta está configurada
+        id: account
+        env:
+          PROFILE: ${{ secrets[format('AZURE_PUBLISH_PROFILE_{0}', matrix.account)] }}
+          APP_NAME: ${{ vars[format('AZURE_APP_NAME_{0}', matrix.account)] }}
+        run: |
+          if [ -z "$PROFILE" ] || [ -z "$APP_NAME" ]; then
+            echo "Conta ${{ matrix.account }} sem secret ou variável: pulando."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.account.outputs.configured == 'true'
 
       - name: Set up Node.js
+        if: steps.account.outputs.configured == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20.x'
 
       - name: Install dependencies
-        run: npm install
+        if: steps.account.outputs.configured == 'true'
+        run: npm ci
 
       - name: Build project
+        if: steps.account.outputs.configured == 'true'
         run: npm run build
 
       - name: Prune dev dependencies
+        if: steps.account.outputs.configured == 'true'
         run: npm prune --omit=dev
 
       - name: Deploy to Azure Web App
+        if: steps.account.outputs.configured == 'true'
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'delbicos-backend-dg'
-          publish-profile: ${{ secrets.AZURE_BACKEND_PUBLISH_PROFILE }}
+          app-name: ${{ vars[format('AZURE_APP_NAME_{0}', matrix.account)] }}
+          publish-profile: ${{ secrets[format('AZURE_PUBLISH_PROFILE_{0}', matrix.account)] }}
           package: .

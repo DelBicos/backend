@@ -38,6 +38,8 @@ jest.mock("../../models/Service");
 jest.mock("../../models/Subcategory");
 jest.mock("../../models/Notification");
 jest.mock("../../services/payment.service", () => ({ PaymentService: {} }));
+// O atendimento em domicilio tem testes proprios e puxa o socket.io; aqui so importa as rotas.
+jest.mock("../../services/appointment/homeVisit.service", () => ({}));
 jest.mock("../../utils/chatRoom", () => ({
   ensureChatRoomForAppointment: jest.fn(),
   syncChatRoomStatusForAppointment: jest.fn(),

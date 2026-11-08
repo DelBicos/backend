@@ -21,6 +21,7 @@ import { FavoriteModel } from "./Favorite";
 import { ChatRoomModel } from "./ChatRoom";
 import { BotChatSessionModel } from "./BotChatSession";
 import { BotChatMessageModel } from "./BotChatMessage";
+import { AppointmentAuditLogModel } from "./AppointmentAuditLog";
 
 export function initializeAssociations() {
   AppointmentModel.hasOne(DisputeModel, { foreignKey: "appointment_id", as: "Dispute" });
@@ -350,5 +351,21 @@ export function initializeAssociations() {
   BotChatSessionModel.belongsTo(AppointmentModel, {
     foreignKey: "appointment_id",
     as: "Appointment",
+  });
+
+  // Appointment Audit Log associations
+  AppointmentModel.hasMany(AppointmentAuditLogModel, {
+    foreignKey: "appointment_id",
+    as: "AuditLogs",
+  });
+
+  AppointmentAuditLogModel.belongsTo(AppointmentModel, {
+    foreignKey: "appointment_id",
+    as: "Appointment",
+  });
+
+  AppointmentAuditLogModel.belongsTo(UserModel, {
+    foreignKey: "user_id",
+    as: "User",
   });
 }

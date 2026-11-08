@@ -15,6 +15,12 @@ import {
   respondToReschedule,
   openDispute,
   getDispute,
+  getAppointmentDetails,
+  markInTransit,
+  markArrived,
+  startService,
+  completeService,
+  getAuditTrail,
 } from "../controllers/appointment.controller";
 import authMiddleware from "../middlewares/auth.middleware";
 
@@ -48,5 +54,14 @@ router.put("/:id", authMiddleware, updateAppointmentStatus);
 router.post("/:id/review", authMiddleware, reviewAppointment);
 
 router.get("/:id/receipt", authMiddleware, getAppointmentInvoice);
+
+// Atendimento em domicilio: a caminho -> chegou (GPS) -> inicio (codigo) -> conclusao
+router.post("/:id/in-transit", authMiddleware, markInTransit);
+router.post("/:id/arrived", authMiddleware, markArrived);
+router.post("/:id/start-service", authMiddleware, startService);
+router.post("/:id/complete-service", authMiddleware, completeService);
+router.get("/:id/audit-trail", authMiddleware, getAuditTrail);
+
+router.get("/:id", authMiddleware, getAppointmentDetails);
 
 export default router;
