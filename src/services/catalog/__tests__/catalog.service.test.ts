@@ -1,4 +1,5 @@
 import { HttpError } from "../../../errors/HttpError";
+import { Op } from "sequelize";
 
 jest.mock("../../../config/database");
 jest.mock("../../appointmentSchedule.service");
@@ -92,6 +93,14 @@ describe("leitura publica", () => {
     expect(args.where.subcategory_id).toBe(3);
     expect(args.offset).toBe(10);
     expect(result).toMatchObject({ total: 1, page: 2, limit: 10 });
+  });
+
+  it("listPublic busca pelo titulo sem diferenciar maiusculas", async () => {
+    mocked(ServiceModel.findAndCountAll).mockResolvedValue({ count: 0, rows: [] });
+    jest.spyOn(sequelize, "getDialect").mockReturnValue("postgres");
+    await catalog.listPublic({ q: "tomada" });
+    const args = mocked(ServiceModel.findAndCountAll).mock.calls[0][0];
+    expect(args.where.title).toEqual({ [Op.iLike]: "%tomada%" });
   });
 });
 
