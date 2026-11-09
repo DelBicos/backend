@@ -1,14 +1,16 @@
 name: Deploy Backend to Azure App Service
 
-# Publica a stag em cada conta Azure configurada. Cada conta precisa de:
-#   - secret   AZURE_PUBLISH_PROFILE_<CONTA>  (perfil de publicação do App Service)
-#   - variável AZURE_APP_NAME_<CONTA>         (nome do App Service)
-# Conta sem os dois configurados é pulada, sem falhar o workflow.
+# Publica o backend em cada conta Azure configurada.
+#   - main -> produção:  secret AZURE_PUBLISH_PROFILE_<CONTA>      e variável AZURE_APP_NAME_<CONTA>
+#   - stag -> homologação: secret AZURE_PUBLISH_PROFILE_<CONTA>_STAG e variável AZURE_APP_NAME_<CONTA>_STAG
+# Enquanto a conta não tiver o ambiente de homologação (_STAG), a stag continua
+# publicando no app de produção, como antes. Conta sem nada configurado é pulada.
 # A ordem de prioridade entre as contas fica no Worker da Cloudflare, não aqui.
 
 on:
   push:
     branches:
+      - main
       - stag
   workflow_dispatch:
 
@@ -25,11 +27,19 @@ jobs:
         env:
           PROFILE: ${{ secrets[format('AZURE_PUBLISH_PROFILE_{0}', matrix.account)] }}
           APP_NAME: ${{ vars[format('AZURE_APP_NAME_{0}', matrix.account)] }}
+          PROFILE_STAG: ${{ secrets[format('AZURE_PUBLISH_PROFILE_{0}_STAG', matrix.account)] }}
+          APP_NAME_STAG: ${{ vars[format('AZURE_APP_NAME_{0}_STAG', matrix.account)] }}
         run: |
-          if [ -z "$PROFILE" ] || [ -z "$APP_NAME" ]; then
+          if [ "$GITHUB_REF_NAME" != "main" ] && [ -n "$PROFILE_STAG" ] && [ -n "$APP_NAME_STAG" ]; then
+            echo "Branch $GITHUB_REF_NAME: publicando na homologação ($APP_NAME_STAG)."
+            echo "target=stag" >> "$GITHUB_OUTPUT"
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$PROFILE" ] || [ -z "$APP_NAME" ]; then
             echo "Conta ${{ matrix.account }} sem secret ou variável: pulando."
             echo "configured=false" >> "$GITHUB_OUTPUT"
           else
+            echo "Branch $GITHUB_REF_NAME: publicando em $APP_NAME."
+            echo "target=prod" >> "$GITHUB_OUTPUT"
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
@@ -58,6 +68,6 @@ jobs:
         if: steps.account.outputs.configured == 'true'
         uses: azure/webapps-deploy@v3
         with:
-          app-name: ${{ vars[format('AZURE_APP_NAME_{0}', matrix.account)] }}
-          publish-profile: ${{ secrets[format('AZURE_PUBLISH_PROFILE_{0}', matrix.account)] }}
+          app-name: ${{ steps.account.outputs.target == 'stag' && vars[format('AZURE_APP_NAME_{0}_STAG', matrix.account)] || vars[format('AZURE_APP_NAME_{0}', matrix.account)] }}
+          publish-profile: ${{ steps.account.outputs.target == 'stag' && secrets[format('AZURE_PUBLISH_PROFILE_{0}_STAG', matrix.account)] || secrets[format('AZURE_PUBLISH_PROFILE_{0}', matrix.account)] }}
           package: .
