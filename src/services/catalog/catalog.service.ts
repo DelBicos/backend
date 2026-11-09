@@ -152,7 +152,9 @@ export async function listPublic(query: QueryParams) {
   const subcategoryId = optionalPositiveId(query.subcategory_id);
   if (subcategoryId) where.subcategory_id = subcategoryId;
   if (typeof query.q === "string" && query.q.trim()) {
-    where.title = { [Op.like]: `%${query.q.trim()}%` };
+    // Sem diferenciar maiusculas: no Postgres o LIKE diferencia, entao usa ILIKE.
+    const contains = sequelize.getDialect() === "postgres" ? Op.iLike : Op.like;
+    where.title = { [contains]: `%${query.q.trim()}%` };
   }
 
   const availabilityInclude: IncludeOptions = { ...AVAILABILITIES_INCLUDE, required: false };

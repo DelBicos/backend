@@ -52,7 +52,7 @@ describe("Caixa preta — busca semântica GET /api/services (listAllServices)",
   });
 
   describe("Partição de Equivalência — termo de busca (q)", () => {
-    it("BS-V-01: q típico aplica filtro LIKE no título e retorna 200", async () => {
+    it("BS-V-01: q típico aplica filtro ILIKE (sem diferenciar maiúsculas) no título e retorna 200", async () => {
       const { res, jsonMock, statusMock } = buildResponse();
 
       await listAllServices(
@@ -65,7 +65,7 @@ describe("Caixa preta — busca semântica GET /api/services (listAllServices)",
         expect.objectContaining({
           where: expect.objectContaining({
             active: true,
-            title: { [Op.like]: "%Limpeza%" },
+            title: { [Op.iLike]: "%Limpeza%" },
           }),
         }),
       );
