@@ -256,8 +256,10 @@ export async function getMessages(
     }
   }
 
+  // Ordena por um campo só: o Cosmos DB (API Mongo) recusa ordenação por
+  // vários campos sem um índice composto idêntico, e o histórico voltava 500.
   const docs = await ChatMessage.find(query)
-    .sort({ sent_at: -1, _id: -1 })
+    .sort({ sent_at: -1 })
     .limit(limit)
     .lean<(IChatMessage & { _id: unknown })[]>();
 
