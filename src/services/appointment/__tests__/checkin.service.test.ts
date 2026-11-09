@@ -34,6 +34,7 @@ import {
 import { AppointmentModel } from "../../../models/Appointment";
 import { AppointmentAuditLogModel } from "../../../models/AppointmentAuditLog";
 import { AdminModel } from "../../../models/Admin";
+import { emitAppointmentStatusUpdate } from "../../../realtime/chatSocket";
 
 describe("appointment/checkin.service", () => {
   beforeEach(() => {
@@ -231,6 +232,25 @@ describe("appointment/checkin.service", () => {
       const res = await processAppointmentCheckout(mockAppt, 20, "AB-12");
       expect(res.success).toBe(true);
       expect(mockAppt.status).toBe("completed");
+    });
+
+    it("avisa o cliente em tempo real quando o serviço é concluído", async () => {
+      (AppointmentModel.update as jest.Mock).mockResolvedValue([1]);
+      (emitAppointmentStatusUpdate as jest.Mock).mockClear();
+      const mockAppt = {
+        id: 7,
+        status: "in_progress",
+        verification_code: "AB-12",
+        Professional: { user_id: 20 },
+        Client: { User: { id: 30 } },
+      } as unknown as AppointmentWithRelations;
+
+      await processAppointmentCheckout(mockAppt, 20, "AB-12");
+
+      expect(emitAppointmentStatusUpdate).toHaveBeenCalledWith(
+        30,
+        expect.objectContaining({ appointment_id: 7, status: "completed" }),
+      );
     });
   });
 
