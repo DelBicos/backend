@@ -1,4 +1,6 @@
+import { Op } from "sequelize";
 import { AppointmentModel } from "../../models/Appointment";
+import { generateConfirmationCode } from "../../utils/confirmationCode.util";
 import {
   AppointmentAuditLogModel,
   AuditLogAction,
@@ -496,4 +498,31 @@ export async function findTrackingParticipant(
     clientUserId,
     professionalConsent: Boolean(professionalUser?.location_consent_accepted),
   };
+}
+
+const ACTIVE_CODE_EXCLUDED_STATUSES = ["completed", "canceled", "no_show"];
+
+/**
+ * Garante que o agendamento tenha codigo de inicio. Agendamentos criados fora do
+ * model (seeders, scripts) nao passam pelo hook que gera o codigo; sem ele o
+ * cliente ve "----" e o profissional nao consegue iniciar o atendimento.
+ */
+export async function ensureVerificationCode(appointment: AppointmentModel): Promise<void> {
+  if (appointment.verification_code) return;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const code = generateConfirmationCode();
+    const inUse = await AppointmentModel.findOne({
+      where: { verification_code: code, status: { [Op.notIn]: ACTIVE_CODE_EXCLUDED_STATUSES } },
+      attributes: ["id"],
+    });
+    if (inUse) continue;
+    // So grava se ainda estiver sem codigo (evita sobrescrever em requisicoes simultaneas).
+    await AppointmentModel.update(
+      { verification_code: code },
+      { where: { id: appointment.id, verification_code: { [Op.is]: null } } },
+    );
+    await appointment.reload({ attributes: ["id", "verification_code"] });
+    return;
+  }
+  throw new Error("Não foi possível gerar o código de início do atendimento");
 }

@@ -12,6 +12,7 @@ import { HttpError } from "../../errors/HttpError";
 import { findAppointmentByPublicId, toPublicAppointment } from "./appointment.service";
 import {
   canUserAccessAuditTrail,
+  ensureVerificationCode,
   fetchAppointmentAuditTrail,
   processAppointmentArrived,
   processAppointmentCheckin,
@@ -68,6 +69,7 @@ export async function getVisitDetails(userId: number, publicId: string) {
 
 export async function markInTransit(userId: number, publicId: string) {
   const appointment = await loadVisit(publicId);
+  await ensureVerificationCode(appointment);
   const result = await processAppointmentInTransit(appointment, userId);
   if (!result.success) fail(result.status, result.error);
   return {
@@ -80,6 +82,7 @@ export async function markArrived(userId: number, publicId: string, body: { lati
   const latitude = parseCoordinate(body.latitude, "latitude");
   const longitude = parseCoordinate(body.longitude, "longitude");
   const appointment = await loadVisit(publicId);
+  await ensureVerificationCode(appointment);
   const result = await processAppointmentArrived(appointment, userId, latitude, longitude);
   if (!result.success) {
     fail(result.status, result.error, { distance: result.distance, maxDistance: result.maxDistance });
