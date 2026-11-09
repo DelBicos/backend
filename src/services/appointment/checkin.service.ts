@@ -228,6 +228,13 @@ export async function processAppointmentArrived(
     );
   });
 
+  await sendAppointmentStatusNotification(
+    appointment,
+    "arrived",
+    "Profissional chegou! 📍",
+    `O profissional ${appointment.Professional?.User?.name || ""} chegou ao local do serviço '${appointment.Service?.title || ""}'.`,
+  );
+
   return { success: true, code: appointment.verification_code };
 }
 
@@ -306,6 +313,13 @@ export async function processAppointmentCheckin(
   appointment.status = "in_progress";
   appointment.started_at = startedAt;
 
+  await sendAppointmentStatusNotification(
+    appointment,
+    "in_progress",
+    "Serviço iniciado ⚡",
+    `O serviço '${appointment.Service?.title || ""}' começou.`,
+  );
+
   return { success: true, startedAt };
 }
 
@@ -380,6 +394,13 @@ export async function processAppointmentCheckout(
 
   appointment.status = "completed";
   appointment.completed_at = completedAt;
+
+  await sendAppointmentStatusNotification(
+    appointment,
+    "completed",
+    "Serviço concluído 🎉",
+    `O serviço '${appointment.Service?.title || ""}' foi concluído. Que tal avaliar o profissional?`,
+  );
 
   return { success: true, completedAt };
 }
