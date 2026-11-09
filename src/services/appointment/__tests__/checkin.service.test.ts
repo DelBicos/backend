@@ -22,6 +22,7 @@ jest.mock("../../../realtime/chatSocket", () => ({
 }));
 
 import {
+  ensureVerificationCode,
   calculateDistanceInMeters,
   canUserAccessAuditTrail,
   processAppointmentInTransit,
@@ -267,5 +268,42 @@ describe("appointment/checkin.service", () => {
       expect(saveMock).toHaveBeenCalled();
       expect(mockAppt.status).toBe("arrived");
     });
+  });
+});
+
+describe("ensureVerificationCode", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it("não faz nada quando o agendamento já tem código", async () => {
+    const appointment = { id: 1, verification_code: "AB-12", reload: jest.fn() };
+    await ensureVerificationCode(appointment as unknown as AppointmentModel);
+    expect(AppointmentModel.update).not.toHaveBeenCalled();
+    expect(appointment.reload).not.toHaveBeenCalled();
+  });
+
+  it("gera e grava um código quando o agendamento está sem", async () => {
+    (AppointmentModel.findOne as jest.Mock).mockResolvedValue(null);
+    (AppointmentModel.update as jest.Mock).mockResolvedValue([1]);
+    const appointment = { id: 7, verification_code: null, reload: jest.fn() };
+
+    await ensureVerificationCode(appointment as unknown as AppointmentModel);
+
+    const [changes, options] = (AppointmentModel.update as jest.Mock).mock.calls[0];
+    expect(changes.verification_code).toMatch(/^[A-Z]{2}-[0-9]{2}$/);
+    expect(options.where.id).toBe(7);
+    expect(appointment.reload).toHaveBeenCalled();
+  });
+
+  it("tenta outro código quando o sorteado já está em uso", async () => {
+    (AppointmentModel.findOne as jest.Mock)
+      .mockResolvedValueOnce({ id: 99 })
+      .mockResolvedValueOnce(null);
+    (AppointmentModel.update as jest.Mock).mockResolvedValue([1]);
+    const appointment = { id: 8, verification_code: null, reload: jest.fn() };
+
+    await ensureVerificationCode(appointment as unknown as AppointmentModel);
+
+    expect(AppointmentModel.findOne).toHaveBeenCalledTimes(2);
+    expect(AppointmentModel.update).toHaveBeenCalledTimes(1);
   });
 });
