@@ -21,7 +21,7 @@ export class ConfirmacaoState implements BotStateNode {
 
     if (!confirmed && !denied) {
       return {
-        reply: "Por favor, responda com *sim* para confirmar ou *não* para cancelar:",
+        reply: "Por favor, responda \"sim\" para confirmar ou \"não\" para cancelar:",
         nextState: "CONFIRMACAO",
         contextUpdate: {
           serviceOptions: ["Sim", "Não"],
