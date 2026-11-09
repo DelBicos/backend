@@ -4,6 +4,7 @@ import {
   ContainerClient,
 } from "@azure/storage-blob";
 import { StorageAdapter, UploadUrlResult } from "./StorageAdapter";
+import { ensureBlobCors } from "./blobCors";
 import logger from "../../utils/logger";
 
 import { errorMessage } from "../../utils/errors.util";
@@ -52,6 +53,8 @@ export class AzureBlobStorageAdapter implements StorageAdapter {
 
     this.ready = (async () => {
       const service = BlobServiceClient.fromConnectionString(connectionString);
+      // O site faz PUT direto no Blob: sem CORS na conta o navegador barra.
+      await ensureBlobCors(service);
       const container = service.getContainerClient(name);
       if (this.isPrivate) {
         await container.createIfNotExists();
