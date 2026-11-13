@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+      - stag
+
+jobs:
+  verify:
+    name: Lint e testes unitários
+    runs-on: ubuntu-latest
+    env:
+      STRIPE_SECRET_KEY: sk_test_ci
+      SECRET_KEY: unit-test-secret
+      EXPIRES_IN: 1h
+      SENDGRID_API_KEY: SG.unit-test
+      SENDER_EMAIL_VERIFICADO: unit-test@example.com
+      ENVIRONMENT: development
+      NODE_ENV: test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.15.1"
+
+      - name: Instalar dependências
+        run: npm install
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Testes unitários
+        run: npm run test:unit
