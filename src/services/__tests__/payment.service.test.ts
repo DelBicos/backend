@@ -1,17 +1,42 @@
-import Stripe from "stripe";
-// --- Mocking Explícito com jest.doMock ---
+jest.mock("../../models/User", () => ({
+  UserModel: { findByPk: jest.fn(), findOne: jest.fn() },
+}));
+jest.mock("../../models/Client", () => ({
+  ClientModel: { findOne: jest.fn() },
+}));
+jest.mock("../../models/Appointment", () => ({
+  AppointmentModel: { create: jest.fn(), findOne: jest.fn() },
+}));
+jest.mock("../../models/Notification", () => ({
+  NotificationModel: { create: jest.fn() },
+}));
+jest.mock("../../models/Service", () => ({
+  ServiceModel: { findByPk: jest.fn() },
+}));
+jest.mock("../../utils/chatRoom", () => ({
+  ensureChatRoomForAppointment: jest.fn().mockResolvedValue(undefined),
+}));
 
-// 1. Defina a função mock principal PRIMEIRO
+import { UserModel } from "../../models/User";
+import { ClientModel } from "../../models/Client";
+import { AppointmentModel } from "../../models/Appointment";
+import { NotificationModel } from "../../models/Notification";
+import { ServiceModel } from "../../models/Service";
+import { ensureChatRoomForAppointment } from "../../utils/chatRoom";
+
 const mockPaymentIntentsCreate = jest.fn();
+const mockPaymentIntentsRetrieve = jest.fn();
+const mockRefundsCreate = jest.fn();
 
-// 2. Use jest.doMock para substituir o módulo 'stripe' ANTES de qualquer importação
 jest.doMock("stripe", () => {
-  // Retorna o CONSTRUTOR mockado
   return jest.fn().mockImplementation(() => {
-    // A INSTÂNCIA retornada pelo construtor
     return {
       paymentIntents: {
-        create: mockPaymentIntentsCreate, // Aponta para a função mock definida fora
+        create: mockPaymentIntentsCreate,
+        retrieve: mockPaymentIntentsRetrieve,
+      },
+      refunds: {
+        create: mockRefundsCreate,
       },
     };
   });
@@ -20,21 +45,18 @@ jest.doMock("stripe", () => {
 // 3. Importe o SERVIÇO e o Stripe DEPOIS do doMock
 //    Agora temos certeza que eles receberão a versão mockada.
 let PaymentService: any;
-let MockedStripe: jest.MockedClass<typeof Stripe>;
 
 beforeAll(() => {
-  // Usamos require aqui para garantir que o mock seja aplicado
   PaymentService = require("../payment.service").PaymentService;
-  MockedStripe = require("stripe") as jest.MockedClass<typeof Stripe>;
 });
 
 // --- Fim do Mocking ---
 
 describe("PaymentService", () => {
   beforeEach(() => {
-    // Limpa a função mock e o construtor mock
     mockPaymentIntentsCreate.mockClear();
-    MockedStripe.mockClear();
+    mockPaymentIntentsRetrieve.mockClear();
+    mockRefundsCreate.mockClear();
   });
 
   // --- Teste de SUCESSO ---
@@ -56,7 +78,6 @@ describe("PaymentService", () => {
     const clientSecret = await PaymentService.createPaymentIntent(inputParams);
 
     // 3. Assert
-    expect(MockedStripe).toHaveBeenCalledTimes(1); // Verifica se 'new Stripe()' foi chamado
     expect(mockPaymentIntentsCreate).toHaveBeenCalledTimes(1);
     expect(mockPaymentIntentsCreate).toHaveBeenCalledWith({
       amount: inputParams.amount,
@@ -85,13 +106,112 @@ describe("PaymentService", () => {
       `Erro ao iniciar o processo de pagamento: ${errorMessage}`
     );
 
-    expect(MockedStripe).toHaveBeenCalledTimes(1);
     expect(mockPaymentIntentsCreate).toHaveBeenCalledTimes(1);
     expect(mockPaymentIntentsCreate).toHaveBeenCalledWith({
       amount: inputParams.amount,
       currency: inputParams.currency,
       automatic_payment_methods: { enabled: true },
       metadata: undefined,
+    });
+  });
+
+  it("wraps a missing client_secret as a provider failure", async () => {
+    mockPaymentIntentsCreate.mockResolvedValueOnce({
+      id: "pi_123",
+      client_secret: null,
+    });
+
+    await expect(
+      PaymentService.createPaymentIntent({ amount: 1000, currency: "brl" }),
+    ).rejects.toThrow(
+      "Erro ao iniciar o processo de pagamento: Falha ao obter o identificador de pagamento do provedor.",
+    );
+  });
+
+  const succeededIntent = {
+    status: "succeeded",
+    metadata: {
+      professionalId: "2",
+      serviceId: "3",
+      selectedTime: "2026-05-01T10:00:00.000Z",
+      addressId: "4",
+    },
+  };
+
+  it("creates the appointment when the PaymentIntent succeeded", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValueOnce(succeededIntent);
+    (UserModel.findByPk as jest.Mock).mockResolvedValueOnce({ id: 9 });
+    (ClientModel.findOne as jest.Mock).mockResolvedValueOnce({ id: 8 });
+    (AppointmentModel.create as jest.Mock).mockResolvedValueOnce({ id: 11 });
+    (ServiceModel.findByPk as jest.Mock).mockResolvedValueOnce({
+      title: "Corte",
+    });
+    (NotificationModel.create as jest.Mock).mockResolvedValueOnce({});
+
+    const appointment = await PaymentService.confirmAndCreateAppointment(
+      "pi_123",
+      9,
+    );
+
+    expect(appointment).toEqual({ id: 11 });
+    expect(ensureChatRoomForAppointment).toHaveBeenCalledWith({ id: 11 });
+    expect(NotificationModel.create).toHaveBeenCalledWith(
+      expect.objectContaining({ user_id: 8, notification_type: "appointment" }),
+    );
+  });
+
+  it("rejects a PaymentIntent that was not paid", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValueOnce({
+      status: "requires_payment_method",
+      metadata: {},
+    });
+
+    await expect(
+      PaymentService.confirmAndCreateAppointment("pi_123", 9),
+    ).rejects.toThrow("O pagamento não foi concluído com sucesso.");
+  });
+
+  it("wraps a Stripe retrieve failure", async () => {
+    mockPaymentIntentsRetrieve.mockRejectedValueOnce(new Error("stripe down"));
+
+    await expect(
+      PaymentService.confirmAndCreateAppointment("pi_123", 9),
+    ).rejects.toThrow("Erro ao verificar pagamento: stripe down");
+  });
+
+  it("rejects when the authenticated user does not exist", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValueOnce(succeededIntent);
+    (UserModel.findByPk as jest.Mock).mockResolvedValueOnce(null);
+
+    await expect(
+      PaymentService.confirmAndCreateAppointment("pi_123", 99),
+    ).rejects.toThrow("Cliente (usuário) não encontrado.");
+  });
+
+  it("rejects when the user has no client profile", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValueOnce(succeededIntent);
+    (UserModel.findByPk as jest.Mock).mockResolvedValueOnce({ id: 9 });
+    (ClientModel.findOne as jest.Mock).mockResolvedValueOnce(null);
+
+    await expect(
+      PaymentService.confirmAndCreateAppointment("pi_123", 9),
+    ).rejects.toThrow("Cliente não encontrado para o usuário.");
+  });
+
+  it("refunds the payment when saving the appointment fails", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValueOnce(succeededIntent);
+    (UserModel.findByPk as jest.Mock).mockResolvedValueOnce({ id: 9 });
+    (ClientModel.findOne as jest.Mock).mockResolvedValueOnce({ id: 8 });
+    (AppointmentModel.create as jest.Mock).mockRejectedValueOnce(
+      new Error("db down"),
+    );
+    mockRefundsCreate.mockResolvedValueOnce({ id: "re_1" });
+
+    await expect(
+      PaymentService.confirmAndCreateAppointment("pi_123", 9),
+    ).rejects.toThrow("Erro ao salvar o agendamento no banco de dados.");
+    expect(mockRefundsCreate).toHaveBeenCalledWith({
+      payment_intent: "pi_123",
     });
   });
 });

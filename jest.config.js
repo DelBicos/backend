@@ -19,6 +19,12 @@ module.exports = {
       roots: ["<rootDir>/src"],
       testMatch: ["**/__tests__/**/*.test.ts"],
       clearMocks: true,
+      setupFiles: ["<rootDir>/tests/setup/env.ts"],
+      setupFilesAfterEnv: ["<rootDir>/tests/setup/afterEnv.ts"],
+      moduleNameMapper: {
+        "^(?:.*[\\\\/])?config/database(?:\\.ts)?$":
+          "<rootDir>/tests/mocks/database.ts",
+      },
     },
     {
       displayName: "integration",
