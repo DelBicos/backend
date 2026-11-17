@@ -1,152 +1,163 @@
-# DelBicos backend architecture
+# Arquitetura do backend DelBicos
 
-> "The architecture should make the correct implementation the obvious
-> implementation."
+> "A arquitetura deve tornar a implementação correta a implementação óbvia."
 
-A developer, human or agent, should be able to find, understand and safely
-change a piece of code without learning unrelated abstractions. This document
-explains *why* each rule exists. The rules themselves, short and imperative,
-live in `.agents/rules/` and are what coding agents read.
+Quem desenvolve, pessoa ou agente, precisa encontrar, entender e alterar um
+trecho de código com segurança, sem aprender abstrações que não têm relação
+com a mudança. Este documento explica *por que* cada regra existe. As regras
+em si, curtas e imperativas, ficam em `.agents/rules/` e são o que os agentes
+de código leem.
 
-## Principles
+## Princípios
 
-1. **Discoverability.** Every piece of code has one obvious place and one
-   obvious shape.
-2. **Explicit responsibility.** Each layer exists for a reason you can name.
-3. **Minimum necessary architecture.** A new layer needs a concrete
-   responsibility no existing layer covers. No service, repository or use case
-   "because the book says so".
-4. **Composition before inheritance.** Inheritance only where a framework
-   requires it: Sequelize models (`extends Model`) and error classes
-   (`extends Error`).
-5. **Libraries before home-made abstractions.** If the language or a library
-   solves it, do not write a helper or wrapper.
-6. **Abstract behavior, not appearance.** Unify only when intent and behavior
-   are the same. The same logic twice is already a smell; the third copy is a
-   strong signal to extract. DRY means one source of truth per behavior, not
-   removing textual repetition.
-7. **Consistency before local perfection.** A pull request follows the
-   dominant pattern, even if something "more elegant" exists.
-8. **Architecture changes are deliberate.** Proposal, discussion, agreement,
-   migration plan, then implementation. Never inside a feature pull request.
-9. **Visible exceptions.** A workaround stays evident and commented where it
-   is applied, never disguised as an official abstraction.
-10. **Reviewability.** Code must be easy for someone else to review.
-11. **The backend protects the business.** The frontend is not a trusted
-    boundary; the database is reached only from the backend.
+1. **Descoberta.** Cada trecho de código tem um lugar óbvio e uma forma óbvia.
+2. **Responsabilidade explícita.** Cada camada existe por um motivo que dá
+   para nomear.
+3. **Arquitetura mínima necessária.** Uma camada nova precisa de uma
+   responsabilidade concreta que nenhuma camada existente cobre. Nada de
+   service, repositório ou caso de uso "porque o livro manda".
+4. **Composição antes de herança.** Herança só onde o framework exige: models
+   do Sequelize (`extends Model`) e classes de erro (`extends Error`).
+5. **Biblioteca antes de abstração caseira.** Se a linguagem ou uma biblioteca
+   resolve, não escreva helper nem wrapper.
+6. **Abstraia comportamento, não aparência.** Una só quando a intenção e o
+   comportamento são os mesmos. A mesma lógica duas vezes já é um mau cheiro.
+   A terceira cópia é um sinal forte para extrair. DRY é uma fonte da verdade
+   por comportamento, não a remoção de repetição de texto.
+7. **Consistência antes da perfeição local.** Um pull request segue o padrão
+   dominante, mesmo quando existe algo "mais elegante".
+8. **Mudança de arquitetura é deliberada.** Proposta, discussão, acordo, plano
+   de migração e só então a implementação. Nunca dentro de um pull request de
+   feature.
+9. **Exceção visível.** Um contorno fica evidente e comentado no lugar em que
+   é aplicado, nunca disfarçado de abstração oficial.
+10. **Facilidade de revisão.** O código precisa ser fácil para outra pessoa
+    revisar.
+11. **O backend protege o negócio.** O frontend não é uma fronteira confiável.
+    O banco só é alcançado a partir do backend.
 
-## Layers
+## Camadas
 
-- **`server.ts`** sets up middlewares and registers one route group per
-  domain (`app.use("/api/user", userRoutes)`), so the API surface reads in
-  one place.
-- **Routes** only bind an endpoint to middlewares and a controller
-  (`router.post("/login", logInUser)`). Logic in a route file is invisible to
-  anyone reading controllers.
-- **Controllers** are exported functions, never classes: two paradigms for the
-  same responsibility make the code harder to navigate. A controller may hold
-  the full logic of its endpoint when that logic belongs only to it.
-- **Business rules (decision D1).** A controller calls the model directly for
-  plain CRUD. Business rules, transactions over more than one table, and logic
-  reused by more than one endpoint go to `src/services/<domain>/`. Mandatory
-  repository, use case or service layers stay rejected.
-- **Services** exist for the business rules of a domain or for an external
-  capability (storage, payment, e-mail, speech). A service that only forwards
-  to a model is a layer without responsibility. Files end in `.service.ts`,
-  `.rules.ts`, `.types.ts` or `.test.ts`, so the role of each file shows in
-  its name.
-- **Models** hold shape, types and field constraints, not the core business
-  rules. Every schema change ships with a reversible migration.
-- **Databases (decision D8).** PostgreSQL through Sequelize is the default.
-  MongoDB through Mongoose holds only `ChatMessage` and `LoginLog`. A new
-  collection is an architecture decision.
-- **Closed folder list (decision D3).** Top-level folders in `src/`: assets,
-  config, constants, controllers, docs (OpenAPI), errors, interfaces, jobs,
-  middlewares, models, realtime, routes, services, templates (e-mail), types,
-  utils and `__tests__`; the only loose file is `app.ts`. A new folder is a
-  competing pattern without a team decision.
+- **`server.ts`** configura os middlewares e registra um grupo de rotas por
+  domínio (`app.use("/api/user", userRoutes)`), para a superfície da API ser
+  lida num só lugar.
+- **Rotas** só ligam um endpoint a middlewares e a um controller
+  (`router.post("/login", logInUser)`). Lógica num arquivo de rota fica
+  invisível para quem lê os controllers.
+- **Controllers** são funções exportadas, nunca classes: dois paradigmas para
+  a mesma responsabilidade dificultam a navegação. Um controller pode guardar
+  a lógica inteira do endpoint quando essa lógica pertence só a ele.
+- **Regras de negócio (decisão D1).** Um controller chama o model direto no
+  CRUD simples. Regra de negócio, transação em mais de uma tabela e lógica
+  reutilizada por mais de um endpoint vão para `src/services/<domain>/`.
+  Camadas obrigatórias de repositório, caso de uso ou service continuam
+  rejeitadas.
+- **Services** existem para as regras de negócio de um domínio ou para uma
+  capacidade externa (armazenamento, pagamento, e-mail, voz). Um service que
+  só repassa a chamada para um model é uma camada sem responsabilidade. Os
+  arquivos terminam em `.service.ts`, `.rules.ts`, `.types.ts` ou `.test.ts`,
+  para o papel de cada arquivo aparecer no nome.
+- **Models** guardam forma, tipos e restrição de campo, não a regra de
+  negócio central. Toda mudança de schema sai com uma migration reversível.
+- **Bancos (decisão D8).** PostgreSQL via Sequelize é o padrão. MongoDB via
+  Mongoose guarda só `ChatMessage` e `LoginLog`. Collection nova é decisão de
+  arquitetura.
+- **Lista fechada de pastas (decisão D3).** Pastas de primeiro nível em
+  `src/`: assets, config, constants, controllers, docs (OpenAPI), errors,
+  interfaces, jobs, middlewares, models, realtime, routes, services,
+  templates (e-mail), types, utils e `__tests__`. O único arquivo solto é
+  `app.ts`. Pasta nova é um padrão concorrente sem decisão do time.
 
-## Anti-patterns
+## Anti-padrões
 
-| Anti-pattern | Why it hurts |
+| Anti-padrão | Por que atrapalha |
 | --- | --- |
-| Class controller among functional controllers | Two paradigms for one responsibility |
-| Service that only forwards to a model | Layer without responsibility |
-| Mandatory repository or use case | Extra architecture without need |
-| Inheritance to share a little behavior | Implicit, hard-to-trace behavior |
-| Helper for a trivial expression | Indirection for something obvious |
-| Abstraction by syntactic similarity | Erases differences of intent |
-| Generic workaround | A local exception disguised as an official abstraction |
-| New folder category inside a pull request | Competing pattern without a decision |
+| Controller de classe no meio de controllers funcionais | Dois paradigmas para uma responsabilidade |
+| Service que só repassa para um model | Camada sem responsabilidade |
+| Repositório ou caso de uso obrigatório | Arquitetura extra sem necessidade |
+| Herança para compartilhar um pouco de comportamento | Comportamento implícito, difícil de rastrear |
+| Helper para uma expressão trivial | Indireção para algo óbvio |
+| Abstração por semelhança sintática | Apaga diferença de intenção |
+| Contorno genérico | Uma exceção local disfarçada de abstração oficial |
+| Categoria nova de pasta dentro de um pull request | Padrão concorrente sem decisão |
 
-Objective signals (class controller, new folder, service file suffix) can
-become CI checks. Subjective ones (forwarding service, utility with domain
-logic, abstraction after one occurrence) stay as review suggestions.
+Sinais objetivos (controller de classe, pasta nova, sufixo de arquivo de
+service) podem virar checagens de CI. Os subjetivos (service que só repassa,
+utilitário com lógica de domínio, abstração depois de uma ocorrência) ficam
+como sugestão de review.
 
-## Not decided yet
+## Ainda não decidido
 
-These were never discussed with concrete examples and must not become rigid
-rules yet: where validation lives (controller, middleware or model schema),
-where each layer is tested, naming conventions, and concrete services for
-retries, queues and other external clients.
+Isto nunca foi discutido com exemplos concretos e ainda não pode virar regra
+rígida: onde a validação mora (controller, middleware ou schema do model),
+onde cada camada é testada, convenções de nome, e services concretos para
+retentativa, fila e outros clientes externos.
 
-## How the agent rules work
+## Como as regras dos agentes funcionam
 
-- **Single source.** `.agents/rules/*.md`, in English, with frontmatter
+- **Fonte única.** `.agents/rules/*.md`, em inglês, com frontmatter
   (`description`, `trigger`, `globs`, `alwaysApply`):
-  - `00-core.md`: stack, architecture, code rules, governance. Every tool
-    loads it in every conversation, so it stays short (about 60 lines).
-  - `01-overlay.md`: temporary initiatives and legacy exceptions, each with an
-    owner and an expiry date.
-  - `02-<layer>.md`, `03-tests.md`, `04-infra.md`: loaded only when the agent
-    works on matching files.
-- **Generated files.** `npm run rules:sync` (`scripts/rules/sync.mjs`) writes
-  `AGENTS.md` (Codex, Cursor, Antigravity), `CLAUDE.md` (imports `AGENTS.md`),
-  `.github/copilot-instructions.md`, `.claude/rules/`, `.cursor/rules/`,
-  `.github/instructions/` and `.claude/settings.json`. Every tool receives the
-  same text without relying on imports. Generated files are never edited by
-  hand.
-- **Edit lock.** `.claude/settings.json` denies Claude Code edits to the rules
-  and their enforcement. Other tools only have the governance text in the
-  core.
-- **Local files.** Git hooks (`post-merge`, `post-checkout`, `post-rewrite`,
-  installed by husky on `npm install`) run `sync.mjs --enforce`: they
-  regenerate the outputs and move untracked instruction files (`CLAUDE.local.md`,
-  `.cursorrules`, `AGENTS.md` in a subfolder, stray files in `.cursor/rules/`
-  and similar) to `.git/rules-quarantine/<date>/`. Nothing is deleted.
-- **CI.** The `Rules` workflow (job `Rules (sync + instruction files)`) fails
-  when generated files differ from the source, and when a pull request adds
-  instruction files outside the system, plan-like documents or logs.
-- **CODEOWNERS.** Rules and enforcement files need approval from the rules
-  owner. The governance text has an opening ("unless the user says the
-  current task is rules maintenance"); CODEOWNERS closes it.
-- **Gradual adjustment.** Existing code outside the rules is not refactored in
-  bulk. It is listed in `01-overlay.md`; an agent that edits such a file fixes
-  that file and only the direct imports the fix needs, and stops to ask if the
-  fix grows beyond that. The rules win over existing code, so the wrong
-  pattern is never copied just because it exists.
+  - `00-core.md`: stack, arquitetura, regras de código, governança. Toda
+    ferramenta carrega este arquivo em toda conversa, por isso ele fica curto
+    (cerca de 60 linhas).
+  - `01-overlay.md`: iniciativas temporárias e exceções legadas, cada uma com
+    dono e data de validade.
+  - `02-<layer>.md`, `03-tests.md`, `04-infra.md`: carregados só quando o
+    agente trabalha em arquivos correspondentes.
+- **Arquivos gerados.** `npm run rules:sync` (`scripts/rules/sync.mjs`)
+  escreve `AGENTS.md` (Codex, Cursor, Antigravity), `CLAUDE.md` (importa
+  `AGENTS.md`), `.github/copilot-instructions.md`, `.claude/rules/`,
+  `.cursor/rules/`, `.github/instructions/` e `.claude/settings.json`. Cada
+  ferramenta recebe o mesmo texto, sem depender de import. Arquivo gerado
+  nunca é editado à mão.
+- **Trava de edição.** `.claude/settings.json` impede o Claude Code de editar
+  as regras e a aplicação delas. As outras ferramentas só têm o texto de
+  governança no núcleo.
+- **Arquivos locais.** Os hooks do Git (`post-merge`, `post-checkout`,
+  `post-rewrite`, instalados pelo husky no `npm install`) rodam
+  `sync.mjs --enforce`: regeneram as saídas e movem arquivos de instrução não
+  rastreados (`CLAUDE.local.md`, `.cursorrules`, `AGENTS.md` numa subpasta,
+  arquivos soltos em `.cursor/rules/` e semelhantes) para
+  `.git/rules-quarantine/<data>/`. Nada é apagado.
+- **CI.** O workflow `Rules` (job `Rules (sync + instruction files)`) falha
+  quando os arquivos gerados divergem da fonte, e quando um pull request
+  adiciona arquivos de instrução fora do sistema, documentos no estilo de
+  plano ou logs.
+- **CODEOWNERS.** Regras e arquivos de aplicação precisam de aprovação de
+  quem é dono das regras. O texto de governança tem uma abertura ("a menos
+  que a pessoa diga que a tarefa atual é manutenção de rules"). O CODEOWNERS
+  fecha essa abertura.
+- **Ajuste gradual.** Código existente fora das regras não é refatorado em
+  massa. Ele fica listado em `01-overlay.md`. Um agente que edita um arquivo
+  desses corrige esse arquivo e só os imports diretos de que a correção
+  precisa, e para para perguntar se a correção crescer além disso. As regras
+  vencem o código existente, então o padrão errado nunca é copiado só porque
+  já está lá.
 
-The rules never tell an agent to read this document: that would spend tokens in
-every conversation.
+As regras nunca mandam um agente ler este documento: isso gastaria tokens em
+toda conversa.
 
-## Maintenance
+## Manutenção
 
-A new rule is born from a repeated agent mistake, never from "maybe one day".
+Uma regra nova nasce de um erro repetido de agente, nunca de "quem sabe um
+dia".
 
-1. **Change a rule:** edit only the `.md` in `.agents/rules/`, run
-   `npm run rules:sync`, and commit source and generated files together in a
-   pull request that changes only rules, titled `chore(rules): ...`. The
-   description names the agent mistake that motivated it.
-2. **New convention:** valid everywhere and one line long goes to the core;
-   valid for one folder goes to that folder's layer. A new layer only when a
-   folder has no coverage and agents fail there more than once.
-3. **Temporary initiative:** a section in `01-overlay.md` with name, expiry
-   date (up to 90 days) and owner. When it ends, delete the section; any
-   permanent convention becomes one or two lines in a layer.
-4. **Token budget:** core around 60 lines; layers with 3 to 10 bullets that do
-   not repeat the core; never `alwaysApply: true` on a layer.
-5. **Monthly review:** check in at least two tools that each one receives the
-   core and the right layer. In Claude Code, `/doctor prompt-audit` flags
-   contradictory instructions and references to missing files.
-6. **Personal preferences** (reply language, tone, commit style) live in each
-   person's tool settings, never in the repository.
+1. **Mudar uma regra:** edite só o `.md` em `.agents/rules/`, rode
+   `npm run rules:sync` e faça o commit da fonte e dos arquivos gerados
+   juntos, num pull request que muda só rules, com título
+   `chore(rules): ...`. A descrição nomeia o erro de agente que motivou a
+   mudança.
+2. **Convenção nova:** o que vale em todo lugar e cabe numa linha vai para o
+   núcleo. O que vale para uma pasta vai para a camada dessa pasta. Camada
+   nova só quando uma pasta não tem cobertura e os agentes falham ali mais de
+   uma vez.
+3. **Iniciativa temporária:** uma seção em `01-overlay.md` com nome, data de
+   validade (até 90 dias) e dono. Quando acaba, apague a seção. Convenção
+   permanente vira uma ou duas linhas numa camada.
+4. **Orçamento de tokens:** núcleo em torno de 60 linhas. Camadas com 3 a 10
+   itens que não repetem o núcleo. Nunca `alwaysApply: true` numa camada.
+5. **Revisão mensal:** confira em pelo menos duas ferramentas se cada uma
+   recebe o núcleo e a camada certa. No Claude Code, `/doctor prompt-audit`
+   aponta instruções contraditórias e referências a arquivos que não existem.
+6. **Preferência pessoal** (idioma da resposta, tom, estilo de commit) fica
+   na configuração da ferramenta de cada pessoa, nunca no repositório.
