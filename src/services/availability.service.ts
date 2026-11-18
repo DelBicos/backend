@@ -4,7 +4,12 @@ import { ProfessionalAvailabilityLockModel } from "../models/ProfessionalAvailab
 import { ServiceAvailabilityModel } from "../models/ServiceAvailability";
 import { ServiceModel } from "../models/Service";
 import { AppointmentModel } from "../models/Appointment";
-import { parseLocalAppointmentStart } from "../utils/date.util";
+import { HttpError } from "../errors/HttpError";
+import {
+  DEFAULT_BOT_TIME_ZONE,
+  appointmentCalendarDate,
+  parseLocalAppointmentStart,
+} from "../utils/date.util";
 
 export interface AvailabilityOptions {
   transaction?: Transaction;
@@ -163,7 +168,7 @@ export async function getAvailableSlots(
       ) {
         availableSlots.add(
           new Date(slot).toLocaleTimeString("pt-BR", {
-            timeZone: "America/Sao_Paulo",
+            timeZone: DEFAULT_BOT_TIME_ZONE,
             hour: "2-digit",
             minute: "2-digit",
             hour12: false,
@@ -173,4 +178,38 @@ export async function getAvailableSlots(
     }
   }
   return [...availableSlots].sort();
+}
+
+/**
+ * Garante que o horario escolhido esta na agenda publicada do profissional
+ * (regras de disponibilidade, sem bloqueios nem outro agendamento). O app so
+ * oferece esses horarios; aqui o servidor nao confia nisso.
+ *
+ * A agenda e lida no fuso de Sao Paulo, o mesmo usado ao listar os horarios.
+ */
+export async function assertSlotInAgenda(params: {
+  professionalId: number;
+  start: Date;
+  durationMinutes: number;
+  serviceId?: number;
+  excludeAppointmentId?: number;
+  transaction?: Transaction;
+}): Promise<void> {
+  const { professionalId, start, durationMinutes, serviceId, excludeAppointmentId, transaction } = params;
+  const date = appointmentCalendarDate(start);
+  const time = start.toLocaleTimeString("pt-BR", {
+    timeZone: DEFAULT_BOT_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const slots = await getAvailableSlots(professionalId, date, durationMinutes, serviceId, {
+    transaction,
+    excludeAppointmentId,
+  });
+  if (!slots.includes(time)) {
+    throw HttpError.conflict(
+      "Esse horário não está disponível na agenda do profissional. Escolha outro horário.",
+    );
+  }
 }

@@ -1,4 +1,5 @@
 import logger from "../utils/logger";
+import { convertToWav16kMono, needsConversionForAzure } from "./voice/audioConversion.service";
 
 const DEFAULT_TOTAL_TIMEOUT_MS = 45_000;
 
@@ -336,14 +337,29 @@ async function callProvider(
   if (config.provider === "azure") {
     const lang = language === "pt" || language === "pt-BR" ? "pt-BR" : language;
     const url = `${config.endpoint}?language=${encodeURIComponent(lang)}&format=detailed`;
-    const audioBytes = new Uint8Array(audio.byteLength);
-    audioBytes.set(audio);
 
-    let azureContentType = mimeType;
-    if (mimeType === "audio/webm") azureContentType = "audio/webm; codecs=opus";
-    else if (mimeType === "audio/ogg") azureContentType = "audio/ogg; codecs=opus";
-    else if (mimeType === "audio/wav" || mimeType === "audio/x-wav") azureContentType = "audio/wav";
-    else if (mimeType === "audio/mp3" || mimeType === "audio/mpeg") azureContentType = "audio/mp3";
+    // O Azure so decodifica WAV e OGG/Opus: WebM, MP4 e M4A viram WAV antes do envio.
+    let azureAudio = audio;
+    let azureMimeType = mimeType;
+    if (needsConversionForAzure(mimeType)) {
+      try {
+        azureAudio = await convertToWav16kMono(audio);
+        azureMimeType = "audio/wav";
+      } catch (error) {
+        logger.warn("Transcrição de voz: falha ao converter o áudio para WAV", {
+          mimeType,
+          error: (error as Error).message,
+        });
+        throw new VoiceTranscriptionProviderError();
+      }
+    }
+    const audioBytes = new Uint8Array(azureAudio.byteLength);
+    audioBytes.set(azureAudio);
+
+    const azureContentType =
+      azureMimeType.split(";")[0].trim().toLowerCase() === "audio/ogg"
+        ? "audio/ogg; codecs=opus"
+        : "audio/wav; codecs=audio/pcm; samplerate=16000";
 
     return requestProvider(
       { ...config, endpoint: url },

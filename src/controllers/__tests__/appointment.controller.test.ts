@@ -1,10 +1,13 @@
-import { Request, Response } from "express";
-import { cancelBotAppointment } from "../../services/bot/states/appointmentActions";
+import { NextFunction, Request, Response } from "express";
+import * as Lifecycle from "../../services/appointment/lifecycle.rules";
+import { HttpError } from "../../errors/HttpError";
+import { nextToErrorHandler, settled } from "./handlerTestUtils";
+import type { AuthenticatedRequest } from "../../interfaces/authentication.interface";
 import {
-  cancelClientAppointment,
-  createAppointment,
-  getAllAppointments,
-  reviewAppointment,
+  cancelAppointment as cancelClientAppointmentHandler,
+  createAppointment as createAppointmentHandler,
+  getAllAppointments as getAllAppointmentsHandler,
+  reviewAppointment as reviewAppointmentHandler,
 } from "../appointment.controller";
 import { AppointmentModel } from "../../models/Appointment";
 import { UserModel } from "../../models/User";
@@ -14,6 +17,11 @@ import { ServiceModel } from "../../models/Service";
 import { AddressModel } from "../../models/Address";
 import { NotificationModel } from "../../models/Notification";
 import { ensureChatRoomForAppointment } from "../../utils/chatRoom";
+
+const cancelClientAppointment = settled(cancelClientAppointmentHandler);
+const createAppointment = settled(createAppointmentHandler);
+const getAllAppointments = settled(getAllAppointmentsHandler);
+const reviewAppointment = settled(reviewAppointmentHandler);
 
 jest.mock("../../config/database", () => {
   const { Sequelize } = require("sequelize");
@@ -30,6 +38,8 @@ jest.mock("../../models/Service");
 jest.mock("../../models/Subcategory");
 jest.mock("../../models/Notification");
 jest.mock("../../services/payment.service", () => ({ PaymentService: {} }));
+// O atendimento em domicilio tem testes proprios e puxa o socket.io; aqui so importa as rotas.
+jest.mock("../../services/appointment/homeVisit.service", () => ({}));
 jest.mock("../../utils/chatRoom", () => ({
   ensureChatRoomForAppointment: jest.fn(),
   syncChatRoomStatusForAppointment: jest.fn(),
@@ -40,8 +50,12 @@ jest.mock("../../utils/logger", () => ({
   logError: jest.fn(),
   logDatabase: jest.fn(),
 }));
-jest.mock("../../services/bot/states/appointmentActions", () => ({
-  cancelBotAppointment: jest.fn(),
+jest.mock("../../services/appointment/lifecycle.rules", () => ({
+  cancelAppointment: jest.fn(),
+}));
+jest.mock("../../services/availability.service", () => ({
+  assertSlotInAgenda: jest.fn().mockResolvedValue(undefined),
+  getAvailableSlots: jest.fn(),
 }));
 jest.mock("../../services/botAppointmentStatus.service", () => ({
   syncBotSessionsForAppointmentStatus: jest.fn(),
@@ -51,6 +65,11 @@ jest.mock("../../services/appointmentSchedule.service", () => ({
     const { AppointmentModel: Model } = require("../../models/Appointment");
     return Model.create(data);
   }),
+  withProfessionalScheduleLock: jest.fn(
+    async (_professionalId: number, work: (tx: unknown) => Promise<unknown>) =>
+      work({ id: "tx" }),
+  ),
+  assertNoAppointmentOverlap: jest.fn(),
   changePendingAppointmentStatus: jest.fn(),
   ScheduleConflictError: class ScheduleConflictError extends Error {},
 }));
@@ -63,6 +82,8 @@ const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000);
 describe("AppointmentController - createAppointment", () => {
   let req: any;
   let res: Partial<Response>;
+  // Erros chegam ao errorHandler global, como no servidor.
+  const next: NextFunction = nextToErrorHandler(() => req, () => res);
   let jsonMock: jest.Mock;
   let statusMock: jest.Mock;
 
@@ -73,7 +94,13 @@ describe("AppointmentController - createAppointment", () => {
     service_radius_km: 10,
     MainAddress: { lat: "-23.5505", lng: "-46.6333" },
   };
-  const service = { id: 5, title: "Limpeza Residencial", active: true };
+  const service = {
+    id: 5,
+    title: "Limpeza Residencial",
+    active: true,
+    professional_id: 20,
+    duration: 60,
+  };
   const validBody = {
     service_id: 5,
     professional_id: 20,
@@ -94,6 +121,7 @@ describe("AppointmentController - createAppointment", () => {
     (ServiceModel.findByPk as jest.Mock).mockResolvedValue(service);
     (AddressModel.findByPk as jest.Mock).mockResolvedValue({
       id: 2,
+      user_id: 1,
       lat: "-23.5614",
       lng: "-46.6559",
     });
@@ -110,7 +138,7 @@ describe("AppointmentController - createAppointment", () => {
 
   describe("criação", () => {
     it("deve criar o agendamento com status pending e retornar 201", async () => {
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
       expect(AppointmentModel.create).toHaveBeenCalledWith({
         professional_id: 20,
@@ -120,7 +148,7 @@ describe("AppointmentController - createAppointment", () => {
         start_time: new Date(validBody.start_time),
         end_time: new Date(validBody.end_time),
         status: "pending",
-      });
+      }, expect.objectContaining({ transaction: expect.anything() }));
       expect(statusMock).toHaveBeenCalledWith(201);
       expect(jsonMock).toHaveBeenCalledWith(
         expect.objectContaining({ id: 100, status: "pending", client_id: 10 }),
@@ -130,18 +158,19 @@ describe("AppointmentController - createAppointment", () => {
     it("deve usar o client_id do usuário autenticado e ignorar o enviado no corpo", async () => {
       req.body.client_id = 999;
 
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
       expect(ClientModel.findOne).toHaveBeenCalledWith({
         where: { user_id: 1 },
       });
       expect(AppointmentModel.create).toHaveBeenCalledWith(
         expect.objectContaining({ client_id: 10 }),
+        expect.anything(),
       );
     });
 
     it("deve criar a sala de chat e notificar cliente e profissional", async () => {
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
       expect(ensureChatRoomForAppointment).toHaveBeenCalledWith(
         expect.objectContaining({ id: 100 }),
@@ -163,26 +192,23 @@ describe("AppointmentController - createAppointment", () => {
       );
     });
 
-    it("deve aceitar coordenadas do cliente dentro do raio de atuação", async () => {
-      delete req.body.address_id;
-      req.body.client_lat = "-23.5614";
-      req.body.client_lng = "-46.6559";
+    it("deve aceitar o endereço do cliente dentro do raio de atuação", async () => {
+      await createAppointment(req as Request, res as Response, next);
 
-      await createAppointment(req as Request, res as Response);
-
-      expect(AddressModel.findByPk).not.toHaveBeenCalled();
+      expect(AddressModel.findByPk).toHaveBeenCalledWith(2);
       expect(statusMock).toHaveBeenCalledWith(201);
     });
 
-    it("deve retornar 400 quando o banco falhar ao salvar", async () => {
+    // Falhas inesperadas (nao sao HttpError) viram 500 no errorHandler global.
+    it("deve retornar 500 quando o banco falhar ao salvar", async () => {
       (AppointmentModel.create as jest.Mock).mockRejectedValue(
         new Error("falha no banco"),
       );
 
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
-      expect(statusMock).toHaveBeenCalledWith(400);
-      expect(jsonMock).toHaveBeenCalledWith({ error: "falha no banco" });
+      expect(statusMock).toHaveBeenCalledWith(500);
+      expect(jsonMock).toHaveBeenCalledWith({ error: "Erro interno do servidor" });
     });
   });
 
@@ -190,7 +216,7 @@ describe("AppointmentController - createAppointment", () => {
     it("deve retornar 401 quando o usuário não estiver autenticado", async () => {
       delete req.user;
 
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
       expect(statusMock).toHaveBeenCalledWith(401);
       expect(jsonMock).toHaveBeenCalledWith({
@@ -202,18 +228,19 @@ describe("AppointmentController - createAppointment", () => {
     it("deve retornar 403 quando o usuário não tiver perfil de cliente", async () => {
       (ClientModel.findOne as jest.Mock).mockResolvedValue(null);
 
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
       expect(statusMock).toHaveBeenCalledWith(403);
       expect(AppointmentModel.create).not.toHaveBeenCalled();
     });
 
-    it.each(["service_id", "professional_id", "start_time", "end_time"])(
+    // end_time deixou de ser enviado: o servidor calcula pelo tempo do serviço.
+    it.each(["service_id", "professional_id", "address_id", "start_time"])(
       "deve retornar 400 quando %s estiver ausente",
       async (field) => {
         delete req.body[field];
 
-        await createAppointment(req as Request, res as Response);
+        await createAppointment(req as Request, res as Response, next);
 
         expect(statusMock).toHaveBeenCalledWith(400);
         expect(jsonMock).toHaveBeenCalledWith({
@@ -226,7 +253,7 @@ describe("AppointmentController - createAppointment", () => {
     it("deve retornar 404 quando o profissional não existir", async () => {
       (ProfessionalModel.findByPk as jest.Mock).mockResolvedValue(null);
 
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
       expect(statusMock).toHaveBeenCalledWith(404);
       expect(jsonMock).toHaveBeenCalledWith({
@@ -238,7 +265,7 @@ describe("AppointmentController - createAppointment", () => {
     it("deve retornar 404 quando o serviço não existir", async () => {
       (ServiceModel.findByPk as jest.Mock).mockResolvedValue(null);
 
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
       expect(statusMock).toHaveBeenCalledWith(404);
       expect(jsonMock).toHaveBeenCalledWith({
@@ -252,7 +279,7 @@ describe("AppointmentController - createAppointment", () => {
         active: false,
       });
 
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
       expect(statusMock).toHaveBeenCalledWith(400);
       expect(jsonMock).toHaveBeenCalledWith({
@@ -261,22 +288,20 @@ describe("AppointmentController - createAppointment", () => {
       expect(AppointmentModel.create).not.toHaveBeenCalled();
     });
 
-    it("deve retornar 400 quando client_lat e client_lng forem inválidos", async () => {
+    it("deve ignorar client_lat e client_lng do corpo e usar o endereço salvo", async () => {
       req.body.client_lat = "abc";
       req.body.client_lng = "xyz";
 
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
-      expect(statusMock).toHaveBeenCalledWith(400);
-      expect(jsonMock).toHaveBeenCalledWith({
-        error: "client_lat e client_lng inválidos",
-      });
+      expect(AddressModel.findByPk).toHaveBeenCalledWith(2);
+      expect(statusMock).toHaveBeenCalledWith(201);
     });
 
     it("deve retornar 404 quando o endereço do cliente não existir", async () => {
       (AddressModel.findByPk as jest.Mock).mockResolvedValue(null);
 
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
       expect(statusMock).toHaveBeenCalledWith(404);
       expect(jsonMock).toHaveBeenCalledWith({
@@ -287,11 +312,12 @@ describe("AppointmentController - createAppointment", () => {
     it("deve retornar 400 quando o endereço estiver fora do raio do profissional", async () => {
       (AddressModel.findByPk as jest.Mock).mockResolvedValue({
         id: 2,
+        user_id: 1,
         lat: "-22.9068",
         lng: "-43.1729",
       });
 
-      await createAppointment(req as Request, res as Response);
+      await createAppointment(req as Request, res as Response, next);
 
       expect(statusMock).toHaveBeenCalledWith(400);
       expect(jsonMock).toHaveBeenCalledWith({
@@ -304,46 +330,57 @@ describe("AppointmentController - createAppointment", () => {
 });
 
 describe("cancelClientAppointment", () => {
+  // A regra (dono da reserva, politica de retencao, estorno) vive em
+  // appointment.lifecycle e tem testes proprios; aqui so a ponte HTTP.
   beforeEach(() => jest.clearAllMocks());
 
-  it("cancela apenas a reserva pertencente ao cliente autenticado", async () => {
-    (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 10 });
-    (AppointmentModel.findOne as jest.Mock).mockResolvedValue({
-      id: 100,
-      client_id: 10,
-    });
+  it("cancela a reserva do usuário autenticado pelo id público", async () => {
+    (Lifecycle.cancelAppointment as jest.Mock).mockResolvedValue({ id: "ABC", status: "canceled" });
     const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
 
     await cancelClientAppointment(
-      { user: { id: 7 }, params: { id: "ABC" } } as any,
+      { user: { id: 7 }, params: { id: "ABC" }, body: { reason: "Imprevisto" } } as any,
       res as any,
+      jest.fn(),
     );
 
-    expect(AppointmentModel.findOne).toHaveBeenCalledWith({
-      where: { short_id: "ABC", client_id: 10 },
-    });
-    expect(cancelBotAppointment).toHaveBeenCalledWith(7, 100);
-    expect(res.status).toHaveBeenCalledWith(200);
+    expect(Lifecycle.cancelAppointment).toHaveBeenCalledWith(7, "ABC", "Imprevisto");
+    expect(res.json).toHaveBeenCalledWith({ id: "ABC", status: "canceled" });
   });
 
-  it("não cancela quando a reserva não pertence ao cliente", async () => {
-    (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 10 });
-    (AppointmentModel.findOne as jest.Mock).mockResolvedValue(null);
+  it("não cancela quando a reserva não pertence ao usuário (erro vai ao errorHandler)", async () => {
+    const notOwned = HttpError.notFound("Agendamento não encontrado");
+    (Lifecycle.cancelAppointment as jest.Mock).mockRejectedValue(notOwned);
     const res = { status: jest.fn().mockReturnThis(), json: jest.fn() };
+    const forwarded = jest.fn();
 
     await cancelClientAppointment(
-      { user: { id: 7 }, params: { id: "ABC" } } as any,
+      { user: { id: 7 }, params: { id: "ABC" }, body: {} } as any,
       res as any,
+      forwarded,
     );
 
-    expect(cancelBotAppointment).not.toHaveBeenCalled();
-    expect(res.status).toHaveBeenCalledWith(404);
+    expect(forwarded).toHaveBeenCalledWith(notOwned);
+    expect(res.json).not.toHaveBeenCalled();
+  });
+
+  it("recusa usuário não autenticado sem chamar a regra", async () => {
+    const forwarded = jest.fn();
+    await cancelClientAppointment(
+      { params: { id: "ABC" }, body: {} } as any,
+      { status: jest.fn(), json: jest.fn() } as any,
+      forwarded,
+    );
+    expect(Lifecycle.cancelAppointment).not.toHaveBeenCalled();
+    expect(forwarded).toHaveBeenCalledWith(expect.objectContaining({ status: 401 }));
   });
 });
 
 describe("AppointmentController - getAllAppointments", () => {
-  let req: Partial<Request>;
+  let req: Partial<AuthenticatedRequest>;
   let res: Partial<Response>;
+  // Erros chegam ao errorHandler global, como no servidor.
+  const next: NextFunction = nextToErrorHandler(() => req, () => res);
   let jsonMock: jest.Mock;
   let statusMock: jest.Mock;
 
@@ -352,9 +389,10 @@ describe("AppointmentController - getAllAppointments", () => {
     jsonMock = jest.fn();
     statusMock = jest.fn().mockReturnValue({ json: jsonMock });
     req = {
+      user: { id: 1 },
       params: { id: "1" },
       query: {},
-    };
+    } as unknown as Partial<AuthenticatedRequest>;
     res = {
       status: statusMock,
       json: jsonMock,
@@ -363,13 +401,14 @@ describe("AppointmentController - getAllAppointments", () => {
     (ProfessionalModel.findOne as jest.Mock).mockResolvedValue(null);
   });
 
-  it("deve retornar erro 404 se o usuário não for encontrado", async () => {
-    (UserModel.findByPk as jest.Mock).mockResolvedValue(null);
+  // O servidor nao consulta mais o usuario do parametro: so deixa ver a propria agenda.
+  it("deve retornar 403 ao consultar os agendamentos de outro usuário", async () => {
+    req.params = { id: "99" };
 
-    await getAllAppointments(req as Request, res as Response);
+    await getAllAppointments(req as Request, res as Response, next);
 
-    expect(statusMock).toHaveBeenCalledWith(404);
-    expect(jsonMock).toHaveBeenCalledWith({ error: "Usuário não encontrado" });
+    expect(statusMock).toHaveBeenCalledWith(403);
+    expect(AppointmentModel.findAll).not.toHaveBeenCalled();
   });
 
   it("deve retornar lista de agendamentos com Address, Subcategory e payment_method para perfil de cliente", async () => {
@@ -423,7 +462,7 @@ describe("AppointmentController - getAllAppointments", () => {
     (ClientModel.findOne as jest.Mock).mockResolvedValue(mockClient);
     (AppointmentModel.findAll as jest.Mock).mockResolvedValue(mockAppointments);
 
-    await getAllAppointments(req as Request, res as Response);
+    await getAllAppointments(req as Request, res as Response, next);
 
     expect(AppointmentModel.findAll).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -435,7 +474,6 @@ describe("AppointmentController - getAllAppointments", () => {
     expect(result).toEqual(
       expect.objectContaining({
         id: "A1B2C3",
-        numeric_id: 100,
         payment_method: "Cartão de Crédito",
         Address: expect.objectContaining({
           street: "Rua Exemplo",
@@ -451,6 +489,8 @@ describe("AppointmentController - getAllAppointments", () => {
 
   it("deve retornar lista de agendamentos para perfil de profissional", async () => {
     req.query = { role: "professional" };
+    (req as AuthenticatedRequest).user = { id: 2 } as AuthenticatedRequest["user"];
+    req.params = { id: "2" };
 
     const mockUser = { id: 2, name: "Profissional Teste" };
     const mockProfessional = { id: 20, user_id: 2 };
@@ -480,7 +520,7 @@ describe("AppointmentController - getAllAppointments", () => {
     (ProfessionalModel.findOne as jest.Mock).mockResolvedValue(mockProfessional);
     (AppointmentModel.findAll as jest.Mock).mockResolvedValue(mockAppointments);
 
-    await getAllAppointments(req as Request, res as Response);
+    await getAllAppointments(req as Request, res as Response, next);
 
     expect(AppointmentModel.findAll).toHaveBeenCalledWith(
       expect.objectContaining({ where: { professional_id: 20 } }),
@@ -488,7 +528,6 @@ describe("AppointmentController - getAllAppointments", () => {
     expect(jsonMock).toHaveBeenCalledWith([
       expect.objectContaining({
         id: "Z9Y8X7",
-        numeric_id: 101,
         payment_method: "Cartão de Crédito",
         Address: expect.objectContaining({
           street: "Av. Paulista",
@@ -503,7 +542,7 @@ describe("AppointmentController - getAllAppointments", () => {
     (ClientModel.findOne as jest.Mock).mockResolvedValue({ id: 10, user_id: 1 });
     (AppointmentModel.findAll as jest.Mock).mockResolvedValue([]);
 
-    await getAllAppointments(req as Request, res as Response);
+    await getAllAppointments(req as Request, res as Response, next);
 
     expect(statusMock).not.toHaveBeenCalled();
     expect(jsonMock).toHaveBeenCalledWith([]);
@@ -513,7 +552,7 @@ describe("AppointmentController - getAllAppointments", () => {
     req.query = { role: "professional" };
     (UserModel.findByPk as jest.Mock).mockResolvedValue({ id: 1 });
 
-    await getAllAppointments(req as Request, res as Response);
+    await getAllAppointments(req as Request, res as Response, next);
 
     expect(AppointmentModel.findAll).not.toHaveBeenCalled();
     expect(jsonMock).toHaveBeenCalledWith([]);
@@ -527,7 +566,7 @@ describe("AppointmentController - getAllAppointments", () => {
       new Error("timeout"),
     );
 
-    await getAllAppointments(req as Request, res as Response);
+    await getAllAppointments(req as Request, res as Response, next);
 
     expect(statusMock).toHaveBeenCalledWith(500);
     expect(jsonMock).toHaveBeenCalledWith({ error: "Erro interno do servidor" });
@@ -537,6 +576,8 @@ describe("AppointmentController - getAllAppointments", () => {
 describe("Caixa preta — avaliação do agendamento (reviewAppointment)", () => {
   let req: any;
   let res: Partial<Response>;
+  // Erros chegam ao errorHandler global, como no servidor.
+  const next: NextFunction = nextToErrorHandler(() => req, () => res);
   let jsonMock: jest.Mock;
   let statusMock: jest.Mock;
   let save: jest.Mock;
@@ -549,7 +590,7 @@ describe("Caixa preta — avaliação do agendamento (reviewAppointment)", () =>
     service_id: 5,
     rating: null,
     review: null,
-    Client: { User: { id: 1, name: "Cliente" } },
+    Client: { user_id: 1, User: { id: 1, name: "Cliente" } },
     save,
   });
 
@@ -581,7 +622,7 @@ describe("Caixa preta — avaliação do agendamento (reviewAppointment)", () =>
   it("AG-L-10: rating=1 (mínimo válido) é aceito", async () => {
     req.body.rating = 1;
 
-    await reviewAppointment(req as Request, res as Response);
+    await reviewAppointment(req as Request, res as Response, next);
 
     expect(statusMock).not.toHaveBeenCalled();
     expect(save).toHaveBeenCalled();
@@ -590,7 +631,7 @@ describe("Caixa preta — avaliação do agendamento (reviewAppointment)", () =>
   it("AG-L-11: rating=5 (máximo válido) é aceito", async () => {
     req.body.rating = 5;
 
-    await reviewAppointment(req as Request, res as Response);
+    await reviewAppointment(req as Request, res as Response, next);
 
     expect(save).toHaveBeenCalled();
     expect(jsonMock).toHaveBeenCalled();
@@ -599,18 +640,19 @@ describe("Caixa preta — avaliação do agendamento (reviewAppointment)", () =>
   it("AG-L-12: rating=0 (abaixo do mínimo) é recusado", async () => {
     req.body.rating = 0;
 
-    await reviewAppointment(req as Request, res as Response);
+    await reviewAppointment(req as Request, res as Response, next);
 
+    // 0 e um valor informado fora da faixa (antes caia em "obrigatorio").
     expect(statusMock).toHaveBeenCalledWith(400);
     expect(jsonMock).toHaveBeenCalledWith({
-      error: "O campo 'rating' é obrigatório",
+      error: "A avaliação deve estar entre 1 e 5",
     });
   });
 
   it("AG-L-13: rating=6 (acima do máximo) é recusado", async () => {
     req.body.rating = 6;
 
-    await reviewAppointment(req as Request, res as Response);
+    await reviewAppointment(req as Request, res as Response, next);
 
     expect(statusMock).toHaveBeenCalledWith(400);
     expect(jsonMock).toHaveBeenCalledWith({
@@ -621,7 +663,7 @@ describe("Caixa preta — avaliação do agendamento (reviewAppointment)", () =>
   it("AG-L-14: comentário com 500 caracteres (máximo) é aceito", async () => {
     req.body.review = "a".repeat(500);
 
-    await reviewAppointment(req as Request, res as Response);
+    await reviewAppointment(req as Request, res as Response, next);
 
     expect(save).toHaveBeenCalled();
   });
@@ -629,7 +671,7 @@ describe("Caixa preta — avaliação do agendamento (reviewAppointment)", () =>
   it("AG-L-15: comentário com 501 caracteres (acima do máximo) é recusado", async () => {
     req.body.review = "a".repeat(501);
 
-    await reviewAppointment(req as Request, res as Response);
+    await reviewAppointment(req as Request, res as Response, next);
 
     expect(statusMock).toHaveBeenCalledWith(400);
     expect(jsonMock).toHaveBeenCalledWith({

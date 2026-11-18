@@ -40,7 +40,7 @@ export function buildConfirmationResponse(
       (ctx.serviceDuration ? `Duração: ${ctx.serviceDuration} minutos\n` : "") +
       (price ? `Valor: ${price}\n` : "") +
       oldInfo +
-      `\nConfirma? Responda com *sim* para confirmar ou *não* para cancelar.`,
+      `\nConfirma? Responda "sim" para confirmar ou "não" para cancelar.`,
     nextState: "CONFIRMACAO",
     contextUpdate: {
       ...ctxUpdate,

@@ -1,12 +1,13 @@
 import { Request, Response, NextFunction } from "express";
 import { validateAvailabilities } from "../utils/serviceAvailability.utils";
 
+import { bodyOf } from "../utils/requestBody.util";
 export function validateCreateService(
   req: Request,
   res: Response,
   next: NextFunction,
 ) {
-  const { title, duration, price, subcategory_id } = req.body as any;
+  const { title, duration, price, subcategory_id } = bodyOf(req);
 
   if (!title || typeof title !== "string" || title.trim().length === 0)
     return res.status(400).json({ error: "title é obrigatório" });
@@ -17,7 +18,7 @@ export function validateCreateService(
       .status(400)
       .json({ error: "duration deve ser um inteiro maior que 0 (minutos)" });
 
-  const { price_cents } = req.body as any;
+  const { price_cents } = bodyOf(req);
   // aceitar price_cents (inteiro em centavos) OU price (decimal/string)
   if (price_cents === undefined || price_cents === null) {
     const priceNum = Number(price);
@@ -45,6 +46,19 @@ export function validateCreateService(
   )
     return res.status(400).json({ error: "subcategory_id é obrigatório" });
 
+  const { availabilities } = bodyOf(req);
+  if (availabilities !== undefined) {
+    if (!Array.isArray(availabilities))
+      return res
+        .status(400)
+        .json({ error: "availabilities deve ser um array" });
+    const errors = validateAvailabilities(availabilities);
+    if (errors.length > 0)
+      return res
+        .status(400)
+        .json({ error: "availabilities inválidas", details: errors });
+  }
+
   return next();
 }
 
@@ -53,7 +67,7 @@ export function validateCreateServiceTopLevel(
   res: Response,
   next: NextFunction,
 ) {
-  const body = req.body as any;
+  const body = bodyOf(req);
   const {
     title,
     description,
@@ -129,7 +143,7 @@ export function validateUpdateService(
   res: Response,
   next: NextFunction,
 ) {
-  const body = req.body as any;
+  const body = bodyOf(req);
 
   if (
     Object.prototype.hasOwnProperty.call(body, "title") &&

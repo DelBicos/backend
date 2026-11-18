@@ -4,6 +4,7 @@ import { BotSessionManager } from "./bot/BotSessionManager";
 import { BotMessageRouter } from "./bot/BotMessageRouter";
 import { BotState } from "../constants/botStates";
 import { logError } from "../utils/logger";
+import type { AppointmentStatusValue } from "../models/Appointment";
 import {
   parsePortugueseDate,
   parseTimeFromText,
@@ -33,7 +34,7 @@ export interface BotSessionHistory {
     ended_at: Date | null;
     appointment_id: number | null;
     appointment_status:
-      "pending" | "confirmed" | "completed" | "canceled" | null;
+      AppointmentStatusValue | null;
     appointment_paid: boolean;
     payment_pending: boolean;
     waiting_for_professional: boolean;
@@ -305,7 +306,7 @@ export async function processMessage(
       userId,
       selectedTimeIso,
     );
-  } catch (error: any) {
+  } catch (error) {
     logError("Bot: erro inesperado no roteamento de mensagem", error, {
       userId,
       sessionId: session.id,

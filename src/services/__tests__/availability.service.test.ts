@@ -15,7 +15,11 @@ jest.mock("../../models/Appointment", () => ({
 }));
 
 import { Op } from "sequelize";
-import { getAvailableSlots, ruleAppliesOnDate } from "../availability.service";
+import {
+  assertSlotInAgenda,
+  getAvailableSlots,
+  ruleAppliesOnDate,
+} from "../availability.service";
 import { ProfessionalAvailabilityModel as Rules } from "../../models/ProfessionalAvailability";
 import { ProfessionalAvailabilityLockModel as Locks } from "../../models/ProfessionalAvailabilityLock";
 import { ServiceAvailabilityModel as ServiceRules } from "../../models/ServiceAvailability";
@@ -136,4 +140,32 @@ it.each([
   [date, -30],
 ])("rejeita calendário/duração inválidos: %s %s", async (day, duration) => {
   expect(await getAvailableSlots(1, day, duration, 2)).toEqual([]);
+});
+
+describe("assertSlotInAgenda (agenda no fuso de São Paulo)", () => {
+  const base = { professionalId: 20, durationMinutes: 60, serviceId: 40 };
+
+  it("aceita um horario da agenda (10:00 em SP = 13:00 UTC)", async () => {
+    await expect(
+      assertSlotInAgenda({ ...base, start: new Date(`${date}T13:00:00Z`) }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("recusa (409) horario fora da agenda ou fora da grade de 30 min", async () => {
+    for (const start of [`${date}T11:00:00Z`, `${date}T16:30:00Z`, `${date}T13:15:00Z`]) {
+      await expect(
+        assertSlotInAgenda({ ...base, start: new Date(start) }),
+      ).rejects.toMatchObject({ status: 409 });
+    }
+  });
+
+  it("repassa o agendamento a ignorar (reagendamento)", async () => {
+    await assertSlotInAgenda({
+      ...base,
+      start: new Date(`${date}T13:00:00Z`),
+      excludeAppointmentId: 77,
+    });
+    const where = (Appointments.findAll as jest.Mock).mock.calls[0][0].where;
+    expect(where.id).toEqual({ [Op.ne]: 77 });
+  });
 });

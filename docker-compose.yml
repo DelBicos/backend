@@ -25,6 +25,17 @@ services:
       retries: 12
       start_period: 20s
     restart: unless-stopped
+  # Emulador do Azure Blob Storage para desenvolvimento. Opcional:
+  #   docker compose --profile storage up -d azurite
+  # e use AZURE_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    container_name: azurite-delbicos
+    profiles: ["storage"]
+    command: azurite-blob --blobHost 0.0.0.0 --skipApiVersionCheck
+    ports:
+      - "127.0.0.1:10000:10000"
+    restart: unless-stopped
   nlu-service:
     build:
       context: ./nlp-service
@@ -75,9 +86,18 @@ services:
       - SEQUELIZE_DIALECT=postgres
       - SECRET_KEY=${SECRET_KEY:-suaChaveSegura}
       - EXPIRES_IN=${EXPIRES_IN:-24h}
-      - SENDGRID_API_KEY=${SENDGRID_API_KEY:-sk_API_KEY}
-      - SENDER_EMAIL_VERIFICADO=${SENDER_EMAIL_VERIFICADO:-deliverydebicos@gmail.com}
-      - LAMBDA_FUNCTION_URL=${LAMBDA_FUNCTION_URL:-}
+      - SMTP_HOST=${SMTP_HOST:-smtp.gmail.com}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SENDER_EMAIL_VERIFICADO=${SENDER_EMAIL_VERIFICADO:-}
+      - SENDER_NAME=${SENDER_NAME:-DelBicos}
+      - STORAGE_PROVIDER=${STORAGE_PROVIDER:-}
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING:-}
+      - AZURE_STORAGE_CONTAINER=${AZURE_STORAGE_CONTAINER:-delbicos-uploads}
+      - AZURE_PRIVATE_CONTAINER=${AZURE_PRIVATE_CONTAINER:-delbicos-private}
+      - AZURE_FUNCTION_URL=${AZURE_FUNCTION_URL:-}
+      - AZURE_FUNCTION_KEY=${AZURE_FUNCTION_KEY:-}
       - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-sk_API_KEY}
       - MONGODB_URI=mongodb://mongo:27017/logs_db
       - MONGODB_CHAT_URI=mongodb://mongo:27017/delbicos_chat

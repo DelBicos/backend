@@ -1,8 +1,10 @@
+jest.mock("../logger", () => ({ __esModule: true, default: { warn: jest.fn() } }));
+
+import logger from "../logger";
 import { connectMongoWithRetry } from "../mongoConnectionRetry";
 
 beforeEach(() => {
   jest.useFakeTimers();
-  jest.spyOn(console, "warn").mockImplementation(() => undefined);
 });
 afterEach(() => {
   jest.useRealTimers();
@@ -14,7 +16,7 @@ it("não agenda outra tentativa quando conecta de primeira", async () => {
   await connectMongoWithRetry(connect, "MongoDB (chat)");
   expect(connect).toHaveBeenCalledTimes(1);
   expect(jest.getTimerCount()).toBe(0);
-  expect(console.warn).not.toHaveBeenCalled();
+  expect(logger.warn).not.toHaveBeenCalled();
 });
 
 it("recupera falhas iniciais e para de tentar depois da conexão", async () => {

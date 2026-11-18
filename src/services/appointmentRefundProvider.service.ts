@@ -1,23 +1,22 @@
-import Stripe from "stripe";
+import { getStripe } from "../config/stripe";
 
-let client: Stripe | undefined;
-function stripe(): Stripe {
-  if (!client) {
-    const key = process.env.STRIPE_SECRET_KEY;
-    if (!key?.startsWith("sk_")) throw new Error("STRIPE_SECRET_KEY não configurada");
-    client = new Stripe(key, { timeout: 10000, maxNetworkRetries: 1 });
-  }
-  return client;
-}
-
-/** Reconcilia antes de reenviar, inclusive após expirar a chave idempotente do Stripe.
- * Um estorno pendente no provedor ainda não é um estorno concluído.
+/**
+ * Devolve ao cliente um pagamento que nao sera usado, de forma idempotente.
+ * - reservado (requires_capture) ou incompleto: cancela a reserva;
+ * - ja cobrado (succeeded): estorna o saldo, reconciliando antes de reenviar
+ *   (inclusive apos expirar a chave idempotente do Stripe).
+ * Retorna true quando a devolucao esta concluida; false quando ainda esta em
+ * andamento no provedor (a fila tenta de novo mais tarde).
  */
 export async function ensureAppointmentRefund(paymentIntentId: string): Promise<boolean> {
-  const api = stripe();
+  const api = getStripe();
   const payment = await api.paymentIntents.retrieve(paymentIntentId);
-  if (payment.status !== "succeeded" || payment.amount_received <= 0)
-    throw new Error("Pagamento não liquidado para estorno");
+  if (payment.status === "canceled") return true;
+  if (payment.status !== "succeeded") {
+    await api.paymentIntents.cancel(paymentIntentId);
+    return true;
+  }
+  if (payment.amount_received <= 0) return true;
 
   let refunded = 0;
   let pending = false;
@@ -30,8 +29,8 @@ export async function ensureAppointmentRefund(paymentIntentId: string): Promise<
   if (refunded >= payment.amount_received) return true;
   if (pending) return false;
 
-  // A mesma tentativa conserva a chave após timeout/crash. Uma falha terminal
-  // já identificada no provedor permite uma nova tentativa com outra chave.
+  // A mesma tentativa conserva a chave apos timeout/crash. Uma falha terminal
+  // ja identificada no provedor permite uma nova tentativa com outra chave.
   const refund = await api.refunds.create(
     { payment_intent: paymentIntentId },
     { idempotencyKey: `appointment-refund:${paymentIntentId}:${latestRefundId ?? "initial"}` },

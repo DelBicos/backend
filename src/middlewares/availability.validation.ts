@@ -1,7 +1,12 @@
 import { Request, Response, NextFunction } from "express";
 
+import { bodyOf } from "../utils/requestBody.util";
 const timeRegex = /^\d{2}:\d{2}(:\d{2})?$/;
 const daysOfWeekRegex = /^[01]{7}$/;
+
+const isTime = (v: unknown): v is string => typeof v === "string" && timeRegex.test(v);
+const isDays = (v: unknown): v is string =>
+  typeof v === "string" && daysOfWeekRegex.test(v);
 
 export function validateCreateAvailability(
   req: Request,
@@ -16,25 +21,25 @@ export function validateCreateAvailability(
     start_day,
     end_day,
     start_day_of_month,
-  } = req.body as any;
+  } = bodyOf(req);
 
-  if (!start_time || !timeRegex.test(start_time))
+  if (!start_time || !isTime(start_time))
     return res
       .status(400)
       .json({ error: "start_time inválido (HH:MM ou HH:MM:SS)" });
-  if (!end_time || !timeRegex.test(end_time))
+  if (!end_time || !isTime(end_time))
     return res
       .status(400)
       .json({ error: "end_time inválido (HH:MM ou HH:MM:SS)" });
 
   // start_time < end_time (comparação simples)
-  if (start_time >= end_time)
+  if (String(start_time) >= String(end_time))
     return res
       .status(400)
       .json({ error: "start_time deve ser menor que end_time" });
 
   if (recurrence_pattern === "weekly") {
-    if (!days_of_week || !daysOfWeekRegex.test(days_of_week))
+    if (!days_of_week || !isDays(days_of_week))
       return res
         .status(400)
         .json({ error: "days_of_week inválido (7 chars 0/1)" });
@@ -63,20 +68,20 @@ export function validateUpdateAvailability(
   next: NextFunction,
 ) {
   // Reaproveitar validação básica do create para alterações parciais apenas quando campos enviados
-  const body = req.body as any;
-  if (body.start_time && !timeRegex.test(body.start_time))
+  const body = bodyOf(req);
+  if (body.start_time && !isTime(body.start_time))
     return res
       .status(400)
       .json({ error: "start_time inválido (HH:MM ou HH:MM:SS)" });
-  if (body.end_time && !timeRegex.test(body.end_time))
+  if (body.end_time && !isTime(body.end_time))
     return res
       .status(400)
       .json({ error: "end_time inválido (HH:MM ou HH:MM:SS)" });
-  if (body.days_of_week && !daysOfWeekRegex.test(body.days_of_week))
+  if (body.days_of_week && !isDays(body.days_of_week))
     return res
       .status(400)
       .json({ error: "days_of_week inválido (7 chars 0/1)" });
-  if (body.start_time && body.end_time && body.start_time >= body.end_time)
+  if (isTime(body.start_time) && isTime(body.end_time) && body.start_time >= body.end_time)
     return res
       .status(400)
       .json({ error: "start_time deve ser menor que end_time" });

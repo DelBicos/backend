@@ -1,3 +1,8 @@
+// A conversao real (ffmpeg) tem teste proprio em voice/__tests__.
+jest.mock("../voice/audioConversion.service", () => ({
+  needsConversionForAzure: jest.fn((mimeType: string) => !mimeType.startsWith("audio/ogg")),
+  convertToWav16kMono: jest.fn(async () => Buffer.from("wav-convertido")),
+}));
 jest.mock("../../utils/logger", () => ({
   __esModule: true,
   default: {
@@ -112,11 +117,40 @@ describe("transcribeVoiceAudio", () => {
 
     const [url, request] = (global as any).fetch.mock.calls[0];
     expect(url).toContain("https://brazilsouth.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1?language=pt-BR");
+    // WebM nao e decodificado pelo Azure: o audio vai convertido para WAV 16 kHz.
     expect(request.headers).toEqual({
       "Ocp-Apim-Subscription-Key": "azure-key",
-      "Content-Type": "audio/webm; codecs=opus",
+      "Content-Type": "audio/wav; codecs=audio/pcm; samplerate=16000",
       Accept: "application/json",
     });
+    expect(Buffer.from(request.body).toString()).toBe("wav-convertido");
+  });
+
+  it("envia OGG/Opus ao Azure sem converter", async () => {
+    process.env.AZURE_SPEECH_KEY = "azure-key";
+    (global as any).fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ RecognitionStatus: "Success", DisplayText: "Oi" }),
+    });
+
+    await expect(transcribeVoiceAudio(Buffer.from("ogg"), "audio/ogg")).resolves.toBe("Oi");
+
+    const [, request] = (global as any).fetch.mock.calls[0];
+    expect(request.headers["Content-Type"]).toBe("audio/ogg; codecs=opus");
+    expect(Buffer.from(request.body).toString()).toBe("ogg");
+  });
+
+  it("falha de forma controlada quando a conversão do áudio para o Azure falha", async () => {
+    process.env.AZURE_SPEECH_KEY = "azure-key";
+    const { convertToWav16kMono } = jest.requireMock("../voice/audioConversion.service");
+    convertToWav16kMono.mockRejectedValueOnce(new Error("ffmpeg"));
+    (global as any).fetch = jest.fn();
+
+    await expect(transcribeVoiceAudio(Buffer.from("audio"), "audio/mp4")).rejects.toBeInstanceOf(
+      VoiceTranscriptionProviderError,
+    );
+    expect((global as any).fetch).not.toHaveBeenCalled();
   });
 
   it("rejeita 'gemini' como provider explícito (removido do sistema)", async () => {

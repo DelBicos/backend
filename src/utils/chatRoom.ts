@@ -66,13 +66,17 @@ export async function archiveChatRoomForAppointment(
 
 /**
  * Sincroniza o status da sala conforme o status do agendamento.
- * Arquiva quando completed/canceled; mantém ativa caso contrário.
+ * Arquiva quando completed/canceled/no_show; mantém ativa caso contrário.
  */
 export async function syncChatRoomStatusForAppointment(
   appointmentId: number,
   appointmentStatus: string,
 ): Promise<void> {
-  if (appointmentStatus === "completed" || appointmentStatus === "canceled") {
+  if (
+    appointmentStatus === "completed" ||
+    appointmentStatus === "canceled" ||
+    appointmentStatus === "no_show"
+  ) {
     await archiveChatRoomForAppointment(appointmentId);
   }
 }

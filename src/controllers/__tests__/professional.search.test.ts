@@ -1,15 +1,20 @@
 import { Request, Response } from "express";
 import { Op } from "sequelize";
 import {
-  getProfessionals,
-  searchProfessionalAvailability,
-  updateProfessionalRadius,
+  getProfessionals as getProfessionalsHandler,
+  searchProfessionalAvailability as searchProfessionalAvailabilityHandler,
+  updateProfessionalRadius as updateProfessionalRadiusHandler,
 } from "../professional.controller";
+import { settled } from "./handlerTestUtils";
 import { ProfessionalModel } from "../../models/Professional";
 import { ProfessionalAvailabilityModel } from "../../models/ProfessionalAvailability";
 import { ProfessionalAvailabilityLockModel } from "../../models/ProfessionalAvailabilityLock";
 import { ServiceAvailabilityModel } from "../../models/ServiceAvailability";
 import { AppointmentModel } from "../../models/Appointment";
+
+const getProfessionals = settled(getProfessionalsHandler);
+const searchProfessionalAvailability = settled(searchProfessionalAvailabilityHandler);
+const updateProfessionalRadius = settled(updateProfessionalRadiusHandler);
 
 jest.mock("../../config/database", () => {
   const { Sequelize } = require("sequelize");
@@ -54,7 +59,8 @@ describe("Caixa preta — busca semântica GET /api/professionals (getProfession
     });
   });
 
-  it("BS-V-04: termo típico busca por nome, e-mail ou CPF", async () => {
+  // A busca pública usa só o nome: e-mail e CPF são dados pessoais e não podem ser sondados.
+  it("BS-V-04: termo típico busca somente por nome", async () => {
     const { res, jsonMock } = buildResponse();
 
     await getProfessionals(
@@ -64,13 +70,7 @@ describe("Caixa preta — busca semântica GET /api/professionals (getProfession
 
     expect(ProfessionalModel.findAndCountAll).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: {
-          [Op.or]: [
-            { "$User.name$": { [Op.like]: "%Ana%" } },
-            { "$User.email$": { [Op.like]: "%Ana%" } },
-            { cpf: { [Op.like]: "%Ana%" } },
-          ],
-        },
+        where: { "$User.name$": { [Op.like]: "%Ana%" } },
       }),
     );
     expect(jsonMock).toHaveBeenCalledWith(

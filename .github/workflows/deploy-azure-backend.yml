@@ -1,42 +1,73 @@
-name: 04 - Deploy do backend no Azure App Service
+name: Deploy Backend to Azure App Service
 
-# Gatilho: dispara direto quando um PR e fechado/mergeado contra a stag-facul
-# (branch de integracao do projeto academico), independente do pipeline do
-# time principal (workflows 01/02/03, que so reagem a branch "stag").
-# O Azure App Service (Free F1) usa deploy nativo (Oryx), sem Docker.
+# Publica o backend em cada conta Azure configurada.
+#   - main -> produção:  secret AZURE_PUBLISH_PROFILE_<CONTA>      e variável AZURE_APP_NAME_<CONTA>
+#   - stag -> homologação: secret AZURE_PUBLISH_PROFILE_<CONTA>_STAG e variável AZURE_APP_NAME_<CONTA>_STAG
+# Enquanto a conta não tiver o ambiente de homologação (_STAG), a stag continua
+# publicando no app de produção, como antes. Conta sem nada configurado é pulada.
+# A ordem de prioridade entre as contas fica no Worker da Cloudflare, não aqui.
+
 on:
-  pull_request:
-    types: [closed]
+  push:
     branches:
-      - stag-facul
+      - main
+      - stag
+  workflow_dispatch:
 
 jobs:
-  deploy:
-    name: Build e deploy no Azure App Service (delbicos-backend-edu)
+  build-and-deploy:
     runs-on: ubuntu-latest
-    if: github.event.pull_request.merged == true
-
+    strategy:
+      fail-fast: false
+      matrix:
+        account: [ISA, FER, DOUG]
     steps:
-      - name: Checkout do repositório
-        uses: actions/checkout@v4
+      - name: Conferir se a conta está configurada
+        id: account
+        env:
+          PROFILE: ${{ secrets[format('AZURE_PUBLISH_PROFILE_{0}', matrix.account)] }}
+          APP_NAME: ${{ vars[format('AZURE_APP_NAME_{0}', matrix.account)] }}
+          PROFILE_STAG: ${{ secrets[format('AZURE_PUBLISH_PROFILE_{0}_STAG', matrix.account)] }}
+          APP_NAME_STAG: ${{ vars[format('AZURE_APP_NAME_{0}_STAG', matrix.account)] }}
+        run: |
+          if [ "$GITHUB_REF_NAME" != "main" ] && [ -n "$PROFILE_STAG" ] && [ -n "$APP_NAME_STAG" ]; then
+            echo "Branch $GITHUB_REF_NAME: publicando na homologação ($APP_NAME_STAG)."
+            echo "target=stag" >> "$GITHUB_OUTPUT"
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$PROFILE" ] || [ -z "$APP_NAME" ]; then
+            echo "Conta ${{ matrix.account }} sem secret ou variável: pulando."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Branch $GITHUB_REF_NAME: publicando em $APP_NAME."
+            echo "target=prod" >> "$GITHUB_OUTPUT"
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Configurar Node.js
+      - uses: actions/checkout@v4
+        if: steps.account.outputs.configured == 'true'
+
+      - name: Set up Node.js
+        if: steps.account.outputs.configured == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "20.x"
+          node-version: '20.x'
 
-      - name: Instalar dependências (com devDependencies, necessárias para o build)
-        run: npm install
+      - name: Install dependencies
+        if: steps.account.outputs.configured == 'true'
+        run: npm ci
 
-      - name: Buildar TypeScript
+      - name: Build project
+        if: steps.account.outputs.configured == 'true'
         run: npm run build
 
-      - name: Remover devDependencies antes do deploy (reduz o pacote e a superfície de ataque)
+      - name: Prune dev dependencies
+        if: steps.account.outputs.configured == 'true'
         run: npm prune --omit=dev
 
-      - name: Deploy no Azure App Service
+      - name: Deploy to Azure Web App
+        if: steps.account.outputs.configured == 'true'
         uses: azure/webapps-deploy@v3
         with:
-          app-name: delbicos-backend-edu
-          publish-profile: ${{ secrets.AZURE_BACKEND_PUBLISH_PROFILE }}
+          app-name: ${{ steps.account.outputs.target == 'stag' && vars[format('AZURE_APP_NAME_{0}_STAG', matrix.account)] || vars[format('AZURE_APP_NAME_{0}', matrix.account)] }}
+          publish-profile: ${{ steps.account.outputs.target == 'stag' && secrets[format('AZURE_PUBLISH_PROFILE_{0}_STAG', matrix.account)] || secrets[format('AZURE_PUBLISH_PROFILE_{0}', matrix.account)] }}
           package: .

@@ -1,9 +1,23 @@
-import { DataTypes, Model, Optional, Transaction } from "sequelize";
+import { DataTypes, Model, Op, Optional, Transaction } from "sequelize";
 import { sequelize } from "../config/database";
 import { customAlphabet } from 'nanoid';
+import { generateConfirmationCode } from "../utils/confirmationCode.util";
 
 const alphabet = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 export const generateShortId = customAlphabet(alphabet, 6);
+
+/** Status do agendamento, incluindo as etapas do atendimento em domicílio. */
+export const APPOINTMENT_STATUSES = [
+  "pending",
+  "confirmed",
+  "in_transit",
+  "arrived",
+  "in_progress",
+  "completed",
+  "canceled",
+  "no_show",
+] as const;
+export type AppointmentStatusValue = (typeof APPOINTMENT_STATUSES)[number];
 
 /*
 CREATE TABLE appointment (
@@ -38,11 +52,21 @@ export interface IAppointment {
   start_time: Date;
   end_time: Date;
   completed_at?: Date;
+  arrived_at?: Date | null;
+  started_at?: Date | null;
+  verification_code?: string | null;
   final_price?: number;
   rating?: number;
   review?: string;
-  status?: "pending" | "confirmed" | "completed" | "canceled";
+  status?: AppointmentStatusValue;
   payment_intent_id?: string | null;
+  canceled_by?: "client" | "professional" | "system" | null;
+  canceled_at?: Date | null;
+  cancellation_reason?: string | null;
+  retained_cents?: number | null;
+  refunded_cents?: number | null;
+  reschedule_requested_start?: Date | null;
+  reschedule_requested_by?: "client" | "professional" | null;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -62,12 +86,22 @@ export class AppointmentModel extends Model<
   public start_time!: Date;
   public end_time!: Date;
   public completed_at?: Date;
+  public arrived_at?: Date | null;
+  public started_at?: Date | null;
+  public verification_code?: string | null;
   public final_price?: number;
   public rating?: number;
   public review?: string;
-  public status!: "pending" | "confirmed" | "completed" | "canceled";
+  public status!: AppointmentStatusValue;
   public created_at!: Date;
   public payment_intent_id?: string | null;
+  public canceled_by?: "client" | "professional" | "system" | null;
+  public canceled_at?: Date | null;
+  public cancellation_reason?: string | null;
+  public retained_cents?: number | null;
+  public refunded_cents?: number | null;
+  public reschedule_requested_start?: Date | null;
+  public reschedule_requested_by?: "client" | "professional" | null;
   public readonly createdAt!: Date;
   public readonly updatedAt!: Date;
 }
@@ -130,6 +164,9 @@ AppointmentModel.init(
       type: DataTypes.DATE,
       allowNull: true,
     },
+    arrived_at: { type: DataTypes.DATE, allowNull: true },
+    started_at: { type: DataTypes.DATE, allowNull: true },
+    verification_code: { type: DataTypes.STRING(6), allowNull: true },
     final_price: {
       type: DataTypes.DECIMAL(10, 2),
       allowNull: true,
@@ -143,13 +180,26 @@ AppointmentModel.init(
       allowNull: false,
     },
     status: {
-      type: DataTypes.ENUM("pending", "confirmed", "completed", "canceled"),
+      type: DataTypes.ENUM(...APPOINTMENT_STATUSES),
       defaultValue: "pending",
     },
     payment_intent_id: {
       type: DataTypes.STRING,
       allowNull: true,
       unique: true,
+    },
+    canceled_by: {
+      type: DataTypes.ENUM("client", "professional", "system"),
+      allowNull: true,
+    },
+    canceled_at: { type: DataTypes.DATE, allowNull: true },
+    cancellation_reason: { type: DataTypes.STRING(500), allowNull: true },
+    retained_cents: { type: DataTypes.INTEGER, allowNull: true },
+    refunded_cents: { type: DataTypes.INTEGER, allowNull: true },
+    reschedule_requested_start: { type: DataTypes.DATE, allowNull: true },
+    reschedule_requested_by: {
+      type: DataTypes.ENUM("client", "professional"),
+      allowNull: true,
     },
   },
   {
@@ -181,6 +231,7 @@ AppointmentModel.init(
     timestamps: true,
     hooks: {
       beforeValidate: async (appointment: AppointmentModel, options) => {
+        const tx = (options as { transaction?: Transaction }).transaction;
         if (!appointment.short_id) {
           let shortId: string;
           let attempts = 0;
@@ -191,9 +242,37 @@ AppointmentModel.init(
             if (attempts > 100) {
               throw new Error('Não foi possível gerar short_id único após 100 tentativas');
             }
-            const existing = await AppointmentModel.findOne({ where: { short_id: shortId }, transaction: (options as { transaction?: Transaction }).transaction });
+            const existing = await AppointmentModel.findOne({ where: { short_id: shortId }, transaction: tx });
             if (!existing) {
               appointment.short_id = shortId;
+              unique = true;
+            }
+          }
+        }
+
+        // Código que o cliente informa ao profissional para iniciar o atendimento.
+        // Só precisa ser único entre agendamentos ativos: são 67.600 combinações
+        // (AB-12), e checar o histórico inteiro esgotaria o espaço com o tempo.
+        if (!appointment.verification_code) {
+          let code = "";
+          let attempts = 0;
+          let unique = false;
+          while (!unique) {
+            code = generateConfirmationCode();
+            attempts++;
+            if (attempts > 100) {
+              throw new Error('Não foi possível gerar verification_code único após 100 tentativas');
+            }
+            const existing = await AppointmentModel.findOne({
+              where: {
+                verification_code: code,
+                status: { [Op.notIn]: ["completed", "canceled", "no_show"] },
+              },
+              attributes: ["id"],
+              transaction: tx,
+            });
+            if (!existing) {
+              appointment.verification_code = code;
               unique = true;
             }
           }

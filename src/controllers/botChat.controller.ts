@@ -13,6 +13,7 @@ import {
   getAppointmentStatusMessage,
 } from "../services/botAppointmentStatus.helpers";
 
+import { errorMessage } from "../utils/errors.util";
 /**
  * POST /api/chat/bot/message
  *
@@ -85,13 +86,13 @@ export const sendBotMessage = async (
       context: result.context,
       clear_history: result.clearHistory === true,
     });
-  } catch (error: any) {
+  } catch (error) {
     logError("Bot: erro ao processar mensagem", error, {
       userId: req.user.id,
       sessionId,
     });
-    if (error.message?.includes("Sessão não encontrada")) {
-      return res.status(404).json({ error: error.message });
+    if (errorMessage(error).includes("Sessão não encontrada")) {
+      return res.status(404).json({ error: errorMessage(error) });
     }
     return res.status(500).json({ error: "Erro interno ao processar mensagem" });
   }
@@ -119,13 +120,13 @@ export const getBotSession = async (
     const history = await getSessionHistory(sessionId, req.user.id);
     res.setHeader("Cache-Control", "no-store");
     return res.json(history);
-  } catch (error: any) {
+  } catch (error) {
     logError("Bot: erro ao buscar sessão", error, {
       userId: req.user.id,
       sessionId,
     });
-    if (error.message?.includes("não encontrada")) {
-      return res.status(404).json({ error: error.message });
+    if (errorMessage(error).includes("não encontrada")) {
+      return res.status(404).json({ error: errorMessage(error) });
     }
     return res.status(500).json({ error: "Erro interno ao buscar sessão" });
   }

@@ -26,10 +26,14 @@ const servers = isAzure
     ? [renderServer, azureServer, localServer]
     : [localServer, azureServer, renderServer];
 
-const routesGlobJs = path.resolve(__dirname, "../routes/*.js");
-const modelsGlobJs = path.resolve(__dirname, "../models/*.js");
+// In production, __dirname is /app/dist/src/config — resolve up to dist/src/
+// In development, __dirname is /…/src/config — resolve up to src/
+const routesGlob = path.resolve(__dirname, "../routes/*.js");
+const modelsGlob = path.resolve(__dirname, "../models/*.js");
+const docsGlob = path.resolve(__dirname, "../docs/*.js");
 const routesGlobTs = path.resolve(__dirname, "../routes/*.ts");
 const modelsGlobTs = path.resolve(__dirname, "../models/*.ts");
+const docsGlobTs = path.resolve(__dirname, "../docs/*.ts");
 
 const swaggerOptions: Options = {
   definition: {
@@ -50,7 +54,8 @@ const swaggerOptions: Options = {
     },
     servers,
   },
-  apis: [routesGlobTs, modelsGlobTs, routesGlobJs, modelsGlobJs],
+  apis: isProduction ? [routesGlob, modelsGlob, docsGlob]
+    : [routesGlobTs, modelsGlobTs, docsGlobTs],
 };
 
 export default swaggerOptions;

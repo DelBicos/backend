@@ -1,5 +1,9 @@
 require("dotenv").config();
 
+/**
+ * Determina o dialect do banco de dados
+ * Prioridade: SEQUELIZE_DIALECT > RDS_DIALECT > "postgres"
+ */
 const getDialect = () => {
   if (process.env.SEQUELIZE_DIALECT) return process.env.SEQUELIZE_DIALECT;
   if (process.env.RDS_DIALECT) return process.env.RDS_DIALECT;
@@ -103,6 +107,7 @@ const config = {
   },
   production: {
     ...(process.env.DATABASE_URL ? { use_env_variable: "DATABASE_URL" } : {}),
+    // Opção 2: Variáveis individuais (host, usuário e senha do banco)
     username: process.env.SEQUELIZE_DB_USER,
     password: process.env.SEQUELIZE_DB_PASS,
     database: process.env.SEQUELIZE_DB_NAME,

@@ -66,8 +66,10 @@ describe("parsePortugueseDate", () => {
     expect(parsePortugueseDate(text, options)).toBeNull();
   });
 
-  it("valida a antecedência de 48 horas pelo calendário local", () => {
-    expect(isValidBookingDate("2026-08-06", options)).toBe(false);
+  it("valida a antecedência de 12 horas pelo calendário local", () => {
+    // Agora é 05/08 22:30 em São Paulo: +12h cai em 06/08.
+    expect(isValidBookingDate("2026-08-05", options)).toBe(false);
+    expect(isValidBookingDate("2026-08-06", options)).toBe(true);
     expect(isValidBookingDate("2026-08-07", options)).toBe(true);
   });
 

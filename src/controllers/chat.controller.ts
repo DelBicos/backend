@@ -26,7 +26,7 @@ export const getChatRooms = async (
 
     const rooms = await listRooms(req.user.id, { limit });
     return res.json(rooms);
-  } catch (error: any) {
+  } catch (error) {
     logError("Erro ao listar salas de chat", error);
     return res.status(500).json({ error: "Erro ao listar salas de chat" });
   }
@@ -71,7 +71,7 @@ export const getChatMessages = async (
       room_status: participant.room.status,
       role: participant.role,
     });
-  } catch (error: any) {
+  } catch (error) {
     if (error instanceof ChatMongoUnavailableError) {
       return res.status(503).json({ error: error.message });
     }

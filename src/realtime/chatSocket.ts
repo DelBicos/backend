@@ -1,6 +1,6 @@
 import { Server as HttpServer } from "http";
 import { Server, Socket } from "socket.io";
-import jwt from "jsonwebtoken";
+import { verifyToken } from "../utils/jwt.util";
 import { ITokenPayload } from "../interfaces/authentication.interface";
 import {
   assertParticipant,
@@ -8,6 +8,8 @@ import {
   persistMessage,
 } from "../services/chat.service";
 import logger from "../utils/logger";
+import type { AppointmentStatusValue } from "../models/Appointment";
+import { registerLocationTracking } from "./locationTracking";
 
 interface AuthedSocket extends Socket {
   userId?: number;
@@ -23,9 +25,14 @@ interface SendMessagePayload {
 const roomChannel = (roomId: number) => `room:${roomId}`;
 const userChannel = (userId: number) => `user:${userId}`;
 
+/** Resposta enviada ao cliente no callback (ack) dos eventos. */
+type SocketAck = (resp: { ok: boolean; [key: string]: unknown }) => void;
+
 export interface AppointmentStatusSocketPayload {
   appointment_id: number;
-  status: "pending" | "confirmed" | "completed" | "canceled";
+  status: AppointmentStatusValue;
+  /** Código de início do atendimento: enviado apenas ao cliente. */
+  verification_code?: string;
   session_ids: number[];
   message: string;
   payment_status: "not_available" | "pending" | "paid";
@@ -65,10 +72,7 @@ export function initChatSocket(httpServer: HttpServer): Server {
         return next(new Error("Token JWT ausente"));
       }
 
-      const decoded = jwt.verify(
-        token,
-        process.env.SECRET_KEY || "secret"
-      ) as ITokenPayload;
+      const decoded = verifyToken<ITokenPayload>(token);
 
       socket.userId = decoded.user.id;
       return next();
@@ -84,8 +88,10 @@ export function initChatSocket(httpServer: HttpServer): Server {
       socket.join(userChannel(socket.userId));
     }
 
+    registerLocationTracking(io as Server, socket);
+
     // Entrar numa sala (valida participação)
-    socket.on("room:join", async (roomId: number, ack?: (resp: any) => void) => {
+    socket.on("room:join", async (roomId: number, ack?: SocketAck) => {
       try {
         if (!socket.userId) return ack?.({ ok: false, error: "Não autenticado" });
 
@@ -116,7 +122,7 @@ export function initChatSocket(httpServer: HttpServer): Server {
     // Enviar mensagem
     socket.on(
       "message:send",
-      async (payload: SendMessagePayload, ack?: (resp: any) => void) => {
+      async (payload: SendMessagePayload, ack?: SocketAck) => {
         try {
           if (!socket.userId)
             return ack?.({ ok: false, error: "Não autenticado" });
