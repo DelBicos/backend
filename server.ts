@@ -8,6 +8,7 @@ import { startAppointmentCron } from "./src/jobs/appointmentCron";
 import { startUpcomingServicesJob } from "./src/jobs/checkUpcomingServicesJob";
 import { initChatSocket } from "./src/realtime/chatSocket";
 import { createApp } from "./src/app";
+import ticketRoutes from "./src/routes/ticket.routes";
 
 // Falha rapido se faltar configuracao obrigatoria (ex.: SECRET_KEY).
 for (const warning of assertRequiredEnv()) logger.warn(warning);
