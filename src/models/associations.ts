@@ -22,6 +22,8 @@ import { ChatRoomModel } from "./ChatRoom";
 import { BotChatSessionModel } from "./BotChatSession";
 import { BotChatMessageModel } from "./BotChatMessage";
 import { AppointmentAuditLogModel } from "./AppointmentAuditLog";
+import TicketModel from "./Ticket";                    // Adicione isso
+import TicketMessageModel from "./TicketMessage";      // E isso
 
 export function initializeAssociations() {
   AppointmentModel.hasOne(DisputeModel, { foreignKey: "appointment_id", as: "Dispute" });
