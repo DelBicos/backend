@@ -18,6 +18,12 @@ export const createTicket = async (
       return res.status(401).json({ error: "Usuário não autenticado." });
     }
 
+    if (await ticketService.isAdmin(userId)) {
+      return res
+        .status(403)
+        .json({ error: "Administradores não podem abrir chamados." });
+    }
+
     const userType = await ticketService.resolveUserType(userId);
     const ticket = await ticketService.createTicket(req.body, userId, userType);
 
@@ -91,7 +97,7 @@ export const showTicket = async (
     if (!userId) {
       return res.status(401).json({ error: "Usuário não autenticado." });
     }
-    if (Number.isNaN(ticketId)) {
+    if (!Number.isInteger(ticketId) || ticketId <= 0) {
       return res.status(400).json({ error: "ID inválido." });
     }
 
@@ -136,11 +142,14 @@ export const showTicketMessages = async (
     if (!userId) {
       return res.status(401).json({ error: "Usuário não autenticado." });
     }
-    if (Number.isNaN(ticketId)) {
+    if (!Number.isInteger(ticketId) || ticketId <= 0) {
       return res.status(400).json({ error: "ID inválido." });
     }
 
     const messages = await ticketService.listMessagesByTicket(ticketId, userId);
+    if (!messages) {
+      return res.status(404).json({ error: "Chamado não encontrado." });
+    }
 
     return res.status(200).json({
       messages: messages.map((m) => {
