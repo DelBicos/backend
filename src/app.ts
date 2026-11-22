@@ -28,6 +28,7 @@ import paymentRouter from "./routes/payment.routes";
 import adminRoutes from "./routes/admin.routes";
 import dashboardRoutes from "./routes/dashboard.routes";
 import favoriteRoutes from "./routes/favorite.routes";
+import ticketRoutes from "./routes/ticket.routes";
 import avatarRouter from "./routes/avatar.routes";
 import serviceRoutes from "./routes/service.routes";
 import availabilityRoutes from "./routes/availability.routes";
@@ -97,6 +98,7 @@ export function createApp(): Express {
   app.use("/api/admin", adminRoutes);
   app.use("/api/dashboard", dashboardRoutes);
   app.use("/api/favorites", favoriteRoutes);
+  app.use("/api/tickets", ticketRoutes);
   app.use("/api/avatar", avatarRouter);
   app.use("/api/services", serviceRoutes);
   app.use("/api/availabilities", availabilityRoutes);
