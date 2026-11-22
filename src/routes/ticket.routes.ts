@@ -27,9 +27,8 @@ const router = Router();
  *       description: Categoria do chamado
  *     TicketPriority:
  *       type: string
- *       nullable: true
- *       enum: [BAIXA, MEDIA, ALTA, CRITICA, null]
- *       description: Prioridade (definida pelo admin; null na criação)
+ *       enum: [BAIXA, MEDIA, ALTA, CRITICA]
+ *       description: Prioridade informada por quem abre o chamado
  *     TicketStatus:
  *       type: string
  *       enum: [ABERTO, EM_ANALISE, EM_ATENDIMENTO, RESOLVIDO, FECHADO]
@@ -40,7 +39,7 @@ const router = Router();
  *       description: Tipo do usuário que abriu
  *     CreateTicketInput:
  *       type: object
- *       required: [title, description, category]
+ *       required: [title, description, category, priority]
  *       properties:
  *         title:
  *           type: string
@@ -54,10 +53,12 @@ const router = Router();
  *           example: Não consigo agendar um serviço de limpeza para amanhã.
  *         category:
  *           $ref: '#/components/schemas/TicketCategory'
- *         appointment_id:
- *           type: integer
- *           nullable: true
- *           example: 123
+ *         priority:
+ *           $ref: '#/components/schemas/TicketPriority'
+ *         appointment_short_id:
+ *           type: string
+ *           example: 6BDOKZ
+ *           description: Código curto do agendamento (opcional)
  *     TicketResponse:
  *       type: object
  *       properties:
@@ -98,18 +99,21 @@ const router = Router();
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required: [title, description, category]
- *             properties:
- *               title: { type: string, minLength: 5, maxLength: 100 }
- *               description: { type: string, minLength: 10, maxLength: 2000 }
- *               category:
- *                 type: string
- *                 enum: [AGENDAMENTO, PAGAMENTO, SERVICO, PRESTADOR, CLIENTE, SUGESTAO, OUTROS]
- *               appointment_short_id:
- *                 type: string
- *                 example: 6BDOKZ
- *                 description: Código curto do agendamento (opcional)
+ *             $ref: '#/components/schemas/CreateTicketInput'
+ *     responses:
+ *       201:
+ *         description: Chamado aberto (status ABERTO)
+ *       400:
+ *         description: Dados inválidos ou agendamento não encontrado
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Token inválido ou usuário administrador
+ *       500:
+ *         description: Erro interno
  */
 router.post("/", authMiddleware, validateCreateTicket, createTicket);
 
@@ -236,6 +240,8 @@ router.get("/:id", authMiddleware, showTicket);
  *         description: ID inválido
  *       401:
  *         description: Não autenticado
+ *       404:
+ *         description: Chamado não encontrado ou de outro usuário
  *       500:
  *         description: Erro interno
  */
