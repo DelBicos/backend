@@ -27,7 +27,11 @@ const createTicketSchema = z.object({
     { message: "Categoria inválida ou não informada" }
   ),
 
-  // ✅ NOVO — short_id do appointment (formato alfanumérico maiúsculo)
+  priority: z.enum(["BAIXA", "MEDIA", "ALTA", "CRITICA"], {
+    message: "Prioridade inválida ou não informada",
+  }),
+
+  // short_id do appointment (formato alfanumérico maiúsculo)
   appointment_short_id: z
     .string({ message: "Código do agendamento deve ser texto" })
     .regex(
