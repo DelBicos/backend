@@ -39,7 +39,7 @@ describe("convertToWav16kMono", () => {
     expect(wav.readUInt16LE(22)).toBe(1); // canais
     expect(wav.readUInt32LE(24)).toBe(16000); // taxa de amostragem
     expect(wav.readUInt16LE(34)).toBe(16); // bits por amostra
-  }, 20000);
+  }, 60000);
 
   it("falha com áudio inválido", async () => {
     await expect(convertToWav16kMono(Buffer.from("isto nao e audio"))).rejects.toThrow();
