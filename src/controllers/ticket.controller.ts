@@ -1,6 +1,9 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 import * as ticketService from "../services/ticket/ticket.service";
+import logger from "../utils/logger";
+import { UserModel } from "../models/User";
+
 
 /**
  * POST /api/tickets
@@ -31,11 +34,12 @@ export const createTicket = async (
       },
     });
   } catch (error) {
-    if (error instanceof Error && (error as any).statusCode === 400) {
+    if (error instanceof Error && (error as Error & { statusCode?: number }).statusCode === 400) {
       return res.status(400).json({ error: error.message });
     }
 
-    console.error("[createTicket] Erro:", error);
+    logger.error("[createTicket] Erro:", { error: error instanceof Error ? error.message : error });
+
     return res.status(500).json({ error: "Erro interno ao criar chamado." });
   }
 };
@@ -140,7 +144,8 @@ export const showTicketMessages = async (
 
     return res.status(200).json({
       messages: messages.map((m) => {
-        const author = (m as any).author;
+        const author = (m as { author?: UserModel }).author; 
+
         return {
           id: m.id,
           ticket_id: m.ticket_id,

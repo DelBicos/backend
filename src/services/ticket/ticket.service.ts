@@ -47,7 +47,8 @@ export const createTicket = async (
     const error = new Error(
       `Agendamento com código ${data.appointment_short_id} não encontrado.`
     );
-    (error as any).statusCode = 400;
+    (error as Error & { statusCode?: number }).statusCode = 400;
+
     throw error;
   }
 
