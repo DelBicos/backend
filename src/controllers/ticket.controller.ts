@@ -72,7 +72,7 @@ export const listTickets = async (
       })),
     });
   } catch (error) {
-    console.error("[listTickets] Erro:", error);
+    logger.error("[listTickets] Erro:", { error: error instanceof Error ? error.message : error });
     return res.status(500).json({ error: "Erro ao listar chamados." });
   }
 };
@@ -116,7 +116,7 @@ export const showTicket = async (
       },
     });
   } catch (error) {
-    console.error("[showTicket] Erro:", error);
+    logger.error("[showTicket] Erro:", { error: error instanceof Error ? error.message : error });
     return res.status(500).json({ error: "Erro ao buscar chamado." });
   }
 };
@@ -162,7 +162,7 @@ export const showTicketMessages = async (
       }),
     });
   } catch (error) {
-    console.error("[showTicketMessages] Erro:", error);
+    logger.error("[showTicketMessages] Erro:", { error: error instanceof Error ? error.message : error });
     return res.status(500).json({ error: "Erro ao listar mensagens." });
   }
 };
