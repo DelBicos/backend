@@ -1,5 +1,6 @@
 import Ticket, { ITicket, TicketUserType } from "../../models/Ticket";
 import { ProfessionalModel } from "../../models/Professional";
+import { AdminModel } from "../../models/Admin";
 import { AppointmentModel } from "../../models/Appointment";
 import { generateTicketCode } from "../../utils/ticketCode";
 import { CreateTicketInput } from "../../middlewares/ticket.validation";
@@ -13,6 +14,12 @@ export const resolveUserType = async (
     where: { user_id: userId },
   });
   return professional ? "PRESTADOR" : "CLIENTE";
+};
+
+/** Administradores atendem chamados; não abrem chamados (TICKET-02). */
+export const isAdmin = async (userId: number): Promise<boolean> => {
+  const admin = await AdminModel.findOne({ where: { user_id: userId } });
+  return admin !== null;
 };
 
 /**
@@ -67,6 +74,7 @@ export const createTicket = async (
     title: data.title,
     description: data.description,
     category: data.category,
+    priority: data.priority,
     status: "ABERTO",
     user_id: userId,
     user_type: userType,
@@ -99,13 +107,14 @@ export const findTicketByIdForUser = async (
 export const listMessagesByTicket = async (
   ticketId: number,
   userId: number
-): Promise<TicketMessageModel[]> => {
+): Promise<TicketMessageModel[] | null> => {
   // 1. Garante ownership
   const ticket = await Ticket.findOne({
     where: { id: ticketId, user_id: userId },
   });
 
-  if (!ticket) return [];
+  // null => chamado inexistente ou de outro usuário (controller responde 404)
+  if (!ticket) return null;
 
   // 2. Busca mensagens com dados do autor
   return TicketMessageModel.findAll({
