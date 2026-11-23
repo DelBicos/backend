@@ -6,11 +6,150 @@ import type {
   BotChatSessionModel,
   BotSessionContext,
 } from "../../../models/BotChatSession";
-import type { NluResult } from "../../nlu.service";
+import {
+  classifyClosingMessage,
+  isSupportProblemReport,
+  type NluResult,
+} from "../../nlu.service";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
 import { DEFAULT_BOT_TIME_ZONE } from "../../../utils/date.util";
+import { normalizeText } from "../../../utils/nlp.util";
+import { logError } from "../../../utils/logger";
+import {
+  isAdmin,
+  openTicketFromChat,
+  TicketOpeningNotAllowedError,
+} from "../../ticket/ticket.service";
+import {
+  TICKET_DESCRIPTION_MAX_LENGTH,
+  TICKET_DESCRIPTION_MIN_LENGTH,
+} from "../../ticket/ticket.rules";
 
 import type { AppointmentWithRelations } from "../../appointment/appointment.types";
+
+/** Respostas curtas que desistem do chamado enquanto o bot espera a descrição. */
+const TICKET_ABORT_PATTERN =
+  /^(?:cancelar|cancela|cancele|desistir|desisto|deixa|deixa pra la|esquece|nao|n|voltar|depois|agora nao)$/;
+// Na confirmação, a negativa é verificada antes: "não quero abrir" contém
+// palavras das duas listas e deve desistir do chamado.
+const TICKET_DENY_PATTERN =
+  /\b(?:nao|n|cancelar|cancela|desistir|desisto|esquece|deixa)\b/;
+const TICKET_CONFIRM_PATTERN =
+  /\b(?:sim|s|claro|pode|confirmo|confirmar|abrir|abre|abra|ok|isso|beleza|bora)\b/;
+
+const CLEARED_TICKET_CONTEXT: Partial<BotSessionContext> = {
+  intent: undefined,
+  pendingPrompt: undefined,
+  ticketDescription: undefined,
+};
+
+const TICKET_CANCELLED_RESULT: HandlerResult = {
+  reply:
+    "Tudo bem, não abri nenhum chamado. Se precisar do suporte técnico, é só me chamar.",
+  nextState: "INICIO",
+  contextUpdate: CLEARED_TICKET_CONTEXT,
+};
+
+const ADMIN_CANNOT_OPEN_TICKET_RESULT: HandlerResult = {
+  reply: "Administradores atendem chamados e não podem abri-los pelo assistente.",
+  nextState: "INICIO",
+  contextUpdate: CLEARED_TICKET_CONTEXT,
+};
+
+function askTicketDescription(): HandlerResult {
+  return {
+    reply:
+      "Certo, vou abrir um chamado para o suporte técnico. Descreva o problema " +
+      "com o máximo de detalhes: o que aconteceu, quando e, se houver, o código " +
+      "do agendamento envolvido.",
+    nextState: "INICIO",
+    contextUpdate: {
+      intent: "SUPORTE",
+      pendingAction: undefined,
+      pendingPrompt: "TICKET_DESCRIPTION",
+      ticketDescription: undefined,
+    },
+  };
+}
+
+function askTicketConfirmation(description: string): HandlerResult {
+  return {
+    reply:
+      "Vou abrir um chamado para o suporte técnico com a descrição abaixo:\n\n" +
+      `"${description}"\n\n` +
+      'Posso abrir o chamado? Responda com "sim" ou "não".',
+    nextState: "INICIO",
+    contextUpdate: {
+      intent: "SUPORTE",
+      pendingAction: undefined,
+      pendingPrompt: "TICKET_CONFIRMATION",
+      ticketDescription: description,
+    },
+  };
+}
+
+function handleTicketDescription(userMessage: string): HandlerResult {
+  const description = userMessage.trim();
+  if (TICKET_ABORT_PATTERN.test(normalizeText(description))) {
+    return TICKET_CANCELLED_RESULT;
+  }
+  if (description.length < TICKET_DESCRIPTION_MIN_LENGTH) {
+    return {
+      reply:
+        "Preciso de um pouco mais de detalhes para o suporte entender o problema. " +
+        "Pode descrever o que aconteceu?",
+      nextState: "INICIO",
+      contextUpdate: {},
+    };
+  }
+  return askTicketConfirmation(
+    description.slice(0, TICKET_DESCRIPTION_MAX_LENGTH),
+  );
+}
+
+async function handleTicketConfirmation(
+  userMessage: string,
+  ctx: BotSessionContext,
+  userId: number,
+): Promise<HandlerResult> {
+  if (!ctx.ticketDescription) return askTicketDescription();
+
+  const answer = normalizeText(userMessage);
+  if (TICKET_DENY_PATTERN.test(answer)) return TICKET_CANCELLED_RESULT;
+  if (!TICKET_CONFIRM_PATTERN.test(answer)) {
+    return {
+      reply: 'Deseja abrir o chamado? Responda com "sim" ou "não".',
+      nextState: "INICIO",
+      contextUpdate: {},
+    };
+  }
+
+  try {
+    const ticket = await openTicketFromChat(userId, ctx.ticketDescription);
+    return {
+      reply:
+        `Chamado ${ticket.ticket_code} aberto com sucesso! ✅\n` +
+        "Nossa equipe de suporte vai analisar e responder pela área de suporte do app.\n\n" +
+        "Posso ajudar com mais alguma coisa?",
+      nextState: "INICIO",
+      contextUpdate: CLEARED_TICKET_CONTEXT,
+    };
+  } catch (error) {
+    if (error instanceof TicketOpeningNotAllowedError) {
+      return ADMIN_CANNOT_OPEN_TICKET_RESULT;
+    }
+    logError("Bot: falha ao abrir chamado de suporte", error, { userId });
+    // Mantém a descrição: um novo "sim" tenta abrir o chamado outra vez.
+    return {
+      reply:
+        "Não consegui abrir o chamado agora. Responda \"sim\" para tentar de novo " +
+        "ou \"não\" para desistir.",
+      nextState: "INICIO",
+      contextUpdate: {},
+    };
+  }
+}
+
 export class InicioState implements BotStateNode {
   public async handle(
     userMessage: string,
@@ -24,6 +163,27 @@ export class InicioState implements BotStateNode {
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .trim();
+
+    if (ctx.pendingPrompt === "TICKET_DESCRIPTION") {
+      return handleTicketDescription(userMessage);
+    }
+    if (ctx.pendingPrompt === "TICKET_CONFIRMATION") {
+      return handleTicketConfirmation(userMessage, ctx, userId);
+    }
+
+    // Um agradecimento também encerra a oferta pendente: "obrigado" diante de
+    // "Deseja agendar?" é uma recusa educada, não um pedido para repetir.
+    const closing = classifyClosingMessage(userMessage);
+    if (closing) {
+      return {
+        reply:
+          closing === "THANKS"
+            ? "Não há de quê! 😊 Fico feliz em ajudar. Se precisar de mais alguma coisa, é só me chamar."
+            : "Até logo! 👋 Quando precisar, é só me chamar.",
+        nextState: "INICIO",
+        contextUpdate: { intent: undefined, pendingPrompt: undefined },
+      };
+    }
 
     if (ctx.pendingPrompt === "OFFER_CREATE_AFTER_EMPTY_QUERY") {
       const confirmed = /\b(sim|s|claro|quero|pode|vamos|bora|ok|beleza)\b/.test(
@@ -78,7 +238,8 @@ export class InicioState implements BotStateNode {
             "Olá! 👋 Sou o assistente virtual do DelBicos. Posso ajudá-lo a:\n" +
             "• Agendar um serviço\n" +
             "• Consultar seus agendamentos\n" +
-            "• Cancelar ou reagendar\n\n" +
+            "• Cancelar ou reagendar\n" +
+            "• Abrir um chamado de suporte técnico\n\n" +
             "O que você gostaria de fazer?",
           nextState: "INICIO",
           contextUpdate: {},
@@ -172,6 +333,26 @@ export class InicioState implements BotStateNode {
         };
       }
 
+      case "SUPORTE": {
+        // Recusa o administrador antes de pedir a descrição, para não fazê-lo
+        // responder duas perguntas inúteis. openTicketFromChat mantém a mesma
+        // checagem na gravação.
+        if (await isAdmin(userId)) return ADMIN_CANNOT_OPEN_TICKET_RESULT;
+
+        // Um relato de problema já é a descrição; um pedido genérico
+        // ("quero abrir um chamado") ainda precisa do relato do usuário.
+        const description = userMessage.trim();
+        if (
+          isSupportProblemReport(description) &&
+          description.length >= TICKET_DESCRIPTION_MIN_LENGTH
+        ) {
+          return askTicketConfirmation(
+            description.slice(0, TICKET_DESCRIPTION_MAX_LENGTH),
+          );
+        }
+        return askTicketDescription();
+      }
+
       case "CONSULTAR": {
         const clientRecord = await ClientModel.findOne({ where: { user_id: userId } });
         if (!clientRecord) {
@@ -223,7 +404,8 @@ export class InicioState implements BotStateNode {
             "Você pode:\n" +
             "• Agendar um serviço\n" +
             "• Consultar seus agendamentos\n" +
-            "• Cancelar ou reagendar\n\n" +
+            "• Cancelar ou reagendar\n" +
+            "• Abrir um chamado de suporte técnico\n\n" +
             'Por exemplo, diga: "quero agendar uma limpeza".',
           nextState: "INICIO",
           contextUpdate: {},

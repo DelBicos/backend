@@ -9,7 +9,7 @@ from typing import Any
 import joblib
 
 FALLBACK = "FALLBACK"
-VALID_INTENTS = {"AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR", "SAUDACAO", FALLBACK}
+VALID_INTENTS = {"AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR", "SUPORTE", "SAUDACAO", FALLBACK}
 
 
 def load_model(model_path: str | Path) -> dict[str, Any]:

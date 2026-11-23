@@ -368,3 +368,84 @@ describe("processMessage - saudação global", () => {
     expect(result.context).toEqual({});
   });
 });
+
+describe("processMessage - abertura de chamado de suporte", () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  const ticketSession = (context: Record<string, unknown>) => ({
+    id: 90,
+    state: "INICIO",
+    status: "active",
+    channel: "web",
+    appointment_id: null,
+    context,
+  });
+
+  it.each([
+    ["CANCELAR", "o profissional cancelou em cima da hora", "TICKET_DESCRIPTION"],
+    ["SAUDACAO", "oi, o app travou", "TICKET_DESCRIPTION"],
+    ["CANCELAR", "não, cancelar", "TICKET_CONFIRMATION"],
+  ])(
+    "não interrompe o chamado quando o classificador responde %s",
+    async (intent, message, pendingPrompt) => {
+      const session = ticketSession({
+        intent: "SUPORTE",
+        pendingPrompt,
+        ticketDescription: "O app travou ao pagar",
+      });
+      (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(session);
+      (analyzeMessage as jest.Mock).mockResolvedValue({ intent, entities: {}, confidence: 1 });
+      (BotMessageRouter.route as jest.Mock).mockResolvedValue({
+        reply: "ok",
+        nextState: "INICIO",
+        contextUpdate: {},
+      });
+
+      await processMessage(1, "auth-1", message, 90);
+
+      expect(BotMessageRouter.route).toHaveBeenCalledWith(
+        "INICIO",
+        message,
+        expect.objectContaining({ intent }),
+        expect.objectContaining({
+          context: expect.objectContaining({ pendingPrompt }),
+        }),
+        1,
+        undefined,
+      );
+    },
+  );
+
+  it("interrompe um agendamento em andamento quando o usuário pede suporte", async () => {
+    const session = {
+      id: 91,
+      state: "COLETANDO_DATA",
+      status: "active",
+      channel: "web",
+      appointment_id: 5,
+      context: { pendingAction: "CREATE", serviceName: "Limpeza" },
+    };
+    (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(session);
+    (analyzeMessage as jest.Mock).mockResolvedValue({
+      intent: "SUPORTE",
+      entities: {},
+      confidence: 1,
+    });
+    (BotMessageRouter.route as jest.Mock).mockResolvedValue({
+      reply: "Descreva o problema",
+      nextState: "INICIO",
+      contextUpdate: { intent: "SUPORTE", pendingPrompt: "TICKET_DESCRIPTION" },
+    });
+
+    await processMessage(1, "auth-1", "quero abrir um chamado", 91);
+
+    expect(BotMessageRouter.route).toHaveBeenCalledWith(
+      "INICIO",
+      "quero abrir um chamado",
+      expect.objectContaining({ intent: "SUPORTE" }),
+      expect.objectContaining({ context: {}, appointment_id: null }),
+      1,
+      undefined,
+    );
+  });
+});

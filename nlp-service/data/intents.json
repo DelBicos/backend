@@ -8,7 +8,7 @@
         "bom dia assistente", "boa tarde tudo bem", "boa noite preciso de ajuda",
         "olá preciso falar com você", "oii", "opa tudo bem", "tudo bem por aí",
         "bom dia gostaria de informações", "boa tarde assistente", "boa noite pode me orientar",
-        "oi gostaria de ajuda", "olá estou precisando de suporte", "como você está",
+        "oi gostaria de ajuda", "como você está",
         "saudações", "ei assistente", "olá delbicos tudo bem", "bom dia equipe",
         "boa tarde gostaria de ajuda", "olá tudo certo",
         "ola", "olaaa", "oi assistente", "oi bot", "e ai tudo bem",
@@ -94,6 +94,25 @@
         "cancele meu atendimento", "quero desmarcar", "preciso desmarcar", "desmarque minha reserva",
         "não quero mais esse agendamento", "não preciso mais do atendimento", "anular agendamento", "quero anular",
         "quero desistir", "retirar meu agendamento", "cancelar meu pedido"
+      ]
+    },
+    {
+      "name": "SUPORTE",
+      "examples": [
+        "quero abrir um chamado", "preciso abrir um chamado de suporte", "abrir chamado", "quero falar com o suporte",
+        "preciso de suporte técnico", "como falo com um atendente", "quero falar com um humano", "olá estou precisando de suporte",
+        "registrar uma reclamação", "quero fazer uma reclamação", "abrir um ticket", "preciso de ajuda do suporte",
+        "o aplicativo está dando erro", "o app travou na hora de pagar", "o site não carrega", "deu erro ao finalizar o pagamento",
+        "fui cobrado duas vezes", "a cobrança veio duplicada", "paguei e o agendamento não foi confirmado", "o pix não caiu",
+        "meu cartão foi recusado mas o valor saiu", "não consigo acessar minha conta", "não consigo fazer login",
+        "esqueci a senha e não recebo o email", "o prestador não apareceu", "o profissional faltou e não avisou",
+        "o profissional foi grosseiro comigo", "o serviço ficou mal feito", "o prestador quebrou meu armário",
+        "quero meu dinheiro de volta", "quero solicitar reembolso", "meu estorno ainda não caiu", "quero denunciar um prestador",
+        "tem um problema com meu pagamento", "estou com um problema no aplicativo", "a tela fica branca quando abro o app",
+        "o botão de pagar não funciona", "minhas notificações pararam de chegar", "o chat com o profissional não envia mensagem",
+        "meus dados estão errados e não consigo alterar", "relatar um problema", "reportar um bug",
+        "aconteceu um problema com o serviço", "preciso que alguém resolva meu problema", "suporte técnico por favor",
+        "quero registrar uma ocorrência", "o valor cobrado está errado", "não recebi o comprovante do pagamento"
       ]
     },
     {

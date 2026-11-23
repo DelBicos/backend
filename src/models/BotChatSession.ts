@@ -11,7 +11,10 @@ export type BotSessionStatus = "active" | "completed" | "abandoned";
 
 export type BotPendingAction = "CREATE" | "CANCEL" | "RESCHEDULE";
 
-export type BotPendingPrompt = "OFFER_CREATE_AFTER_EMPTY_QUERY";
+export type BotPendingPrompt =
+  | "OFFER_CREATE_AFTER_EMPTY_QUERY"
+  | "TICKET_DESCRIPTION"
+  | "TICKET_CONFIRMATION";
 
 export interface BotServiceOption {
   id: number;
@@ -116,6 +119,8 @@ export interface BotSessionContext {
   }>;
   suggestedDates?: string[];
   userAppointmentList?: Array<{ index: number; id: number; shortId?: string }>;
+  /** Problem description collected before the support ticket is opened. */
+  ticketDescription?: string;
 }
 
 export interface IBotChatSession {

@@ -1,6 +1,10 @@
 import { BotState } from "../../constants/botStates";
 import { BotChatSessionModel } from "../../models/BotChatSession";
-import { isSchedulingActionWord, NluResult } from "../nlu.service";
+import {
+  classifyClosingMessage,
+  isSchedulingActionWord,
+  NluResult,
+} from "../nlu.service";
 import { BotStateNode, HandlerResult } from "./BotStateNode";
 import { InicioState } from "./states/InicioState";
 import { ColetandoServicoState } from "./states/ColetandoServicoState";
@@ -128,7 +132,21 @@ export class BotMessageRouter {
     // Na primeira mensagem, consulta o catálogo tanto para serviço isolado
     // (NLU FALLBACK) quanto para AGENDAR sem entidade. A busca informa se houve
     // correspondência forte; conversa casual continua com a resposta de INICIO.
-    if (state === BotState.INICIO) {
+    // Enquanto um chamado está sendo aberto, o texto livre é a descrição do
+    // problema; casá-lo com o catálogo ("limpeza mal feita") desviaria a
+    // conversa para um agendamento.
+    const pendingPrompt = session.context?.pendingPrompt;
+    const isCollectingTicket =
+      pendingPrompt === "TICKET_DESCRIPTION" ||
+      pendingPrompt === "TICKET_CONFIRMATION";
+
+    // Agradecimento ou despedida já tem resposta própria no INICIO e não
+    // deve ser comparado com nomes de serviços.
+    if (
+      state === BotState.INICIO &&
+      !isCollectingTicket &&
+      !classifyClosingMessage(userMessage)
+    ) {
       const explicitService = nlu.entities.service?.trim();
       const shouldProbeFallback = nlu.intent === "FALLBACK";
       const shouldProbeSchedulingDescription =

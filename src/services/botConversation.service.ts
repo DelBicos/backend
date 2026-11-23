@@ -197,11 +197,23 @@ export async function processMessage(
       (!isExplicitGreeting &&
         Boolean(parseTimePeriodFromText(trimmedMessage))));
 
+  // Durante a abertura de um chamado, a mensagem é a descrição do problema ou
+  // a resposta à confirmação: "não, cancelar" desiste do chamado e não deve
+  // iniciar o cancelamento de um agendamento. Só o reinício (item A) sai daqui.
+  const isCollectingTicket =
+    session.state === BotState.INICIO &&
+    (ctx.pendingPrompt === "TICKET_DESCRIPTION" ||
+      ctx.pendingPrompt === "TICKET_CONFIRMATION");
+
   // Saudações são globais: elas nunca devem ser interpretadas como nome de
   // serviço nem apagar um agendamento parcialmente preenchido. Uma resposta
   // de horário reconhecível, porém, pertence à etapa em andamento mesmo se o
   // classificador confundir "noite" com "boa noite".
-  if (nlu.intent === "SAUDACAO" && !isContextualTimeAnswer) {
+  if (
+    nlu.intent === "SAUDACAO" &&
+    !isContextualTimeAnswer &&
+    !isCollectingTicket
+  ) {
     const replyText = buildGreetingReply(session.state, ctx);
     await BotSessionManager.saveSession(session, session.state, ctx);
     await BotSessionManager.createMessage(session.id, "bot", replyText);
@@ -227,10 +239,13 @@ export async function processMessage(
     ) &&
     Boolean(parsePortugueseDate(trimmedMessage, { timeZone: ctx.timeZone }));
   const isExplicitIntent =
+    !isCollectingTicket &&
     !isContextualAvailabilityQuestion &&
     !isContextualDateAnswer &&
     !isContextualTimeAnswer &&
-    ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR"].includes(nlu.intent);
+    ["AGENDAR", "ALTERAR", "CANCELAR", "CONSULTAR", "SUPORTE"].includes(
+      nlu.intent,
+    );
   let shouldRedirectToInicio = false;
   if (isExplicitIntent) {
     if (nlu.intent === "AGENDAR") {
@@ -281,7 +296,7 @@ export async function processMessage(
       shouldRedirectToInicio =
         !isContinuingCurrentBooking || requestsDifferentService;
     } else {
-      // Cancelar, alterar ou consultar representam uma nova ação explícita;
+      // Cancelar, alterar, consultar ou pedir suporte representam uma nova ação explícita;
       // portanto também interrompem confirmações e pedidos de ID anteriores.
       shouldRedirectToInicio = true;
     }

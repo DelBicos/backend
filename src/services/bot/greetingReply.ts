@@ -48,7 +48,7 @@ export function buildGreetingReply(
     default:
       return (
         `${greeting}\n\nPosso ajudar a agendar um serviço, consultar seus agendamentos, ` +
-        "cancelar ou reagendar. O que você gostaria de fazer?"
+        "cancelar, reagendar ou abrir um chamado de suporte técnico. O que você gostaria de fazer?"
       );
   }
 }

@@ -37,7 +37,9 @@ import {
   isAdmin,
   listMessagesByTicket,
   listTicketsByUser,
+  openTicketFromChat,
   resolveUserType,
+  TicketOpeningNotAllowedError,
 } from "../ticket.service";
 import type { CreateTicketInput } from "../../../middlewares/ticket.validation";
 
@@ -273,5 +275,45 @@ describe("ticket.service addMessageToTicket (TICKET-05)", () => {
     });
     expect(mockMessageCreate).not.toHaveBeenCalled();
     expect(ticket.save).not.toHaveBeenCalled();
+  });
+});
+
+describe("ticket.service openTicketFromChat (chatbot)", () => {
+  it("abre o chamado com título, categoria e prioridade derivados da descrição", async () => {
+    mockAdminFindOne.mockResolvedValue(null);
+    mockProfessionalFindOne.mockResolvedValue(null);
+
+    await openTicketFromChat(7, "  Fui cobrado duas vezes pelo mesmo serviço  ");
+
+    expect(mockTicketCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Fui cobrado duas vezes pelo mesmo serviço",
+        description: "Fui cobrado duas vezes pelo mesmo serviço",
+        category: "PAGAMENTO",
+        priority: "MEDIA",
+        status: "ABERTO",
+        user_id: 7,
+        user_type: "CLIENTE",
+        appointment_id: null,
+      })
+    );
+  });
+
+  it("registra o prestador com o tipo PRESTADOR", async () => {
+    mockAdminFindOne.mockResolvedValue(null);
+    mockProfessionalFindOne.mockResolvedValue({ id: 3 });
+
+    await openTicketFromChat(7, "O aplicativo não carrega minha agenda");
+
+    expect(mockTicketCreate).toHaveBeenCalledWith(expect.objectContaining({ user_type: "PRESTADOR" }));
+  });
+
+  it("recusa administradores sem criar o chamado (TICKET-02)", async () => {
+    mockAdminFindOne.mockResolvedValue({ id: 1 });
+
+    await expect(openTicketFromChat(1, "O aplicativo não carrega")).rejects.toBeInstanceOf(
+      TicketOpeningNotAllowedError
+    );
+    expect(mockTicketCreate).not.toHaveBeenCalled();
   });
 });

@@ -26,6 +26,11 @@ jest.mock("../../semanticSearch.service", () => ({
   rankSemanticCandidates: jest.fn(),
   SemanticSearchUnavailableError: class SemanticSearchUnavailableError extends Error {},
 }));
+jest.mock("../../ticket/ticket.service", () => ({
+  isAdmin: jest.fn().mockResolvedValue(false),
+  openTicketFromChat: jest.fn(),
+  TicketOpeningNotAllowedError: class TicketOpeningNotAllowedError extends Error {},
+}));
 jest.mock("../../../utils/logger", () => ({
   __esModule: true,
   default: { warn: jest.fn() },
@@ -287,7 +292,6 @@ describe("BotMessageRouter no estado INICIO", () => {
       } as NluResult,
     },
     { message: "como você está", nlu: fallbackNlu() },
-    { message: "obrigado", nlu: fallbackNlu() },
     { message: "estou triste hoje", nlu: fallbackNlu() },
     { message: "hoje estou cansado", nlu: fallbackNlu() },
     { message: "gosto de música", nlu: fallbackNlu() },
@@ -350,6 +354,60 @@ describe("BotMessageRouter no estado INICIO", () => {
       expect(ServiceModel.findAll).not.toHaveBeenCalled();
     },
   );
+
+  it.each([
+    ["obrigado", "Não há de quê"],
+    ["muito obrigada pela ajuda", "Não há de quê"],
+    ["valeu, tchau", "Não há de quê"],
+    ["tchau", "Até logo"],
+    ["era só isso, até mais", "Até logo"],
+  ])(
+    "responde ao encerramento '%s' sem buscar no catálogo",
+    async (message, expectedReply) => {
+      const result = await BotMessageRouter.route(
+        BotState.INICIO,
+        message,
+        fallbackNlu(),
+        sessionFixture(),
+        1,
+      );
+
+      expect(result.nextState).toBe(BotState.INICIO);
+      expect(result.reply).toContain(expectedReply);
+      expect(ServiceModel.findAll).not.toHaveBeenCalled();
+    },
+  );
+
+  it("encerra a oferta de agendamento quando o usuário agradece", async () => {
+    const result = await BotMessageRouter.route(
+      BotState.INICIO,
+      "obrigado",
+      fallbackNlu(),
+      {
+        context: { pendingPrompt: "OFFER_CREATE_AFTER_EMPTY_QUERY" },
+      } as BotChatSessionModel,
+      1,
+    );
+
+    expect(result.reply).toContain("Não há de quê");
+    expect(result.contextUpdate.pendingPrompt).toBeUndefined();
+  });
+
+  it("não busca no catálogo a descrição de um chamado de suporte", async () => {
+    const result = await BotMessageRouter.route(
+      BotState.INICIO,
+      "a limpeza ficou mal feita e mancharam o sofá",
+      fallbackNlu(),
+      {
+        context: { intent: "SUPORTE", pendingPrompt: "TICKET_DESCRIPTION" },
+      } as BotChatSessionModel,
+      1,
+    );
+
+    expect(result.nextState).toBe(BotState.INICIO);
+    expect(result.contextUpdate.pendingPrompt).toBe("TICKET_CONFIRMATION");
+    expect(ServiceModel.findAll).not.toHaveBeenCalled();
+  });
 
   it.each([
     "quero agendar",
