@@ -1,11 +1,11 @@
 import type { NextFunction, Request, Response } from "express";
-import { validateCreateTicket } from "../ticket.validation";
+import { validateCreateTicket, validateCreateTicketMessage } from "../ticket.validation";
 
 type Detail = { field: string; message: string };
 type Result = { status: number; body: { error?: string; details?: Detail[] } } | "next" | undefined;
 
 /** Executa o middleware e devolve { status, body } ou "next", além do req (body já tratado). */
-function run(body: unknown) {
+function run(body: unknown, middleware = validateCreateTicket) {
   let result: Result;
   const req = { body } as Request;
   const res = {
@@ -13,13 +13,13 @@ function run(body: unknown) {
       return { json: (payload: { error?: string; details?: Detail[] }) => (result = { status, body: payload }) };
     },
   } as unknown as Response;
-  validateCreateTicket(req, res, (() => (result = "next")) as NextFunction);
+  middleware(req, res, (() => (result = "next")) as NextFunction);
   return { result, req };
 }
 
 /** Confirma 400 "Dados inválidos." apontando o campo recusado. */
-const rejects = (body: unknown, field: string) => {
-  const { result } = run(body);
+const rejects = (body: unknown, field: string, middleware = validateCreateTicket) => {
+  const { result } = run(body, middleware);
   expect(result).not.toBe("next");
   expect(result).toMatchObject({ status: 400, body: { error: "Dados inválidos." } });
   const fields = (result as { body: { details: Detail[] } }).body.details.map((d) => d.field);
@@ -86,9 +86,50 @@ describe("validateCreateTicket (TICKET-01 / TICKET-02)", () => {
     expect(req.body).toEqual(valid);
   });
 
+  it("aplica os limites ao texto sem espaços nas pontas", () => {
+    rejects({ ...valid, title: "     " }, "title");
+    rejects({ ...valid, title: "  abc  " }, "title");
+    rejects({ ...valid, description: " ".repeat(12) }, "description");
+  });
+
   it("remove espaços nas pontas de título e descrição", () => {
     const { req } = run({ ...valid, title: "  Erro ao agendar  ", description: "  Descrição com espaços  " });
     expect(req.body.title).toBe("Erro ao agendar");
     expect(req.body.description).toBe("Descrição com espaços");
+  });
+});
+
+describe("validateCreateTicketMessage (TICKET-05)", () => {
+  const message = (body: unknown) => run(body, validateCreateTicketMessage);
+
+  it("aceita mensagem com texto e remove espaços nas pontas", () => {
+    const { result, req } = message({ content: "  Ainda sem resposta  " });
+    expect(result).toBe("next");
+    expect(req.body).toEqual({ content: "Ainda sem resposta" });
+  });
+
+  it("aceita os limites de 1 e 2000 caracteres", () => {
+    expect(message({ content: "A" }).result).toBe("next");
+    expect(message({ content: "A".repeat(2000) }).result).toBe("next");
+  });
+
+  it("recusa mensagem ausente, vazia, só com espaços, longa ou que não é texto", () => {
+    rejects({}, "content", validateCreateTicketMessage);
+    rejects({ content: "" }, "content", validateCreateTicketMessage);
+    rejects({ content: "    " }, "content", validateCreateTicketMessage);
+    rejects({ content: "A".repeat(2001) }, "content", validateCreateTicketMessage);
+    rejects({ content: 123 }, "content", validateCreateTicketMessage);
+  });
+
+  it("descarta campos que o usuário não pode definir (autor, chamado, anexo)", () => {
+    const { result, req } = message({
+      content: "Oi",
+      author_id: 99,
+      author_type: "ADMIN",
+      ticket_id: 1,
+      attachment_url: "https://exemplo.com/x.png",
+    });
+    expect(result).toBe("next");
+    expect(req.body).toEqual({ content: "Oi" });
   });
 });
