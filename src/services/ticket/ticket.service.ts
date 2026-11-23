@@ -11,7 +11,12 @@ import TicketMessageModel from "../../models/TicketMessage";
 import { UserModel } from "../../models/User";
 import { sequelize } from "../../config/database";
 import { HttpError } from "../../errors/HttpError";
-import { acceptsNewMessages } from "./ticket.rules";
+import {
+  acceptsNewMessages,
+  buildTicketTitleFromDescription,
+  CHATBOT_TICKET_PRIORITY,
+  inferTicketCategory,
+} from "./ticket.rules";
 
 /** Author data shown in the ticket history (GET and POST /:id/messages). */
 const MESSAGE_AUTHOR_INCLUDE = {
@@ -183,4 +188,35 @@ export const addMessageToTicket = async (
   });
   if (!created) throw new Error(`Mensagem ${messageId} não encontrada após gravação.`);
   return created;
+};
+/** Thrown when an administrator tries to open a ticket (TICKET-02). */
+export class TicketOpeningNotAllowedError extends Error {
+  constructor() {
+    super("Administradores atendem chamados e não podem abri-los.");
+    this.name = "TicketOpeningNotAllowedError";
+  }
+}
+
+/**
+ * Opens a ticket from the chatbot conversation. Title and category are derived
+ * from the description the user typed; the priority is the chatbot default.
+ */
+export const openTicketFromChat = async (
+  userId: number,
+  description: string
+): Promise<Ticket> => {
+  if (await isAdmin(userId)) throw new TicketOpeningNotAllowedError();
+
+  const trimmed = description.trim();
+  const userType = await resolveUserType(userId);
+  return createTicket(
+    {
+      title: buildTicketTitleFromDescription(trimmed),
+      description: trimmed,
+      category: inferTicketCategory(trimmed),
+      priority: CHATBOT_TICKET_PRIORITY,
+    },
+    userId,
+    userType
+  );
 };
