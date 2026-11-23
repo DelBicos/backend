@@ -3,7 +3,29 @@ import { AuthenticatedRequest } from "../interfaces/authentication.interface";
 import * as ticketService from "../services/ticket/ticket.service";
 import logger from "../utils/logger";
 import { UserModel } from "../models/User";
+import TicketMessageModel from "../models/TicketMessage";
+import { HttpError } from "../errors/HttpError";
 
+/**
+ * Message shape in the history (GET) and in the POST response, so the app
+ * renders both with the same component.
+ */
+const toMessageResponse = (m: TicketMessageModel) => {
+  const author = (m as { author?: UserModel }).author;
+  return {
+    id: m.id,
+    ticket_id: m.ticket_id,
+    author: {
+      id: m.author_id,
+      type: m.author_type,
+      name: author?.name ?? "Usuário",
+      avatar_uri: author?.avatar_uri ?? null,
+    },
+    content: m.content,
+    attachment_url: m.attachment_url,
+    created_at: m.createdAt,
+  };
+};
 
 /**
  * POST /api/tickets
@@ -40,8 +62,8 @@ export const createTicket = async (
       },
     });
   } catch (error) {
-    if (error instanceof Error && (error as Error & { statusCode?: number }).statusCode === 400) {
-      return res.status(400).json({ error: error.message });
+    if (error instanceof HttpError) {
+      return res.status(error.status).json({ error: error.message });
     }
 
     logger.error("[createTicket] Erro:", { error: error instanceof Error ? error.message : error });
@@ -151,27 +173,44 @@ export const showTicketMessages = async (
       return res.status(404).json({ error: "Chamado não encontrado." });
     }
 
-    return res.status(200).json({
-      messages: messages.map((m) => {
-        const author = (m as { author?: UserModel }).author; 
-
-        return {
-          id: m.id,
-          ticket_id: m.ticket_id,
-          author: {
-            id: m.author_id,
-            type: m.author_type,
-            name: author?.name ?? "Usuário",
-            avatar_uri: author?.avatar_uri ?? null,
-          },
-          content: m.content,
-          attachment_url: m.attachment_url,
-          created_at: m.createdAt,
-        };
-      }),
-    });
+    return res.status(200).json({ messages: messages.map(toMessageResponse) });
   } catch (error) {
     logger.error("[showTicketMessages] Erro:", { error: error instanceof Error ? error.message : error });
     return res.status(500).json({ error: "Erro ao listar mensagens." });
+  }
+};
+
+/**
+ * POST /api/tickets/:id/messages
+ */
+export const addTicketMessage = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<Response> => {
+  try {
+    const userId = req.user?.id;
+    const ticketId = Number(req.params.id);
+
+    if (!userId) {
+      return res.status(401).json({ error: "Usuário não autenticado." });
+    }
+    if (!Number.isInteger(ticketId) || ticketId <= 0) {
+      return res.status(400).json({ error: "ID inválido." });
+    }
+
+    const message = await ticketService.addMessageToTicket(ticketId, userId, req.body);
+
+    return res.status(201).json({
+      message: "Mensagem adicionada com sucesso.",
+      ticket_message: toMessageResponse(message),
+    });
+  } catch (error) {
+    if (error instanceof HttpError) {
+      return res
+        .status(error.status)
+        .json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
+    }
+    logger.error("[addTicketMessage] Erro:", { error: error instanceof Error ? error.message : error });
+    return res.status(500).json({ error: "Erro ao adicionar mensagem." });
   }
 };
