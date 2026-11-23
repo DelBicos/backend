@@ -88,18 +88,18 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex("ticket", ["user_id"], {
-      name: "idx_ticket_user",
-    });
-    await queryInterface.addIndex("ticket", ["status"], {
-      name: "idx_ticket_status",
-    });
-    await queryInterface.addIndex("ticket", ["priority", "status"], {
-      name: "idx_ticket_priority_status",
-    });
-    await queryInterface.addIndex("ticket", ["created_at"], {
-      name: "idx_ticket_created_at",
-    });
+    const existingIndexes = (await queryInterface.showIndex("ticket")).map((index) => index.name);
+    const indexes = [
+      { name: "idx_ticket_user", fields: ["user_id"] },
+      { name: "idx_ticket_status", fields: ["status"] },
+      { name: "idx_ticket_priority_status", fields: ["priority", "status"] },
+      { name: "idx_ticket_created_at", fields: ["created_at"] },
+    ];
+    for (const { name, fields } of indexes) {
+      if (!existingIndexes.includes(name)) {
+        await queryInterface.addIndex("ticket", fields, { name });
+      }
+    }
   },
 
   async down(queryInterface) {
