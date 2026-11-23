@@ -534,4 +534,58 @@ describe("analyzeMessage", () => {
       confidence: 0.9,
     });
   });
+
+  it.each([
+    "quero abrir um chamado",
+    "preciso de suporte técnico",
+    "oi, quero falar com o suporte",
+    "olá estou precisando de suporte",
+    "o aplicativo está dando erro",
+    "fui cobrado duas vezes",
+    "o prestador não apareceu no meu agendamento",
+    "não consigo acessar minha conta",
+  ])("a regra de suporte sobrepõe o modelo: %s", async (message) => {
+    mockClassifier("FALLBACK", 0.4);
+
+    const result = await analyzeMessage(message);
+
+    expect(result.intent).toBe("SUPORTE");
+    expect(result.confidence).toBe(1);
+    expect(result.entities).toEqual({});
+  });
+
+  it.each([
+    ["quero instalar um suporte de tv", "AGENDAR"],
+    ["quero cancelar meu agendamento", "CANCELAR"],
+    ["ver meus agendamentos", "CONSULTAR"],
+  ])("não confunde %p com suporte", async (message, expected) => {
+    mockClassifier(expected);
+
+    const result = await analyzeMessage(message);
+
+    expect(result.intent).toBe(expected);
+  });
+
+  it.each(["valeu", "Muito obrigado pela ajuda!", "obrigada, tchau", "até mais"])(
+    "trata agradecimento/despedida como entrada estruturada: %s",
+    async (message) => {
+      const fetchMock = mockClassifier("SAUDACAO");
+      const result = await analyzeMessage(message);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(result).toEqual({ intent: "FALLBACK", entities: {}, confidence: 1 });
+    },
+  );
+
+  it("não trata como despedida um agradecimento seguido de problema", async () => {
+    mockClassifier("FALLBACK", 0.3);
+    expect((await analyzeMessage("obrigado, mas o app travou")).intent).toBe("SUPORTE");
+  });
+
+  it("aceita SUPORTE vindo do classificador", async () => {
+    mockClassifier("SUPORTE", 0.81);
+
+    const result = await analyzeMessage("minhas notificações pararam de chegar");
+
+    expect(result).toEqual({ intent: "SUPORTE", entities: {}, confidence: 0.81 });
+  });
 });
