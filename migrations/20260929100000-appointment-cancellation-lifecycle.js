@@ -76,9 +76,12 @@ module.exports = {
       created_at: { type: Sequelize.DATE, allowNull: false, defaultValue: Sequelize.fn("NOW") },
       updated_at: { type: Sequelize.DATE, allowNull: false, defaultValue: Sequelize.fn("NOW") },
     });
-    await queryInterface.addIndex("dispute", ["status", "created_at"], {
-      name: "idx_dispute_status",
-    });
+    const indexes = await queryInterface.showIndex("dispute");
+    if (!indexes.some((index) => index.name === "idx_dispute_status")) {
+      await queryInterface.addIndex("dispute", ["status", "created_at"], {
+        name: "idx_dispute_status",
+      });
+    }
   },
 
   async down(queryInterface) {

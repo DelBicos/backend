@@ -1,6 +1,7 @@
 import { Response } from "express";
 import type { AuthenticatedRequest } from "../../interfaces/authentication.interface";
 import {
+  addTicketMessage,
   createTicket,
   listTickets,
   showTicket,
@@ -8,6 +9,7 @@ import {
 } from "../ticket.controller";
 import * as ticketService from "../../services/ticket/ticket.service";
 import logger from "../../utils/logger";
+import { HttpError } from "../../errors/HttpError";
 
 jest.mock("../../config/database", () => ({}));
 jest.mock("../../models/User", () => ({ UserModel: {} }));
@@ -18,6 +20,7 @@ jest.mock("../../services/ticket/ticket.service", () => ({
   listTicketsByUser: jest.fn(),
   findTicketByIdForUser: jest.fn(),
   listMessagesByTicket: jest.fn(),
+  addMessageToTicket: jest.fn(),
 }));
 jest.mock("../../utils/logger", () => ({
   __esModule: true,
@@ -125,7 +128,7 @@ describe("ticket.controller createTicket — POST /api/tickets (TICKET-01 / TICK
 
   it("repassa erro 400 do service (agendamento inexistente)", async () => {
     service.createTicket.mockRejectedValue(
-      Object.assign(new Error("Agendamento com código NAOEXI não encontrado."), { statusCode: 400 }),
+      HttpError.badRequest("Agendamento com código NAOEXI não encontrado."),
     );
     const { res, jsonMock, statusMock } = buildResponse();
 
@@ -288,5 +291,99 @@ describe("ticket.controller showTicketMessages — GET /api/tickets/:id/messages
 
     expect(statusMock).toHaveBeenCalledWith(400);
     expect(service.listMessagesByTicket).not.toHaveBeenCalled();
+  });
+});
+
+describe("ticket.controller addTicketMessage — POST /api/tickets/:id/messages (TICKET-05)", () => {
+  const savedMessage = {
+    id: 3,
+    ticket_id: 42,
+    author_id: 7,
+    author_type: "CLIENTE",
+    content: "Ainda sem resposta",
+    attachment_url: null,
+    createdAt,
+    author: { name: "Cliente", avatar_uri: null },
+  };
+
+  it("adiciona a mensagem e responde 201 no mesmo formato do histórico", async () => {
+    service.addMessageToTicket.mockResolvedValue(savedMessage as never);
+    const { res, jsonMock, statusMock } = buildResponse();
+
+    await addTicketMessage(
+      request({ params: { id: "42" }, body: { content: "Ainda sem resposta" } }),
+      res as Response,
+    );
+
+    expect(service.addMessageToTicket).toHaveBeenCalledWith(42, 7, { content: "Ainda sem resposta" });
+    expect(statusMock).toHaveBeenCalledWith(201);
+    expect(jsonMock).toHaveBeenCalledWith({
+      message: "Mensagem adicionada com sucesso.",
+      ticket_message: {
+        id: 3,
+        ticket_id: 42,
+        author: { id: 7, type: "CLIENTE", name: "Cliente", avatar_uri: null },
+        content: "Ainda sem resposta",
+        attachment_url: null,
+        created_at: createdAt,
+      },
+    });
+  });
+
+  it("usa o id do token como autor", async () => {
+    service.addMessageToTicket.mockResolvedValue(savedMessage as never);
+    const { res } = buildResponse();
+
+    await addTicketMessage(request({ params: { id: "42" }, body: { content: "Oi" } }), res as Response);
+
+    expect(service.addMessageToTicket).toHaveBeenCalledWith(42, user.id, expect.anything());
+  });
+
+  it("responde 404 quando o chamado não é do usuário", async () => {
+    service.addMessageToTicket.mockRejectedValue(HttpError.notFound("Chamado não encontrado."));
+    const { res, jsonMock, statusMock } = buildResponse();
+
+    await addTicketMessage(request({ params: { id: "42" }, body: { content: "Oi" } }), res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(404);
+    expect(jsonMock).toHaveBeenCalledWith({ error: "Chamado não encontrado." });
+  });
+
+  it("responde 409 com code TICKET_CLOSED para chamado encerrado", async () => {
+    service.addMessageToTicket.mockRejectedValue(
+      HttpError.conflict("Chamado encerrado não aceita novas mensagens.").withCode("TICKET_CLOSED"),
+    );
+    const { res, jsonMock, statusMock } = buildResponse();
+
+    await addTicketMessage(request({ params: { id: "42" }, body: { content: "Oi" } }), res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(409);
+    expect(jsonMock).toHaveBeenCalledWith({
+      error: "Chamado encerrado não aceita novas mensagens.",
+      code: "TICKET_CLOSED",
+    });
+    expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it.each(["abc", "1.5", "0", "-3"])("responde 400 para ID inválido (%p) sem chamar o service", async (id) => {
+    const { res, statusMock } = buildResponse();
+
+    await addTicketMessage(request({ params: { id }, body: { content: "Oi" } }), res as Response);
+
+    expect(statusMock).toHaveBeenCalledWith(400);
+    expect(service.addMessageToTicket).not.toHaveBeenCalled();
+  });
+
+  it("responde 401 sem usuário e 500 com log em erro inesperado", async () => {
+    const unauth = buildResponse();
+    await addTicketMessage(request({ user: undefined, params: { id: "42" } }), unauth.res as Response);
+    expect(unauth.statusMock).toHaveBeenCalledWith(401);
+
+    service.addMessageToTicket.mockRejectedValue(new Error("conexão perdida"));
+    const failure = buildResponse();
+    await addTicketMessage(request({ params: { id: "42" }, body: { content: "Oi" } }), failure.res as Response);
+    expect(failure.statusMock).toHaveBeenCalledWith(500);
+    expect(failure.jsonMock).toHaveBeenCalledWith({ error: "Erro ao adicionar mensagem." });
+    expect(logger.error).toHaveBeenCalledWith("[addTicketMessage] Erro:", { error: "conexão perdida" });
   });
 });

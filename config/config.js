@@ -18,6 +18,7 @@ const isLocalHost = (host) => {
   if (!host) return true;
   return (
     host === "localhost" ||
+    host === "postgres" || // Docker Compose service name (no SSL)
     host === "127.0.0.1" ||
     host.startsWith("192.168.") ||
     host.startsWith("10.") ||

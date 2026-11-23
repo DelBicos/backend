@@ -49,12 +49,19 @@ module.exports = {
       },
     });
 
-    await queryInterface.addIndex("ticket_message", ["ticket_id"], {
-      name: "idx_ticket_message_ticket",
-    });
-    await queryInterface.addIndex("ticket_message", ["created_at"], {
-      name: "idx_ticket_message_created",
-    });
+    // In development, sequelize.sync() may have created these indexes from the model already.
+    const existingIndexes = (await queryInterface.showIndex("ticket_message")).map(
+      (index) => index.name,
+    );
+    const indexes = [
+      { name: "idx_ticket_message_ticket", fields: ["ticket_id"] },
+      { name: "idx_ticket_message_created", fields: ["created_at"] },
+    ];
+    for (const { name, fields } of indexes) {
+      if (!existingIndexes.includes(name)) {
+        await queryInterface.addIndex("ticket_message", fields, { name });
+      }
+    }
   },
 
   async down(queryInterface) {

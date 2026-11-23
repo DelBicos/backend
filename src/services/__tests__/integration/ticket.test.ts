@@ -323,3 +323,133 @@ describe("GET /api/tickets/:id/messages", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("TICKET-05 — adicionar mensagem em chamado aberto", () => {
+  const postMessage = (token: string, ticketId: number | string, body: object) =>
+    request(app)
+      .post(`/api/tickets/${ticketId}/messages`)
+      .set("Authorization", `Bearer ${token}`)
+      .send(body);
+
+  it("grava a mensagem do cliente e ela aparece no histórico", async () => {
+    const created = await openTicket(clientToken);
+    const ticketId = created.body.ticket.id;
+
+    const res = await postMessage(clientToken, ticketId, { content: "  Ainda sem resposta  " });
+
+    expect(res.status).toBe(201);
+    expect(res.body.message).toBe("Mensagem adicionada com sucesso.");
+    expect(res.body.ticket_message).toMatchObject({
+      ticket_id: ticketId,
+      author: { id: clientId, type: "CLIENTE", name: "Cliente Teste" },
+      content: "Ainda sem resposta",
+      attachment_url: null,
+    });
+
+    const history = await request(app)
+      .get(`/api/tickets/${ticketId}/messages`)
+      .set("Authorization", `Bearer ${clientToken}`);
+    expect(history.body.messages).toHaveLength(1);
+    expect(history.body.messages[0]).toEqual(res.body.ticket_message);
+  });
+
+  it("grava como PRESTADOR quando o chamado é do prestador", async () => {
+    const created = await openTicket(professionalToken);
+
+    const res = await postMessage(professionalToken, created.body.ticket.id, { content: "Cliente não respondeu" });
+
+    expect(res.status).toBe(201);
+    expect(res.body.ticket_message.author).toMatchObject({ id: professionalId, type: "PRESTADOR" });
+  });
+
+  it("mantém a ordem cronológica com várias mensagens", async () => {
+    const created = await openTicket(clientToken);
+    const ticketId = created.body.ticket.id;
+    await postMessage(clientToken, ticketId, { content: "Primeira" });
+    await postMessage(clientToken, ticketId, { content: "Segunda" });
+
+    const history = await request(app)
+      .get(`/api/tickets/${ticketId}/messages`)
+      .set("Authorization", `Bearer ${clientToken}`);
+    expect(history.body.messages.map((m: { content: string }) => m.content)).toEqual(["Primeira", "Segunda"]);
+  });
+
+  it("atualiza o updated_at do chamado", async () => {
+    const created = await openTicket(clientToken);
+    const ticketId = created.body.ticket.id;
+    const before = (await Ticket.findByPk(ticketId))!.updatedAt;
+
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    await postMessage(clientToken, ticketId, { content: "Nova interação" });
+
+    const after = (await Ticket.findByPk(ticketId))!.updatedAt;
+    expect(after.getTime()).toBeGreaterThan(before.getTime());
+  });
+
+  it("ignora autor e anexo enviados no body", async () => {
+    const created = await openTicket(clientToken);
+
+    const res = await postMessage(clientToken, created.body.ticket.id, {
+      content: "Oi",
+      author_id: professionalId,
+      author_type: "ADMIN",
+      attachment_url: "https://exemplo.com/x.png",
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.ticket_message.author).toMatchObject({ id: clientId, type: "CLIENTE" });
+    expect(res.body.ticket_message.attachment_url).toBeNull();
+  });
+
+  it.each(["EM_ANALISE", "EM_ATENDIMENTO"] as const)("aceita mensagem com status %s", async (status) => {
+    const created = await openTicket(clientToken);
+    await Ticket.update({ status }, { where: { id: created.body.ticket.id } });
+
+    const res = await postMessage(clientToken, created.body.ticket.id, { content: "Oi" });
+    expect(res.status).toBe(201);
+  });
+
+  it.each(["RESOLVIDO", "FECHADO"] as const)("responde 409 TICKET_CLOSED e não grava com status %s", async (status) => {
+    const created = await openTicket(clientToken);
+    await Ticket.update({ status }, { where: { id: created.body.ticket.id } });
+
+    const res = await postMessage(clientToken, created.body.ticket.id, { content: "Oi" });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toEqual({ error: "Chamado encerrado não aceita novas mensagens.", code: "TICKET_CLOSED" });
+    expect(await TicketMessageModel.count({ where: { ticket_id: created.body.ticket.id } })).toBe(0);
+  });
+
+  it("responde 404 e não grava em chamado de outro usuário", async () => {
+    const created = await openTicket(clientToken);
+
+    const res = await postMessage(professionalToken, created.body.ticket.id, { content: "Oi" });
+
+    expect(res.status).toBe(404);
+    expect(await TicketMessageModel.count()).toBe(0);
+  });
+
+  it("responde 404 para chamado inexistente", async () => {
+    const res = await postMessage(clientToken, 999999, { content: "Oi" });
+    expect(res.status).toBe(404);
+  });
+
+  it.each([
+    ["sem conteúdo", {}],
+    ["conteúdo vazio", { content: "" }],
+    ["só espaços", { content: "    " }],
+    ["mais de 2000 caracteres", { content: "A".repeat(2001) }],
+  ])("responde 400 para mensagem %s", async (_label, body) => {
+    const created = await openTicket(clientToken);
+
+    const res = await postMessage(clientToken, created.body.ticket.id, body);
+
+    expect(res.status).toBe(400);
+    expect(res.body.details).toEqual(expect.arrayContaining([expect.objectContaining({ field: "content" })]));
+  });
+
+  it("responde 400 para ID inválido e 401 sem token", async () => {
+    expect((await postMessage(clientToken, "abc", { content: "Oi" })).status).toBe(400);
+    expect((await request(app).post("/api/tickets/1/messages").send({ content: "Oi" })).status).toBe(401);
+  });
+});
