@@ -5,6 +5,44 @@ import type { NluIntent } from "./nlu.types";
 export const RESTART_COMMAND_PATTERN =
   /^(?:reiniciar|recomecar|comecar\s+(?:de\s+novo|novamente)|novo\s+(?:atendimento|agendamento|pedido)|iniciar\s+novamente|limpar\s+(?:o\s+)?(?:chat|bate\s*papo|conversa)|zerar\s+(?:o\s+)?(?:chat|bate\s*papo|conversa)|cancelar\s+(?:o\s+)?(?:processo|fluxo)|voltar\s+(?:ao\s+)?inicio|sair\s+(?:do\s+)?(?:atendimento|fluxo))$/;
 
+/**
+ * Pedido explícito de atendimento. "Suporte" sozinho também nomeia um produto
+ * ("instalar suporte de TV"), por isso a palavra só conta quando é o objeto
+ * final do pedido, vem qualificada ("suporte técnico", "suporte do app") ou
+ * acompanha um verbo de contato ("falar com o suporte").
+ */
+export const SUPPORT_REQUEST_PATTERN = new RegExp(
+  [
+    String.raw`\b(?:abrir|abra|abre|registrar|registre|criar|crie|fazer|faca)\s+(?:(?:um|uma|o|a|meu|minha)\s+)?(?:(?:novo|nova)\s+)?(?:chamado|ticket|protocolo|reclamacao|ocorrencia)\b`,
+    String.raw`\b(?:falar|conversar|contato|contatar|acionar|chamar)\s+(?:com\s+)?(?:(?:o|a|um|uma|alguem\s+do)\s+)?(?:suporte|atendente|atendimento\s+humano|humano|sac)\b`,
+    String.raw`\bsuporte\s+tecnico\b`,
+    String.raw`\bsuporte\s+(?:do|no|da|com\s+o)\s+(?:app|aplicativo|site|sistema|plataforma|delbicos)\b`,
+    String.raw`\b(?:preciso|precisando|necessito|quero|queria|gostaria)\s+(?:de\s+)?(?:(?:um|uma|o)\s+)?(?:suporte|atendente)$`,
+    String.raw`^(?:suporte|chamado|ticket|atendente)$`,
+  ].join("|"),
+);
+
+/**
+ * Relato de problema na plataforma. Quando presente, a própria mensagem já
+ * serve como descrição do chamado.
+ */
+export const SUPPORT_PROBLEM_PATTERN = new RegExp(
+  [
+    String.raw`\b(?:app|aplicativo|site|sistema|pagina|tela|plataforma)\b.*\b(?:erro|travou|travando|trava|bug|caiu|fora\s+do\s+ar|nao\s+(?:funciona|carrega|abre|responde))\b`,
+    String.raw`\b(?:deu|da|dando|apareceu|aparece|aparecendo)\s+(?:(?:um|uma)\s+)?(?:erro|falha)\b`,
+    String.raw`\bcobr(?:ado|ada|aram|anca|ou)\b.*\b(?:duas\s+vezes|duplicad[ao]|a\s+mais|indevid[ao]|errad[ao])\b`,
+    String.raw`\b(?:pagamento|pix|cartao)\b.*\b(?:nao\s+(?:foi|caiu|aprovado|confirmado|processado)|recusad[oa]|falhou)\b`,
+    String.raw`\bnao\s+consigo\s+(?:pagar|acessar|entrar|logar|fazer\s+login|finalizar|concluir)\b`,
+    String.raw`\b(?:prestador|profissional)\s+(?:nao\s+(?:apareceu|veio|compareceu)|faltou)\b`,
+    String.raw`\b(?:reclamacao|reclamar|denuncia|denunciar|estorno|reembolso)\b`,
+  ].join("|"),
+);
+
+/** Indica se a mensagem relata um problema concreto, e não só pede suporte. */
+export function isSupportProblemReport(message: string): boolean {
+  return SUPPORT_PROBLEM_PATTERN.test(normalizeForRules(message));
+}
+
 export const EXPLICIT_INTENT_RULES: ReadonlyArray<readonly [RegExp, NluIntent]> = [
   [
     /\b(?:cancelar|cancele|cancela|desmarcar|desmarque|anular|anule|desistir)\b/,
@@ -326,6 +364,67 @@ export function classifyCorrectedAppointmentIntent(
   return null;
 }
 
+export type ClosingMessageKind = "THANKS" | "FAREWELL";
+
+const THANKS_WORDS = new Set([
+  "obrigado",
+  "obrigada",
+  "obrigadao",
+  "brigado",
+  "brigada",
+  "obg",
+  "valeu",
+  "vlw",
+  "grato",
+  "grata",
+  "agradeco",
+  "agradecido",
+  "agradecida",
+]);
+const FAREWELL_WORDS = new Set(["tchau", "tchauzinho", "flw", "falou", "xau"]);
+const FAREWELL_PHRASE_PATTERN =
+  /\b(?:ate\s+(?:mais|logo|breve|a\s+proxima|depois)|(?:era\s+)?so\s+isso)\b/;
+// Palavras que acompanham o agradecimento sem mudar o sentido. A mensagem
+// inteira precisa ser formada por elas: "obrigado, mas o app travou" segue
+// para a classificação normal.
+const CLOSING_FILLER_WORDS = new Set([
+  "a", "abraco", "abracos", "ajuda", "ate", "atencao", "atendimento", "beleza",
+  "blz", "boa", "bom", "breve", "certo", "de", "demais", "depois", "dia",
+  "e", "entao", "entendi", "era", "isso", "logo", "mais", "mesmo", "muito",
+  "muitissimo", "nao", "noite", "otimo", "ok", "pela", "pelo", "perfeito",
+  "proxima", "show", "so", "tarde", "tudo", "viu",
+]);
+
+/**
+ * Reconhece mensagens que só agradecem ou se despedem ("muito obrigado",
+ * "valeu, tchau", "era só isso"). Agradecimento tem precedência sobre a
+ * despedida porque pede a resposta "não há de quê".
+ */
+export function classifyClosingMessage(
+  message: string,
+): ClosingMessageKind | null {
+  const normalized = normalizeForRules(message);
+  const words = normalized.split(" ").filter(Boolean);
+  if (words.length === 0 || words.length > 8) return null;
+
+  const isClosingVocabulary = words.every(
+    (word) =>
+      THANKS_WORDS.has(word) ||
+      FAREWELL_WORDS.has(word) ||
+      CLOSING_FILLER_WORDS.has(word),
+  );
+  if (!isClosingVocabulary) return null;
+
+  if (words.some((word) => THANKS_WORDS.has(word))) return "THANKS";
+  if (
+    words.some((word) => FAREWELL_WORDS.has(word)) ||
+    FAREWELL_PHRASE_PATTERN.test(normalized)
+  ) {
+    return "FAREWELL";
+  }
+  return null;
+}
+
 /** Identifica frases que encerram o contexto atual e iniciam um novo fluxo. */
 export function isRestartCommand(message: string): boolean {
   return RESTART_COMMAND_PATTERN.test(normalizeForRules(message));
@@ -334,6 +433,15 @@ export function isRestartCommand(message: string): boolean {
 export function classifyExplicitIntent(message: string): NluIntent | null {
   const normalized = normalizeForRules(message);
   if (!normalized || isRestartCommand(normalized)) return null;
+
+  // Suporte antecede as regras de agendamento: "o prestador não apareceu no
+  // meu agendamento" relata um problema, não é uma consulta de agenda.
+  if (
+    SUPPORT_REQUEST_PATTERN.test(normalized) ||
+    SUPPORT_PROBLEM_PATTERN.test(normalized)
+  ) {
+    return "SUPORTE";
+  }
 
   const correctedAppointmentIntent =
     classifyCorrectedAppointmentIntent(normalized);
