@@ -16,6 +16,7 @@ import { DEFAULT_BOT_TIME_ZONE } from "../../../utils/date.util";
 import { normalizeText } from "../../../utils/nlp.util";
 import { logError } from "../../../utils/logger";
 import {
+  isAdmin,
   openTicketFromChat,
   TicketOpeningNotAllowedError,
 } from "../../ticket/ticket.service";
@@ -45,6 +46,12 @@ const CLEARED_TICKET_CONTEXT: Partial<BotSessionContext> = {
 const TICKET_CANCELLED_RESULT: HandlerResult = {
   reply:
     "Tudo bem, não abri nenhum chamado. Se precisar do suporte técnico, é só me chamar.",
+  nextState: "INICIO",
+  contextUpdate: CLEARED_TICKET_CONTEXT,
+};
+
+const ADMIN_CANNOT_OPEN_TICKET_RESULT: HandlerResult = {
+  reply: "Administradores atendem chamados e não podem abri-los pelo assistente.",
   nextState: "INICIO",
   contextUpdate: CLEARED_TICKET_CONTEXT,
 };
@@ -129,11 +136,7 @@ async function handleTicketConfirmation(
     };
   } catch (error) {
     if (error instanceof TicketOpeningNotAllowedError) {
-      return {
-        reply: "Administradores atendem chamados e não podem abri-los pelo assistente.",
-        nextState: "INICIO",
-        contextUpdate: CLEARED_TICKET_CONTEXT,
-      };
+      return ADMIN_CANNOT_OPEN_TICKET_RESULT;
     }
     logError("Bot: falha ao abrir chamado de suporte", error, { userId });
     // Mantém a descrição: um novo "sim" tenta abrir o chamado outra vez.
@@ -331,6 +334,11 @@ export class InicioState implements BotStateNode {
       }
 
       case "SUPORTE": {
+        // Recusa o administrador antes de pedir a descrição, para não fazê-lo
+        // responder duas perguntas inúteis. openTicketFromChat mantém a mesma
+        // checagem na gravação.
+        if (await isAdmin(userId)) return ADMIN_CANNOT_OPEN_TICKET_RESULT;
+
         // Um relato de problema já é a descrição; um pedido genérico
         // ("quero abrir um chamado") ainda precisa do relato do usuário.
         const description = userMessage.trim();

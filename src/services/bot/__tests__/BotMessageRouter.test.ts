@@ -27,6 +27,7 @@ jest.mock("../../semanticSearch.service", () => ({
   SemanticSearchUnavailableError: class SemanticSearchUnavailableError extends Error {},
 }));
 jest.mock("../../ticket/ticket.service", () => ({
+  isAdmin: jest.fn().mockResolvedValue(false),
   openTicketFromChat: jest.fn(),
   TicketOpeningNotAllowedError: class TicketOpeningNotAllowedError extends Error {},
 }));

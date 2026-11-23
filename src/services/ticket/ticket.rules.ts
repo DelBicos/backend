@@ -1,4 +1,5 @@
 import type { TicketCategory, TicketPriority, TicketStatus } from "../../models/Ticket";
+import { normalizeText } from "../../utils/nlp.util";
 
 /** Statuses in which a ticket is still open and accepts new messages (TICKET-05). */
 export const OPEN_TICKET_STATUSES: readonly TicketStatus[] = [
@@ -32,18 +33,9 @@ const CATEGORY_KEYWORD_RULES: ReadonlyArray<readonly [RegExp, TicketCategory]> =
   [/\b(?:sugestao|sugerir|sugiro|melhoria|ideia)\b/, "SUGESTAO"],
 ];
 
-const normalizeForCategory = (text: string): string =>
-  text
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
 /** Infers the ticket category from a free-text description; OUTROS by default. */
 export const inferTicketCategory = (description: string): TicketCategory => {
-  const normalized = normalizeForCategory(description);
+  const normalized = normalizeText(description);
   const match = CATEGORY_KEYWORD_RULES.find(([pattern]) => pattern.test(normalized));
   return match ? match[1] : "OUTROS";
 };

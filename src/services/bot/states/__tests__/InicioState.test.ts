@@ -1,6 +1,10 @@
 jest.mock("../../../ticket/ticket.service", () => {
   class TicketOpeningNotAllowedError extends Error {}
-  return { openTicketFromChat: jest.fn(), TicketOpeningNotAllowedError };
+  return {
+    isAdmin: jest.fn().mockResolvedValue(false),
+    openTicketFromChat: jest.fn(),
+    TicketOpeningNotAllowedError,
+  };
 });
 
 jest.mock("../../../../utils/logger", () => ({
@@ -32,6 +36,7 @@ import type {
   BotSessionContext,
 } from "../../../../models/BotChatSession";
 import {
+  isAdmin,
   openTicketFromChat,
   TicketOpeningNotAllowedError,
 } from "../../../ticket/ticket.service";
@@ -112,6 +117,22 @@ describe("InicioState - abertura de chamado de suporte", () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it("recusa o administrador antes de pedir a descrição", async () => {
+    (isAdmin as jest.Mock).mockResolvedValueOnce(true);
+
+    const result = await state.handle(
+      "Fui cobrado duas vezes pelo serviço de ontem",
+      supportNlu,
+      sessionWith({}),
+      1,
+    );
+
+    expect(isAdmin).toHaveBeenCalledWith(1);
+    expect(result.reply).toContain("Administradores");
+    expect(result.contextUpdate.pendingPrompt).toBeUndefined();
+    expect(openTicketFromChat).not.toHaveBeenCalled();
   });
 
   it("pede a descrição quando o pedido de suporte é genérico", async () => {
