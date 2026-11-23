@@ -22,6 +22,8 @@ import { ChatRoomModel } from "./ChatRoom";
 import { BotChatSessionModel } from "./BotChatSession";
 import { BotChatMessageModel } from "./BotChatMessage";
 import { AppointmentAuditLogModel } from "./AppointmentAuditLog";
+import TicketModel from "./Ticket";                    // Adicione isso
+import TicketMessageModel from "./TicketMessage";      // E isso
 
 export function initializeAssociations() {
   AppointmentModel.hasOne(DisputeModel, { foreignKey: "appointment_id", as: "Dispute" });
@@ -367,5 +369,50 @@ export function initializeAssociations() {
   AppointmentAuditLogModel.belongsTo(UserModel, {
     foreignKey: "user_id",
     as: "User",
+  });
+
+  TicketModel.belongsTo(UserModel, {
+    foreignKey: "user_id",
+    as: "requester",
+  });
+
+  TicketModel.belongsTo(UserModel, {
+    foreignKey: "admin_id",
+    as: "assignee",
+  });
+
+  TicketModel.belongsTo(AppointmentModel, {
+    foreignKey: "appointment_id",
+    as: "appointment",
+  });
+
+  UserModel.hasMany(TicketModel, {
+    foreignKey: "user_id",
+    as: "openedTickets",
+  });
+
+  UserModel.hasMany(TicketModel, {
+    foreignKey: "admin_id",
+    as: "assignedTickets",
+  });
+
+  AppointmentModel.hasMany(TicketModel, {
+    foreignKey: "appointment_id",
+    as: "tickets",
+  });
+
+  TicketModel.hasMany(TicketMessageModel, {
+    foreignKey: "ticket_id",
+    as: "messages",
+  });
+
+  TicketMessageModel.belongsTo(TicketModel, {
+    foreignKey: "ticket_id",
+    as: "ticket",
+  });
+
+  TicketMessageModel.belongsTo(UserModel, {
+    foreignKey: "author_id",
+    as: "author",
   });
 }
