@@ -1,11 +1,15 @@
 import { Router } from "express";
 import authMiddleware from "../middlewares/auth.middleware";
-import { validateCreateTicket } from "../middlewares/ticket.validation";
 import {
+  validateCreateTicket,
+  validateCreateTicketMessage,
+} from "../middlewares/ticket.validation";
+import {
+  addTicketMessage,
   createTicket,
   listTickets,
   showTicket,
-  showTicketMessages
+  showTicketMessages,
 } from "../controllers/ticket.controller";
 
 const router = Router();
@@ -246,5 +250,79 @@ router.get("/:id", authMiddleware, showTicket);
  *         description: Erro interno
  */
 router.get("/:id/messages", authMiddleware, showTicketMessages);
+
+/**
+ * @swagger
+ * /tickets/{id}/messages:
+ *   post:
+ *     summary: Adiciona uma mensagem a um chamado aberto (TICKET-05)
+ *     description: |
+ *       Só o dono do chamado pode escrever. Chamados RESOLVIDO ou FECHADO não
+ *       aceitam novas mensagens (409, code TICKET_CLOSED). O autor vem do token.
+ *     tags: [Tickets]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID do chamado
+ *         example: 42
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [content]
+ *             properties:
+ *               content:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 2000
+ *                 example: "O prestador ainda não respondeu."
+ *     responses:
+ *       201:
+ *         description: Mensagem adicionada
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 message: { type: string, example: "Mensagem adicionada com sucesso." }
+ *                 ticket_message:
+ *                   type: object
+ *                   properties:
+ *                     id: { type: integer, example: 3 }
+ *                     ticket_id: { type: integer, example: 42 }
+ *                     author:
+ *                       type: object
+ *                       properties:
+ *                         id: { type: integer, example: 31 }
+ *                         type: { type: string, enum: [CLIENTE, PRESTADOR, ADMIN] }
+ *                         name: { type: string, example: "Maria Souza" }
+ *                         avatar_uri: { type: string, nullable: true }
+ *                     content: { type: string }
+ *                     attachment_url: { type: string, nullable: true }
+ *                     created_at: { type: string, format: date-time }
+ *       400:
+ *         description: ID inválido ou mensagem vazia/longa
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/ErrorResponse' }
+ *       401:
+ *         description: Não autenticado
+ *       403:
+ *         description: Token inválido
+ *       404:
+ *         description: Chamado não encontrado ou de outro usuário
+ *       409:
+ *         description: Chamado encerrado (RESOLVIDO ou FECHADO), code TICKET_CLOSED
+ *       500:
+ *         description: Erro interno
+ */
+router.post("/:id/messages", authMiddleware, validateCreateTicketMessage, addTicketMessage);
 
 export default router;
