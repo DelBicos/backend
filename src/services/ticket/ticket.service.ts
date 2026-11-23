@@ -1,11 +1,24 @@
-import Ticket, { ITicket, TicketUserType } from "../../models/Ticket";
+import Ticket, { TicketUserType } from "../../models/Ticket";
 import { ProfessionalModel } from "../../models/Professional";
 import { AdminModel } from "../../models/Admin";
 import { AppointmentModel } from "../../models/Appointment";
 import { generateTicketCode } from "../../utils/ticketCode";
-import { CreateTicketInput } from "../../middlewares/ticket.validation";
+import {
+  CreateTicketInput,
+  CreateTicketMessageInput,
+} from "../../middlewares/ticket.validation";
 import TicketMessageModel from "../../models/TicketMessage";
 import { UserModel } from "../../models/User";
+import { sequelize } from "../../config/database";
+import { HttpError } from "../../errors/HttpError";
+import { acceptsNewMessages } from "./ticket.rules";
+
+/** Author data shown in the ticket history (GET and POST /:id/messages). */
+const MESSAGE_AUTHOR_INCLUDE = {
+  model: UserModel,
+  as: "author",
+  attributes: ["id", "name", "avatar_uri"],
+};
 
 export const resolveUserType = async (
   userId: number
@@ -51,12 +64,9 @@ export const createTicket = async (
 
   // Se o usuário informou um short_id, mas não existe → erro
   if (data.appointment_short_id && !appointmentId) {
-    const error = new Error(
+    throw HttpError.badRequest(
       `Agendamento com código ${data.appointment_short_id} não encontrado.`
     );
-    (error as Error & { statusCode?: number }).statusCode = 400;
-
-    throw error;
   }
 
   let ticketCode = generateTicketCode();
@@ -120,12 +130,57 @@ export const listMessagesByTicket = async (
   return TicketMessageModel.findAll({
     where: { ticket_id: ticketId },
     order: [["createdAt", "ASC"]],
-    include: [
-      {
-        model: UserModel,
-        as: "author",
-        attributes: ["id", "name", "avatar_uri"],
-      },
-    ],
+    include: [MESSAGE_AUTHOR_INCLUDE],
   });
+};
+
+/**
+ * TICKET-05: adds a message from the ticket owner to an open ticket.
+ *
+ * Throws HttpError 404 when the ticket does not exist or belongs to another
+ * user, and HttpError 409 (code TICKET_CLOSED) when it is resolved or closed.
+ */
+export const addMessageToTicket = async (
+  ticketId: number,
+  userId: number,
+  data: CreateTicketMessageInput
+): Promise<TicketMessageModel> => {
+  const messageId = await sequelize.transaction(async (transaction) => {
+    // Row lock: a concurrent status change (e.g. admin closing the ticket)
+    // waits, so a message is never saved on a ticket that was just closed.
+    const ticket = await Ticket.findOne({
+      where: { id: ticketId, user_id: userId },
+      transaction,
+      lock: transaction.LOCK.UPDATE,
+    });
+
+    if (!ticket) throw HttpError.notFound("Chamado não encontrado.");
+    if (!acceptsNewMessages(ticket.status)) {
+      throw HttpError.conflict(
+        "Chamado encerrado não aceita novas mensagens."
+      ).withCode("TICKET_CLOSED");
+    }
+
+    const message = await TicketMessageModel.create(
+      {
+        ticket_id: ticket.id,
+        author_id: userId,
+        author_type: ticket.user_type,
+        content: data.content,
+      },
+      { transaction }
+    );
+
+    // Bumps the ticket updated_at so the list reflects the latest interaction.
+    ticket.changed("updatedAt", true);
+    await ticket.save({ transaction });
+
+    return message.id;
+  });
+
+  const created = await TicketMessageModel.findByPk(messageId, {
+    include: [MESSAGE_AUTHOR_INCLUDE],
+  });
+  if (!created) throw new Error(`Mensagem ${messageId} não encontrada após gravação.`);
+  return created;
 };
