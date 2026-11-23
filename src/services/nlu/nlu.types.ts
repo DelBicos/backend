@@ -1,7 +1,13 @@
 import { TimePeriod } from "../../utils/date.util";
 
 export type NluIntent =
-  "AGENDAR" | "ALTERAR" | "CANCELAR" | "CONSULTAR" | "SAUDACAO" | "FALLBACK";
+  | "AGENDAR"
+  | "ALTERAR"
+  | "CANCELAR"
+  | "CONSULTAR"
+  | "SUPORTE"
+  | "SAUDACAO"
+  | "FALLBACK";
 
 export interface NluEntities {
   service?: string;
