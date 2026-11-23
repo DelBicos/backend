@@ -6,31 +6,40 @@ const mockAdminFindOne = jest.fn();
 const mockAppointmentFindOne = jest.fn();
 const mockMessageFindAll = jest.fn();
 const mockGenerateCode = jest.fn();
+const mockMessageCreate = jest.fn();
+const mockMessageFindByPk = jest.fn();
+const mockTransaction = { LOCK: { UPDATE: "UPDATE" } };
 
-jest.mock("../../config/database", () => ({}));
-jest.mock("../../models/Ticket", () => ({
+jest.mock("../../../config/database", () => ({
+  sequelize: {
+    transaction: jest.fn(async (work: (t: unknown) => unknown) => work(mockTransaction)),
+  },
+}));
+jest.mock("../../../models/Ticket", () => ({
   __esModule: true,
   default: { findOne: mockTicketFindOne, findAll: mockTicketFindAll, create: mockTicketCreate },
 }));
-jest.mock("../../models/TicketMessage", () => ({
+jest.mock("../../../models/TicketMessage", () => ({
   __esModule: true,
-  default: { findAll: mockMessageFindAll },
+  default: { findAll: mockMessageFindAll, create: mockMessageCreate, findByPk: mockMessageFindByPk },
 }));
-jest.mock("../../models/Professional", () => ({ ProfessionalModel: { findOne: mockProfessionalFindOne } }));
-jest.mock("../../models/Admin", () => ({ AdminModel: { findOne: mockAdminFindOne } }));
-jest.mock("../../models/Appointment", () => ({ AppointmentModel: { findOne: mockAppointmentFindOne } }));
-jest.mock("../../models/User", () => ({ UserModel: { name: "UserModel" } }));
-jest.mock("../../utils/ticketCode", () => ({ generateTicketCode: mockGenerateCode }));
+jest.mock("../../../models/Professional", () => ({ ProfessionalModel: { findOne: mockProfessionalFindOne } }));
+jest.mock("../../../models/Admin", () => ({ AdminModel: { findOne: mockAdminFindOne } }));
+jest.mock("../../../models/Appointment", () => ({ AppointmentModel: { findOne: mockAppointmentFindOne } }));
+jest.mock("../../../models/User", () => ({ UserModel: { name: "UserModel" } }));
+jest.mock("../../../utils/ticketCode", () => ({ generateTicketCode: mockGenerateCode }));
 
+import { HttpError } from "../../../errors/HttpError";
 import {
+  addMessageToTicket,
   createTicket,
   findTicketByIdForUser,
   isAdmin,
   listMessagesByTicket,
   listTicketsByUser,
   resolveUserType,
-} from "../ticket/ticket.service";
-import type { CreateTicketInput } from "../../middlewares/ticket.validation";
+} from "../ticket.service";
+import type { CreateTicketInput } from "../../../middlewares/ticket.validation";
 
 const input: CreateTicketInput = {
   title: "Erro ao agendar serviço",
@@ -111,8 +120,11 @@ describe("ticket.service createTicket (TICKET-01 / TICKET-02)", () => {
 
     await expect(createTicket({ ...input, appointment_short_id: "NAOEXI" }, 7, "CLIENTE")).rejects.toMatchObject({
       message: "Agendamento com código NAOEXI não encontrado.",
-      statusCode: 400,
+      status: 400,
     });
+    await expect(
+      createTicket({ ...input, appointment_short_id: "NAOEXI" }, 7, "CLIENTE"),
+    ).rejects.toBeInstanceOf(HttpError);
     expect(mockTicketCreate).not.toHaveBeenCalled();
   });
 
@@ -176,5 +188,90 @@ describe("ticket.service listMessagesByTicket", () => {
       order: [["createdAt", "ASC"]],
       include: [{ model: { name: "UserModel" }, as: "author", attributes: ["id", "name", "avatar_uri"] }],
     });
+  });
+});
+
+describe("ticket.service addMessageToTicket (TICKET-05)", () => {
+  const openTicket = (overrides: Record<string, unknown> = {}) => ({
+    id: 42,
+    status: "ABERTO",
+    user_type: "CLIENTE",
+    changed: jest.fn(),
+    save: jest.fn().mockResolvedValue(undefined),
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    mockMessageCreate.mockResolvedValue({ id: 3 });
+    mockMessageFindByPk.mockResolvedValue({ id: 3, content: "Ainda sem resposta" });
+  });
+
+  it("grava a mensagem do dono com author_type do chamado, dentro da transação com trava", async () => {
+    mockTicketFindOne.mockResolvedValue(openTicket());
+
+    const result = await addMessageToTicket(42, 7, { content: "Ainda sem resposta" });
+
+    expect(mockTicketFindOne).toHaveBeenCalledWith({
+      where: { id: 42, user_id: 7 },
+      transaction: mockTransaction,
+      lock: "UPDATE",
+    });
+    expect(mockMessageCreate).toHaveBeenCalledWith(
+      { ticket_id: 42, author_id: 7, author_type: "CLIENTE", content: "Ainda sem resposta" },
+      { transaction: mockTransaction },
+    );
+    expect(result).toEqual({ id: 3, content: "Ainda sem resposta" });
+    expect(mockMessageFindByPk).toHaveBeenCalledWith(3, {
+      include: [{ model: { name: "UserModel" }, as: "author", attributes: ["id", "name", "avatar_uri"] }],
+    });
+  });
+
+  it("usa PRESTADOR como author_type quando o chamado é de prestador", async () => {
+    mockTicketFindOne.mockResolvedValue(openTicket({ user_type: "PRESTADOR" }));
+
+    await addMessageToTicket(42, 9, { content: "Cliente não respondeu" });
+
+    expect(mockMessageCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ author_id: 9, author_type: "PRESTADOR" }),
+      expect.anything(),
+    );
+  });
+
+  it("atualiza o updated_at do chamado para refletir a última interação", async () => {
+    const ticket = openTicket();
+    mockTicketFindOne.mockResolvedValue(ticket);
+
+    await addMessageToTicket(42, 7, { content: "Ainda sem resposta" });
+
+    expect(ticket.changed).toHaveBeenCalledWith("updatedAt", true);
+    expect(ticket.save).toHaveBeenCalledWith({ transaction: mockTransaction });
+  });
+
+  it.each(["EM_ANALISE", "EM_ATENDIMENTO"])("aceita mensagem com status %s", async (status) => {
+    mockTicketFindOne.mockResolvedValue(openTicket({ status }));
+    await expect(addMessageToTicket(42, 7, { content: "Oi" })).resolves.toBeDefined();
+  });
+
+  it("lança 404 sem gravar quando o chamado não existe ou é de outro usuário", async () => {
+    mockTicketFindOne.mockResolvedValue(null);
+
+    await expect(addMessageToTicket(42, 8, { content: "Oi" })).rejects.toMatchObject({
+      status: 404,
+      message: "Chamado não encontrado.",
+    });
+    expect(mockMessageCreate).not.toHaveBeenCalled();
+  });
+
+  it.each(["RESOLVIDO", "FECHADO"])("lança 409 TICKET_CLOSED sem gravar quando o status é %s", async (status) => {
+    const ticket = openTicket({ status });
+    mockTicketFindOne.mockResolvedValue(ticket);
+
+    await expect(addMessageToTicket(42, 7, { content: "Oi" })).rejects.toMatchObject({
+      status: 409,
+      code: "TICKET_CLOSED",
+      message: "Chamado encerrado não aceita novas mensagens.",
+    });
+    expect(mockMessageCreate).not.toHaveBeenCalled();
+    expect(ticket.save).not.toHaveBeenCalled();
   });
 });
