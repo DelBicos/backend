@@ -2,11 +2,16 @@ import { parseTimePeriodFromText } from "../utils/date.util";
 import { normalizeText } from "../utils/nlp.util";
 import logger from "../utils/logger";
 import type { NluEntities, NluIntent, NluResult } from "./nlu/nlu.types";
-import { STANDALONE_EXPLICIT_TIME_PATTERN, STANDALONE_TIME_PERIOD_PATTERN, classifyExplicitIntent, isStandaloneDateInput } from "./nlu/intent.rules";
+import { STANDALONE_EXPLICIT_TIME_PATTERN, STANDALONE_TIME_PERIOD_PATTERN, classifyClosingMessage, classifyExplicitIntent, isStandaloneDateInput } from "./nlu/intent.rules";
 import { extractDate, extractEntities, extractTime } from "./nlu/entities.rules";
 
 export type { NluIntent, NluEntities, NluResult } from "./nlu/nlu.types";
-export { isSchedulingActionWord, isRestartCommand } from "./nlu/intent.rules";
+export {
+  classifyClosingMessage,
+  isSchedulingActionWord,
+  isRestartCommand,
+  isSupportProblemReport,
+} from "./nlu/intent.rules";
 
 /** Tempo máximo de espera pelo classificador interno em milissegundos. */
 const configuredTimeoutMs = Number(
@@ -26,6 +31,7 @@ const VALID_INTENTS = new Set([
   "ALTERAR",
   "CANCELAR",
   "CONSULTAR",
+  "SUPORTE",
   "SAUDACAO",
   "FALLBACK",
 ]);
@@ -53,6 +59,9 @@ function classifyStructuredInput(
   ) {
     return fallback({}, 1);
   }
+  // Agradecimentos e despedidas também são respostas de fluxo; enviados ao
+  // classificador, "valeu" e "muito obrigado" podiam virar SAUDACAO.
+  if (classifyClosingMessage(message)) return fallback({}, 1);
 
   if (/^\d+$/.test(normalized)) {
     const id = Number(normalized);
