@@ -8,9 +8,11 @@ import type {
 } from "../../../models/BotChatSession";
 import {
   classifyClosingMessage,
+  extractProblemStatement,
   isSupportProblemReport,
   type NluResult,
 } from "../../nlu.service";
+import type { ClosingMessageKind } from "../../nlu/intent.rules";
 import { BotStateNode, HandlerResult } from "../BotStateNode";
 import { DEFAULT_BOT_TIME_ZONE } from "../../../utils/date.util";
 import { normalizeText } from "../../../utils/nlp.util";
@@ -21,15 +23,23 @@ import {
   TicketOpeningNotAllowedError,
 } from "../../ticket/ticket.service";
 import {
+  buildChatbotTicket,
+  TICKET_CATEGORY_LABELS,
   TICKET_DESCRIPTION_MAX_LENGTH,
   TICKET_DESCRIPTION_MIN_LENGTH,
+  TICKET_DETAILED_SUMMARY_MIN_WORDS,
 } from "../../ticket/ticket.rules";
 
 import type { AppointmentWithRelations } from "../../appointment/appointment.types";
 
-/** Respostas curtas que desistem do chamado enquanto o bot espera a descrição. */
+/** Respostas curtas que desistem do chamado em qualquer etapa da coleta. */
 const TICKET_ABORT_PATTERN =
-  /^(?:cancelar|cancela|cancele|desistir|desisto|deixa|deixa pra la|esquece|nao|n|voltar|depois|agora nao)$/;
+  /^(?:cancelar|cancela|cancele|desistir|desisto|deixa|deixa pra la|esquece|voltar|agora nao)$/;
+// Na etapa do problema, "não" também desiste. Na etapa dos detalhes, "não"
+// significa "nada a acrescentar" e segue para a confirmação.
+const TICKET_DESCRIPTION_ABORT_PATTERN = /^(?:nao|n|depois)$/;
+const TICKET_DETAILS_SKIP_PATTERN =
+  /^(?:nao|n|nada|nada mais|nao sei|nao tenho|so|so isso|somente|somente isso|e so isso|era so isso|pode abrir|abre|abrir|abra|sem detalhes)$/;
 // Na confirmação, a negativa é verificada antes: "não quero abrir" contém
 // palavras das duas listas e deve desistir do chamado.
 const TICKET_DENY_PATTERN =
@@ -40,7 +50,8 @@ const TICKET_CONFIRM_PATTERN =
 const CLEARED_TICKET_CONTEXT: Partial<BotSessionContext> = {
   intent: undefined,
   pendingPrompt: undefined,
-  ticketDescription: undefined,
+  ticketSummary: undefined,
+  ticketDetails: undefined,
 };
 
 const TICKET_CANCELLED_RESULT: HandlerResult = {
@@ -56,44 +67,102 @@ const ADMIN_CANNOT_OPEN_TICKET_RESULT: HandlerResult = {
   contextUpdate: CLEARED_TICKET_CONTEXT,
 };
 
+const CLOSING_REPLIES: Readonly<Record<ClosingMessageKind, string>> = {
+  THANKS:
+    "Não há de quê! 😊 Fico feliz em ajudar. Se precisar de mais alguma coisa, é só me chamar.",
+  FAREWELL: "Até logo! 👋 Quando precisar, é só me chamar.",
+  ACKNOWLEDGMENT: "Combinado! Se precisar de mais alguma coisa, é só me chamar.",
+};
+
+function closingResult(kind: ClosingMessageKind): HandlerResult {
+  return {
+    reply: CLOSING_REPLIES[kind],
+    nextState: "INICIO",
+    contextUpdate: { intent: undefined, pendingPrompt: undefined },
+  };
+}
+
 function askTicketDescription(): HandlerResult {
   return {
     reply:
-      "Certo, vou abrir um chamado para o suporte técnico. Descreva o problema " +
-      "com o máximo de detalhes: o que aconteceu, quando e, se houver, o código " +
-      "do agendamento envolvido.",
+      "Certo, vou abrir um chamado para o suporte técnico. " +
+      "Em poucas palavras, qual é o problema?",
     nextState: "INICIO",
     contextUpdate: {
+      ...CLEARED_TICKET_CONTEXT,
       intent: "SUPORTE",
       pendingAction: undefined,
       pendingPrompt: "TICKET_DESCRIPTION",
-      ticketDescription: undefined,
+      ticketId: undefined,
+      ticketCode: undefined,
     },
   };
 }
 
-function askTicketConfirmation(description: string): HandlerResult {
+function askTicketDetails(summary: string): HandlerResult {
   return {
     reply:
-      "Vou abrir um chamado para o suporte técnico com a descrição abaixo:\n\n" +
-      `"${description}"\n\n` +
+      `Entendi: "${summary}".\n\n` +
+      "Para o suporte resolver mais rápido, conte mais detalhes: quando aconteceu, " +
+      "o código do agendamento (se houver), valores envolvidos e o que você já tentou.\n\n" +
+      'Se não tiver mais nada a acrescentar, responda "só isso".',
+    nextState: "INICIO",
+    contextUpdate: {
+      ...CLEARED_TICKET_CONTEXT,
+      intent: "SUPORTE",
+      pendingAction: undefined,
+      pendingPrompt: "TICKET_DETAILS",
+      ticketSummary: summary,
+      ticketId: undefined,
+      ticketCode: undefined,
+    },
+  };
+}
+
+function askTicketConfirmation(summary: string, details?: string): HandlerResult {
+  const draft = buildChatbotTicket(summary, details);
+  return {
+    reply:
+      "Confira o chamado antes de eu abrir:\n\n" +
+      `Título: ${draft.title}\n` +
+      `Categoria: ${TICKET_CATEGORY_LABELS[draft.category]}\n` +
+      `Descrição: ${draft.description}\n\n` +
       'Posso abrir o chamado? Responda com "sim" ou "não".',
     nextState: "INICIO",
     contextUpdate: {
       intent: "SUPORTE",
       pendingAction: undefined,
       pendingPrompt: "TICKET_CONFIRMATION",
-      ticketDescription: description,
+      ticketSummary: summary,
+      ticketDetails: details,
+      ticketId: undefined,
+      ticketCode: undefined,
     },
   };
 }
 
+/** Um relato já completo vai direto para a confirmação; um curto pede detalhes. */
+function continueWithSummary(summary: string): HandlerResult {
+  const words = summary.split(/\s+/).filter(Boolean).length;
+  return words >= TICKET_DETAILED_SUMMARY_MIN_WORDS
+    ? askTicketConfirmation(summary)
+    : askTicketDetails(summary);
+}
+
 function handleTicketDescription(userMessage: string): HandlerResult {
-  const description = userMessage.trim();
-  if (TICKET_ABORT_PATTERN.test(normalizeText(description))) {
+  const text = userMessage.trim();
+  const answer = normalizeText(text);
+  if (
+    TICKET_ABORT_PATTERN.test(answer) ||
+    TICKET_DESCRIPTION_ABORT_PATTERN.test(answer)
+  ) {
     return TICKET_CANCELLED_RESULT;
   }
-  if (description.length < TICKET_DESCRIPTION_MIN_LENGTH) {
+  const summary = (extractProblemStatement(text) || text).slice(
+    0,
+    TICKET_DESCRIPTION_MAX_LENGTH,
+  );
+  if (summary.length < TICKET_DESCRIPTION_MIN_LENGTH) {
     return {
       reply:
         "Preciso de um pouco mais de detalhes para o suporte entender o problema. " +
@@ -102,8 +171,24 @@ function handleTicketDescription(userMessage: string): HandlerResult {
       contextUpdate: {},
     };
   }
+  return continueWithSummary(summary);
+}
+
+function handleTicketDetails(
+  userMessage: string,
+  ctx: BotSessionContext,
+): HandlerResult {
+  if (!ctx.ticketSummary) return askTicketDescription();
+
+  const text = userMessage.trim();
+  const answer = normalizeText(text);
+  if (TICKET_ABORT_PATTERN.test(answer)) return TICKET_CANCELLED_RESULT;
+  if (TICKET_DETAILS_SKIP_PATTERN.test(answer)) {
+    return askTicketConfirmation(ctx.ticketSummary);
+  }
   return askTicketConfirmation(
-    description.slice(0, TICKET_DESCRIPTION_MAX_LENGTH),
+    ctx.ticketSummary,
+    text.slice(0, TICKET_DESCRIPTION_MAX_LENGTH),
   );
 }
 
@@ -112,7 +197,7 @@ async function handleTicketConfirmation(
   ctx: BotSessionContext,
   userId: number,
 ): Promise<HandlerResult> {
-  if (!ctx.ticketDescription) return askTicketDescription();
+  if (!ctx.ticketSummary) return askTicketDescription();
 
   const answer = normalizeText(userMessage);
   if (TICKET_DENY_PATTERN.test(answer)) return TICKET_CANCELLED_RESULT;
@@ -125,21 +210,30 @@ async function handleTicketConfirmation(
   }
 
   try {
-    const ticket = await openTicketFromChat(userId, ctx.ticketDescription);
+    const ticket = await openTicketFromChat(
+      userId,
+      ctx.ticketSummary,
+      ctx.ticketDetails,
+    );
     return {
       reply:
-        `Chamado ${ticket.ticket_code} aberto com sucesso! ✅\n` +
-        "Nossa equipe de suporte vai analisar e responder pela área de suporte do app.\n\n" +
+        `Chamado ${ticket.ticket_code} aberto com sucesso! ✅\n\n` +
+        'Nossa equipe de suporte vai analisar e responder por lá. Toque em "Ver chamado" para acompanhar.\n\n' +
         "Posso ajudar com mais alguma coisa?",
       nextState: "INICIO",
-      contextUpdate: CLEARED_TICKET_CONTEXT,
+      // O app usa ticketId e ticketCode para exibir o atalho "Ver chamado".
+      contextUpdate: {
+        ...CLEARED_TICKET_CONTEXT,
+        ticketId: ticket.id,
+        ticketCode: ticket.ticket_code,
+      },
     };
   } catch (error) {
     if (error instanceof TicketOpeningNotAllowedError) {
       return ADMIN_CANNOT_OPEN_TICKET_RESULT;
     }
     logError("Bot: falha ao abrir chamado de suporte", error, { userId });
-    // Mantém a descrição: um novo "sim" tenta abrir o chamado outra vez.
+    // Mantém o rascunho: um novo "sim" tenta abrir o chamado outra vez.
     return {
       reply:
         "Não consegui abrir o chamado agora. Responda \"sim\" para tentar de novo " +
@@ -167,22 +261,19 @@ export class InicioState implements BotStateNode {
     if (ctx.pendingPrompt === "TICKET_DESCRIPTION") {
       return handleTicketDescription(userMessage);
     }
+    if (ctx.pendingPrompt === "TICKET_DETAILS") {
+      return handleTicketDetails(userMessage, ctx);
+    }
     if (ctx.pendingPrompt === "TICKET_CONFIRMATION") {
       return handleTicketConfirmation(userMessage, ctx, userId);
     }
 
-    // Um agradecimento também encerra a oferta pendente: "obrigado" diante de
-    // "Deseja agendar?" é uma recusa educada, não um pedido para repetir.
+    // Um agradecimento ou despedida também encerra a oferta pendente:
+    // "obrigado" diante de "Deseja agendar?" é uma recusa educada. Já uma
+    // concordância ("ok", "beleza") responde à oferta e só é tratada depois.
     const closing = classifyClosingMessage(userMessage);
-    if (closing) {
-      return {
-        reply:
-          closing === "THANKS"
-            ? "Não há de quê! 😊 Fico feliz em ajudar. Se precisar de mais alguma coisa, é só me chamar."
-            : "Até logo! 👋 Quando precisar, é só me chamar.",
-        nextState: "INICIO",
-        contextUpdate: { intent: undefined, pendingPrompt: undefined },
-      };
+    if (closing === "THANKS" || closing === "FAREWELL") {
+      return closingResult(closing);
     }
 
     if (ctx.pendingPrompt === "OFFER_CREATE_AFTER_EMPTY_QUERY") {
@@ -230,6 +321,8 @@ export class InicioState implements BotStateNode {
         };
       }
     }
+
+    if (closing === "ACKNOWLEDGMENT") return closingResult(closing);
 
     switch (nlu.intent) {
       case "SAUDACAO":
@@ -339,16 +432,19 @@ export class InicioState implements BotStateNode {
         // checagem na gravação.
         if (await isAdmin(userId)) return ADMIN_CANNOT_OPEN_TICKET_RESULT;
 
-        // Um relato de problema já é a descrição; um pedido genérico
-        // ("quero abrir um chamado") ainda precisa do relato do usuário.
-        const description = userMessage.trim();
+        // Um relato de problema já traz o resumo, sem cumprimentos nem o
+        // pedido de suporte ("Legal, porém fui cobrado duas vezes, quero
+        // suporte" vira "Fui cobrado duas vezes"). Um pedido genérico ("quero
+        // abrir um chamado") ainda precisa do relato do usuário.
+        const summary = extractProblemStatement(userMessage).slice(
+          0,
+          TICKET_DESCRIPTION_MAX_LENGTH,
+        );
         if (
-          isSupportProblemReport(description) &&
-          description.length >= TICKET_DESCRIPTION_MIN_LENGTH
+          isSupportProblemReport(userMessage) &&
+          summary.length >= TICKET_DESCRIPTION_MIN_LENGTH
         ) {
-          return askTicketConfirmation(
-            description.slice(0, TICKET_DESCRIPTION_MAX_LENGTH),
-          );
+          return continueWithSummary(summary);
         }
         return askTicketDescription();
       }
@@ -388,7 +484,7 @@ export class InicioState implements BotStateNode {
           const d = new Date(a.start_time);
           const dateStr = d.toLocaleDateString("pt-BR", { timeZone: DEFAULT_BOT_TIME_ZONE });
           const timeStr = d.toLocaleTimeString("pt-BR", { timeZone: DEFAULT_BOT_TIME_ZONE, hour: "2-digit", minute: "2-digit" });
-          return `${i + 1}. ID ${a.id} — ${a.Service?.title ?? "serviço"} — ${dateStr} às ${timeStr} (${a.status})`;
+          return `${i + 1}. ID ${a.short_id || a.id} — ${a.Service?.title ?? "serviço"} — ${dateStr} às ${timeStr} (${a.status})`;
         });
         return {
           reply: `Seus próximos agendamentos:\n\n${lines.join("\n")}\n\nPosso ajudá-lo com mais alguma coisa?`,

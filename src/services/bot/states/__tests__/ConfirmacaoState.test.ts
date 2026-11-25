@@ -4,6 +4,8 @@ jest.mock("../appointmentActions", () => ({
   rescheduleBotAppointment: jest.fn(),
 }));
 jest.mock("../../../../utils/logger", () => ({ logError: jest.fn() }));
+import type { BotChatSessionModel } from "../../../../models/BotChatSession";
+import type { NluResult } from "../../../nlu.service";
 import { ConfirmacaoState } from "../ConfirmacaoState";
 import {
   cancelBotAppointment,
@@ -62,4 +64,25 @@ it("permite nova escolha após falha sem cancelar a reserva", async () => {
   expect(result.nextState).toBe("COLETANDO_HORARIO");
   expect(result.reply).toContain("Horário ocupado");
   expect(cancelBotAppointment).not.toHaveBeenCalled();
+});
+
+it("mostra o short_id do agendamento criado, não o id numérico", async () => {
+  (createBotAppointment as jest.Mock).mockResolvedValue({
+    id: 89,
+    short_id: "6BDOKZ",
+    status: "pending",
+  });
+  const session = {
+    context: { ...context, pendingAction: "CREATE" },
+  } as unknown as BotChatSessionModel;
+  const nlu: NluResult = { intent: "FALLBACK", entities: {}, confidence: 1 };
+
+  const result = await new ConfirmacaoState().handle("sim", nlu, session, 1);
+
+  expect(result.reply).toContain("ID: 6BDOKZ");
+  expect(result.reply).not.toContain("ID: 89");
+  expect(result.contextUpdate).toMatchObject({
+    appointmentId: 89,
+    appointmentShortId: "6BDOKZ",
+  });
 });

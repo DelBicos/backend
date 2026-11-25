@@ -405,6 +405,25 @@ describe("BotMessageRouter no estado INICIO", () => {
     );
 
     expect(result.nextState).toBe(BotState.INICIO);
+    expect(result.contextUpdate.pendingPrompt).toBe("TICKET_DETAILS");
+    expect(ServiceModel.findAll).not.toHaveBeenCalled();
+  });
+
+  it("não busca no catálogo os detalhes de um chamado de suporte", async () => {
+    const result = await BotMessageRouter.route(
+      BotState.INICIO,
+      "foi a limpeza de sofá de ontem",
+      fallbackNlu(),
+      {
+        context: {
+          intent: "SUPORTE",
+          pendingPrompt: "TICKET_DETAILS",
+          ticketSummary: "O serviço ficou mal feito",
+        },
+      } as BotChatSessionModel,
+      1,
+    );
+
     expect(result.contextUpdate.pendingPrompt).toBe("TICKET_CONFIRMATION");
     expect(ServiceModel.findAll).not.toHaveBeenCalled();
   });

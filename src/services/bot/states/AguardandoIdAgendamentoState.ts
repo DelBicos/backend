@@ -124,6 +124,7 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
         nextState: "CONFIRMACAO",
         contextUpdate: {
           appointmentId: appointment.id,
+          appointmentShortId: appointment.short_id,
           serviceId: appointment.service_id,
           professionalId: appointment.professional_id,
           serviceOptions: ["Sim, confirmar", "Não, voltar"],
@@ -144,6 +145,7 @@ export class AguardandoIdAgendamentoState implements BotStateNode {
       nextState: "COLETANDO_DATA",
       contextUpdate: {
         appointmentId: appointment.id,
+        appointmentShortId: appointment.short_id,
         serviceId: appointment.service_id,
         professionalId: appointment.professional_id,
         serviceName: svcTitle,

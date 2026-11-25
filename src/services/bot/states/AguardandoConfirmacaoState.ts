@@ -40,10 +40,13 @@ export class AguardandoConfirmacaoState implements BotStateNode {
       };
     }
 
+    // O usuário conhece o agendamento pelo código público, não pelo id numérico.
+    const appointmentCode = appointment.short_id || appointment.id;
+
     if (appointment.status === "pending") {
       return {
         reply:
-          `O agendamento ID ${appointment.id} ainda est\u00e1 pendente. ` +
+          `O agendamento ID ${appointmentCode} ainda est\u00e1 pendente. ` +
           "O profissional tem at\u00e9 12 horas para responder. " +
           "Voc\u00ea n\u00e3o precisa manter esta tela aberta: atualizaremos a conversa automaticamente.",
         nextState: "AGUARDANDO_CONFIRMACAO",
@@ -56,14 +59,14 @@ export class AguardandoConfirmacaoState implements BotStateNode {
 
     const replies = {
       confirmed: appointment.payment_intent_id
-        ? `\u2705 O pagamento do agendamento ID ${appointment.id} foi confirmado. O agendamento est\u00e1 confirmado e pago.`
-        : `\u2705 O profissional confirmou o agendamento ID ${appointment.id}. O pagamento est\u00e1 pendente; use a op\u00e7\u00e3o Pagar para finalizar.`,
-      canceled: `\u274c O agendamento ID ${appointment.id} foi recusado ou cancelado. Posso ajud\u00e1-lo a escolher outra op\u00e7\u00e3o.`,
-      completed: `\u2705 O agendamento ID ${appointment.id} foi conclu\u00eddo. Posso ajud\u00e1-lo com mais alguma coisa?`,
-      no_show: `\u274c O agendamento ID ${appointment.id} foi encerrado por n\u00e3o comparecimento. Posso ajud\u00e1-lo a marcar outro?`,
-      in_transit: `O profissional est\u00e1 a caminho para o agendamento ID ${appointment.id}.`,
-      arrived: `O profissional chegou ao local do agendamento ID ${appointment.id}.`,
-      in_progress: `O atendimento do agendamento ID ${appointment.id} est\u00e1 em andamento.`,
+        ? `\u2705 O pagamento do agendamento ID ${appointmentCode} foi confirmado. O agendamento est\u00e1 confirmado e pago.`
+        : `\u2705 O profissional confirmou o agendamento ID ${appointmentCode}. O pagamento est\u00e1 pendente; use a op\u00e7\u00e3o Pagar para finalizar.`,
+      canceled: `\u274c O agendamento ID ${appointmentCode} foi recusado ou cancelado. Posso ajud\u00e1-lo a escolher outra op\u00e7\u00e3o.`,
+      completed: `\u2705 O agendamento ID ${appointmentCode} foi conclu\u00eddo. Posso ajud\u00e1-lo com mais alguma coisa?`,
+      no_show: `\u274c O agendamento ID ${appointmentCode} foi encerrado por n\u00e3o comparecimento. Posso ajud\u00e1-lo a marcar outro?`,
+      in_transit: `O profissional est\u00e1 a caminho para o agendamento ID ${appointmentCode}.`,
+      arrived: `O profissional chegou ao local do agendamento ID ${appointmentCode}.`,
+      in_progress: `O atendimento do agendamento ID ${appointmentCode} est\u00e1 em andamento.`,
     } as const;
 
     return {

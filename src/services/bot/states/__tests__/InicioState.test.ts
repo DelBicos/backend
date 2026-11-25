@@ -114,6 +114,11 @@ describe("InicioState - abertura de chamado de suporte", () => {
   const supportNlu: NluResult = { intent: "SUPORTE", entities: {}, confidence: 1 };
   const sessionWith = (context: BotSessionContext) =>
     ({ context }) as BotChatSessionModel;
+  const confirmationContext: BotSessionContext = {
+    pendingPrompt: "TICKET_CONFIRMATION",
+    ticketSummary: "Fui cobrado duas vezes no meu cartão",
+    ticketDetails: "Foi no agendamento 6BDOKZ, ontem, R$ 120",
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -135,33 +140,47 @@ describe("InicioState - abertura de chamado de suporte", () => {
     expect(openTicketFromChat).not.toHaveBeenCalled();
   });
 
-  it("pede a descrição quando o pedido de suporte é genérico", async () => {
+  it("pergunta qual é o problema quando o pedido de suporte é genérico", async () => {
     const result = await state.handle("quero abrir um chamado", supportNlu, sessionWith({}), 1);
 
     expect(result.nextState).toBe("INICIO");
-    expect(result.reply).toContain("Descreva o problema");
+    expect(result.reply).toContain("qual é o problema");
     expect(result.contextUpdate).toMatchObject({
       intent: "SUPORTE",
       pendingPrompt: "TICKET_DESCRIPTION",
     });
   });
 
-  it("usa o relato do problema como descrição e pede confirmação", async () => {
+  it("limpa cumprimentos e o pedido de suporte do relato e pede detalhes", async () => {
     const result = await state.handle(
-      "Fui cobrado duas vezes pelo serviço de ontem",
+      "Legal, porém foi cobrado duas vezes no meu cartão, eu gostaria de suporte técnico",
       supportNlu,
       sessionWith({}),
       1,
     );
 
+    expect(result.reply).toContain('Entendi: "Foi cobrado duas vezes no meu cartão"');
+    expect(result.reply).toContain("mais detalhes");
     expect(result.contextUpdate).toMatchObject({
-      pendingPrompt: "TICKET_CONFIRMATION",
-      ticketDescription: "Fui cobrado duas vezes pelo serviço de ontem",
+      pendingPrompt: "TICKET_DETAILS",
+      ticketSummary: "Foi cobrado duas vezes no meu cartão",
     });
-    expect(openTicketFromChat).not.toHaveBeenCalled();
   });
 
-  it("guarda a descrição informada e pede confirmação, mesmo com outra intenção", async () => {
+  it("vai direto para a confirmação quando o relato já é detalhado", async () => {
+    const result = await state.handle(
+      "O pagamento do agendamento de ontem foi cobrado duas vezes no cartão e o estorno não apareceu",
+      supportNlu,
+      sessionWith({}),
+      1,
+    );
+
+    expect(result.contextUpdate.pendingPrompt).toBe("TICKET_CONFIRMATION");
+    expect(result.reply).toContain("Título: O pagamento do agendamento de ontem");
+    expect(result.reply).toContain("Categoria: Pagamento");
+  });
+
+  it("usa a resposta da etapa do problema como resumo, mesmo com outra intenção", async () => {
     const result = await state.handle(
       "o profissional cancelou em cima da hora",
       { intent: "CANCELAR", entities: {}, confidence: 1 },
@@ -170,12 +189,12 @@ describe("InicioState - abertura de chamado de suporte", () => {
     );
 
     expect(result.contextUpdate).toMatchObject({
-      pendingPrompt: "TICKET_CONFIRMATION",
-      ticketDescription: "o profissional cancelou em cima da hora",
+      pendingPrompt: "TICKET_DETAILS",
+      ticketSummary: "O profissional cancelou em cima da hora",
     });
   });
 
-  it("pede mais detalhes quando a descrição é curta demais", async () => {
+  it("pede mais detalhes quando o problema é curto demais", async () => {
     const result = await state.handle(
       "erro",
       fallbackNlu,
@@ -188,7 +207,7 @@ describe("InicioState - abertura de chamado de suporte", () => {
   });
 
   it.each(["cancelar", "deixa pra lá", "Não"])(
-    "desiste do chamado na etapa de descrição: %s",
+    "desiste do chamado na etapa do problema: %s",
     async (answer) => {
       const result = await state.handle(
         answer,
@@ -202,39 +221,87 @@ describe("InicioState - abertura de chamado de suporte", () => {
     },
   );
 
-  it("abre o chamado quando o usuário confirma", async () => {
-    (openTicketFromChat as jest.Mock).mockResolvedValue({ ticket_code: "TKT-AB12" });
-
+  it("junta os detalhes à descrição e mostra a prévia do chamado", async () => {
     const result = await state.handle(
-      "sim",
+      "Foi no agendamento 6BDOKZ, ontem, R$ 120",
       fallbackNlu,
       sessionWith({
-        pendingPrompt: "TICKET_CONFIRMATION",
-        ticketDescription: "O app travou ao pagar",
+        pendingPrompt: "TICKET_DETAILS",
+        ticketSummary: "Fui cobrado duas vezes no meu cartão",
       }),
-      9,
+      1,
     );
 
-    expect(openTicketFromChat).toHaveBeenCalledWith(9, "O app travou ao pagar");
-    expect(result.reply).toContain("TKT-AB12");
+    expect(result.reply).toContain("Título: Fui cobrado duas vezes no meu cartão");
+    expect(result.reply).toContain("Detalhes: Foi no agendamento 6BDOKZ, ontem, R$ 120");
+    expect(result.contextUpdate).toMatchObject({
+      pendingPrompt: "TICKET_CONFIRMATION",
+      ticketSummary: "Fui cobrado duas vezes no meu cartão",
+      ticketDetails: "Foi no agendamento 6BDOKZ, ontem, R$ 120",
+    });
+  });
+
+  it.each(["só isso", "não", "nada"])(
+    "segue sem detalhes quando o usuário não tem o que acrescentar: %s",
+    async (answer) => {
+      const result = await state.handle(
+        answer,
+        fallbackNlu,
+        sessionWith({
+          pendingPrompt: "TICKET_DETAILS",
+          ticketSummary: "Fui cobrado duas vezes no meu cartão",
+        }),
+        1,
+      );
+
+      expect(result.reply).not.toContain("Detalhes:");
+      expect(result.contextUpdate).toMatchObject({
+        pendingPrompt: "TICKET_CONFIRMATION",
+        ticketDetails: undefined,
+      });
+    },
+  );
+
+  it("desiste do chamado na etapa dos detalhes", async () => {
+    const result = await state.handle(
+      "cancelar",
+      fallbackNlu,
+      sessionWith({
+        pendingPrompt: "TICKET_DETAILS",
+        ticketSummary: "Fui cobrado duas vezes no meu cartão",
+      }),
+      1,
+    );
+
+    expect(result.reply).toContain("não abri nenhum chamado");
+    expect(result.contextUpdate.pendingPrompt).toBeUndefined();
+  });
+
+  it("abre o chamado e devolve o id e o código para o atalho do app", async () => {
+    (openTicketFromChat as jest.Mock).mockResolvedValue({ id: 4, ticket_code: "TKT-8WZF" });
+
+    const result = await state.handle("sim", fallbackNlu, sessionWith(confirmationContext), 9);
+
+    expect(openTicketFromChat).toHaveBeenCalledWith(
+      9,
+      "Fui cobrado duas vezes no meu cartão",
+      "Foi no agendamento 6BDOKZ, ontem, R$ 120",
+    );
+    expect(result.reply).toContain("TKT-8WZF");
+    expect(result.reply).toContain("Ver chamado");
     expect(result.contextUpdate).toMatchObject({
       pendingPrompt: undefined,
-      ticketDescription: undefined,
+      ticketSummary: undefined,
+      ticketDetails: undefined,
+      ticketId: 4,
+      ticketCode: "TKT-8WZF",
     });
   });
 
   it.each(["não", "não quero abrir", "cancelar"])(
     "não abre o chamado quando o usuário recusa: %s",
     async (answer) => {
-      const result = await state.handle(
-        answer,
-        fallbackNlu,
-        sessionWith({
-          pendingPrompt: "TICKET_CONFIRMATION",
-          ticketDescription: "O app travou ao pagar",
-        }),
-        9,
-      );
+      const result = await state.handle(answer, fallbackNlu, sessionWith(confirmationContext), 9);
 
       expect(openTicketFromChat).not.toHaveBeenCalled();
       expect(result.contextUpdate.pendingPrompt).toBeUndefined();
@@ -244,34 +311,52 @@ describe("InicioState - abertura de chamado de suporte", () => {
   it("mantém a confirmação pendente quando a abertura falha", async () => {
     (openTicketFromChat as jest.Mock).mockRejectedValue(new Error("db down"));
 
-    const result = await state.handle(
-      "sim",
-      fallbackNlu,
-      sessionWith({
-        pendingPrompt: "TICKET_CONFIRMATION",
-        ticketDescription: "O app travou ao pagar",
-      }),
-      9,
-    );
+    const result = await state.handle("sim", fallbackNlu, sessionWith(confirmationContext), 9);
 
     expect(result.reply).toContain("tentar de novo");
     expect(result.contextUpdate).toEqual({});
   });
 
-  it("informa o administrador que ele não abre chamados", async () => {
+  it("informa o administrador que ele não abre chamados ao gravar", async () => {
     (openTicketFromChat as jest.Mock).mockRejectedValue(new TicketOpeningNotAllowedError());
 
-    const result = await state.handle(
-      "sim",
-      fallbackNlu,
-      sessionWith({
-        pendingPrompt: "TICKET_CONFIRMATION",
-        ticketDescription: "O app travou ao pagar",
-      }),
-      1,
-    );
+    const result = await state.handle("sim", fallbackNlu, sessionWith(confirmationContext), 1);
 
     expect(result.reply).toContain("Administradores");
     expect(result.contextUpdate.pendingPrompt).toBeUndefined();
+  });
+});
+
+describe("InicioState - encerramento da conversa", () => {
+  const state = new InicioState();
+
+  it.each([
+    ["Somente, muito obrigado", "Não há de quê"],
+    ["Somente", "Até logo"],
+    ["Legal", "Combinado"],
+    ["não", "Combinado"],
+  ])("responde ao encerramento %p", async (message, expectedReply) => {
+    const result = await state.handle(
+      message,
+      fallbackNlu,
+      { context: {} } as BotChatSessionModel,
+      1,
+    );
+
+    expect(result.reply).toContain(expectedReply);
+    expect(result.nextState).toBe("INICIO");
+  });
+
+  it('trata "ok" diante da oferta de agendamento como confirmação', async () => {
+    const result = await state.handle(
+      "ok",
+      fallbackNlu,
+      {
+        context: { pendingPrompt: "OFFER_CREATE_AFTER_EMPTY_QUERY" },
+      } as BotChatSessionModel,
+      1,
+    );
+
+    expect(result.nextState).toBe("COLETANDO_SERVICO");
   });
 });

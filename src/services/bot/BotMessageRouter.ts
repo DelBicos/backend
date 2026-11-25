@@ -138,6 +138,7 @@ export class BotMessageRouter {
     const pendingPrompt = session.context?.pendingPrompt;
     const isCollectingTicket =
       pendingPrompt === "TICKET_DESCRIPTION" ||
+      pendingPrompt === "TICKET_DETAILS" ||
       pendingPrompt === "TICKET_CONFIRMATION";
 
     // Agradecimento ou despedida já tem resposta própria no INICIO e não

@@ -22,7 +22,7 @@ export function buildConfirmationResponse(
       ? `${ctx.professionalCity}/${ctx.professionalState}`
       : "";
   const oldInfo = isAlterar && ctx.appointmentId
-    ? `\n\n📋 O agendamento (ID ${ctx.appointmentId}) terá seu horário atualizado após a confirmação. O pagamento vinculado será preservado.`
+    ? `\n\n📋 O agendamento (ID ${ctx.appointmentShortId ?? ctx.appointmentId}) terá seu horário atualizado após a confirmação. O pagamento vinculado será preservado.`
     : "";
 
   return {

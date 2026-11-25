@@ -49,7 +49,7 @@ export class ConfirmacaoState implements BotStateNode {
         if (!ctx.appointmentId) throw new Error("ID do agendamento não encontrado na sessão");
         await cancelBotAppointment(userId, ctx.appointmentId);
         return {
-          reply: `✅ Agendamento ID ${ctx.appointmentId} cancelado com sucesso.`,
+          reply: `✅ Agendamento ID ${ctx.appointmentShortId ?? ctx.appointmentId} cancelado com sucesso.`,
           nextState: "FINALIZADO",
           contextUpdate: {},
           finalize: true,
@@ -79,7 +79,7 @@ export class ConfirmacaoState implements BotStateNode {
         return {
           reply:
             `✅ Reagendamento concluído!\n\n` +
-            `Agendamento ID: ${rescheduledAppointment.id}\n` +
+            `Agendamento ID: ${rescheduledAppointment.short_id || rescheduledAppointment.id}\n` +
             `Serviço: ${ctx.serviceName}\n` +
             `Data: ${formatDatePtBR(reschedCtx.date!)}\n` +
             `Horário: ${reschedCtx.time}\n\n` +
@@ -87,6 +87,7 @@ export class ConfirmacaoState implements BotStateNode {
           nextState: "AGUARDANDO_CONFIRMACAO",
           contextUpdate: {
             appointmentId: rescheduledAppointment.id,
+            appointmentShortId: rescheduledAppointment.short_id,
             appointmentStatus: rescheduledAppointment.status,
             appointmentPaid: Boolean(rescheduledAppointment.payment_intent_id),
           },
@@ -99,7 +100,7 @@ export class ConfirmacaoState implements BotStateNode {
       return {
         reply:
           `✅ Agendamento pré-criado com sucesso!\n\n` +
-          `ID: ${appointment.id}\n` +
+          `ID: ${appointment.short_id || appointment.id}\n` +
           `Serviço: ${ctx.serviceName}\n` +
           `Data: ${formatDatePtBR(ctx.date!)}\n` +
           `Horário: ${ctx.time}\n\n` +
@@ -107,6 +108,7 @@ export class ConfirmacaoState implements BotStateNode {
         nextState: "AGUARDANDO_CONFIRMACAO",
         contextUpdate: {
           appointmentId: appointment.id,
+          appointmentShortId: appointment.short_id,
           appointmentStatus: "pending",
           appointmentPaid: false,
           serviceOptions: ["Pagar Agora"],
