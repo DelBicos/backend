@@ -14,6 +14,7 @@ export type BotPendingAction = "CREATE" | "CANCEL" | "RESCHEDULE";
 export type BotPendingPrompt =
   | "OFFER_CREATE_AFTER_EMPTY_QUERY"
   | "TICKET_DESCRIPTION"
+  | "TICKET_DETAILS"
   | "TICKET_CONFIRMATION";
 
 export interface BotServiceOption {
@@ -97,6 +98,8 @@ export interface BotSessionContext {
   newTime?: string; // HH:MM (para ALTERAR)
   newTimePeriod?: TimePeriod;
   appointmentId?: number;
+  /** Public code shown to the user instead of the numeric id. */
+  appointmentShortId?: string;
   appointmentStatus?: AppointmentStatusValue;
   appointmentPaid?: boolean;
   suggestedSlots?: string[];
@@ -119,8 +122,13 @@ export interface BotSessionContext {
   }>;
   suggestedDates?: string[];
   userAppointmentList?: Array<{ index: number; id: number; shortId?: string }>;
-  /** Problem description collected before the support ticket is opened. */
-  ticketDescription?: string;
+  /** Problem in one sentence; becomes the ticket title. */
+  ticketSummary?: string;
+  /** Extra details the user added; appended to the ticket description. */
+  ticketDetails?: string;
+  /** Ticket opened by the chatbot, so the app can link to its detail page. */
+  ticketId?: number;
+  ticketCode?: string;
 }
 
 export interface IBotChatSession {
