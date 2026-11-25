@@ -384,6 +384,7 @@ describe("processMessage - abertura de chamado de suporte", () => {
   it.each([
     ["CANCELAR", "o profissional cancelou em cima da hora", "TICKET_DESCRIPTION"],
     ["SAUDACAO", "oi, o app travou", "TICKET_DESCRIPTION"],
+    ["AGENDAR", "foi no agendamento de limpeza de ontem", "TICKET_DETAILS"],
     ["CANCELAR", "não, cancelar", "TICKET_CONFIRMATION"],
   ])(
     "não interrompe o chamado quando o classificador responde %s",
@@ -391,7 +392,7 @@ describe("processMessage - abertura de chamado de suporte", () => {
       const session = ticketSession({
         intent: "SUPORTE",
         pendingPrompt,
-        ticketDescription: "O app travou ao pagar",
+        ticketSummary: "O app travou ao pagar",
       });
       (BotSessionManager.getOrCreateSession as jest.Mock).mockResolvedValue(session);
       (analyzeMessage as jest.Mock).mockResolvedValue({ intent, entities: {}, confidence: 1 });
