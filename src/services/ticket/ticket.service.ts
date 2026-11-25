@@ -11,12 +11,7 @@ import TicketMessageModel from "../../models/TicketMessage";
 import { UserModel } from "../../models/User";
 import { sequelize } from "../../config/database";
 import { HttpError } from "../../errors/HttpError";
-import {
-  acceptsNewMessages,
-  buildTicketTitleFromDescription,
-  CHATBOT_TICKET_PRIORITY,
-  inferTicketCategory,
-} from "./ticket.rules";
+import { acceptsNewMessages, buildChatbotTicket } from "./ticket.rules";
 
 /** Author data shown in the ticket history (GET and POST /:id/messages). */
 const MESSAGE_AUTHOR_INCLUDE = {
@@ -198,25 +193,17 @@ export class TicketOpeningNotAllowedError extends Error {
 }
 
 /**
- * Opens a ticket from the chatbot conversation. Title and category are derived
- * from the description the user typed; the priority is the chatbot default.
+ * Opens a ticket from the chatbot conversation. The summary becomes the title
+ * and the details, when given, are appended to the description (see
+ * buildChatbotTicket).
  */
 export const openTicketFromChat = async (
   userId: number,
-  description: string
+  summary: string,
+  details?: string
 ): Promise<Ticket> => {
   if (await isAdmin(userId)) throw new TicketOpeningNotAllowedError();
 
-  const trimmed = description.trim();
   const userType = await resolveUserType(userId);
-  return createTicket(
-    {
-      title: buildTicketTitleFromDescription(trimmed),
-      description: trimmed,
-      category: inferTicketCategory(trimmed),
-      priority: CHATBOT_TICKET_PRIORITY,
-    },
-    userId,
-    userType
-  );
+  return createTicket(buildChatbotTicket(summary, details), userId, userType);
 };

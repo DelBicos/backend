@@ -8,6 +8,7 @@ import { extractDate, extractEntities, extractTime } from "./nlu/entities.rules"
 export type { NluIntent, NluEntities, NluResult } from "./nlu/nlu.types";
 export {
   classifyClosingMessage,
+  extractProblemStatement,
   isSchedulingActionWord,
   isRestartCommand,
   isSupportProblemReport,

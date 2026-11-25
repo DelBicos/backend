@@ -279,16 +279,21 @@ describe("ticket.service addMessageToTicket (TICKET-05)", () => {
 });
 
 describe("ticket.service openTicketFromChat (chatbot)", () => {
-  it("abre o chamado com título, categoria e prioridade derivados da descrição", async () => {
+  it("abre o chamado com o resumo como título e os detalhes na descrição", async () => {
     mockAdminFindOne.mockResolvedValue(null);
     mockProfessionalFindOne.mockResolvedValue(null);
 
-    await openTicketFromChat(7, "  Fui cobrado duas vezes pelo mesmo serviço  ");
+    await openTicketFromChat(
+      7,
+      "  Fui cobrado duas vezes pelo mesmo serviço  ",
+      "Foi ontem, no agendamento 6BDOKZ"
+    );
 
     expect(mockTicketCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         title: "Fui cobrado duas vezes pelo mesmo serviço",
-        description: "Fui cobrado duas vezes pelo mesmo serviço",
+        description:
+          "Fui cobrado duas vezes pelo mesmo serviço\n\nDetalhes: Foi ontem, no agendamento 6BDOKZ",
         category: "PAGAMENTO",
         priority: "MEDIA",
         status: "ABERTO",

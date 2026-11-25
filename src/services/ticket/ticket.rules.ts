@@ -53,3 +53,51 @@ export const buildTicketTitleFromDescription = (description: string): string => 
   const lastSpace = cut.lastIndexOf(" ");
   return `${(lastSpace > 0 ? cut.slice(0, lastSpace) : cut).trimEnd()}...`;
 };
+
+/** Labels shown to the user, matching the help center screens. */
+export const TICKET_CATEGORY_LABELS: Readonly<Record<TicketCategory, string>> = {
+  AGENDAMENTO: "Agendamento",
+  PAGAMENTO: "Pagamento",
+  SERVICO: "Serviço",
+  PRESTADOR: "Prestador",
+  CLIENTE: "Conta",
+  SUGESTAO: "Sugestão",
+  OUTROS: "Outros",
+};
+
+/**
+ * A summary with fewer words than this gets a follow-up question for details:
+ * "Fui cobrado duas vezes no meu cartão" alone does not tell support when, how
+ * much or for which appointment.
+ */
+export const TICKET_DETAILED_SUMMARY_MIN_WORDS = 12;
+
+export interface ChatbotTicketDraft {
+  title: string;
+  description: string;
+  category: TicketCategory;
+  priority: TicketPriority;
+}
+
+/**
+ * Builds the ticket opened by the chatbot. The summary (the problem in one
+ * sentence) becomes the title; the description keeps the summary and, when
+ * given, the details the user added.
+ */
+export const buildChatbotTicket = (
+  summary: string,
+  details?: string
+): ChatbotTicketDraft => {
+  const trimmedSummary = summary.replace(/\s+/g, " ").trim();
+  const trimmedDetails = details?.trim();
+  const description = (
+    trimmedDetails ? `${trimmedSummary}\n\nDetalhes: ${trimmedDetails}` : trimmedSummary
+  ).slice(0, TICKET_DESCRIPTION_MAX_LENGTH);
+
+  return {
+    title: buildTicketTitleFromDescription(trimmedSummary),
+    description,
+    category: inferTicketCategory(description),
+    priority: CHATBOT_TICKET_PRIORITY,
+  };
+};

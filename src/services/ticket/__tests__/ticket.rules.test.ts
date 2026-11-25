@@ -1,5 +1,6 @@
 import {
   acceptsNewMessages,
+  buildChatbotTicket,
   buildTicketTitleFromDescription,
   inferTicketCategory,
   OPEN_TICKET_STATUSES,
@@ -43,5 +44,35 @@ describe("ticket.rules buildTicketTitleFromDescription (chatbot)", () => {
     const title = buildTicketTitleFromDescription(`${"palavra ".repeat(30)}fim`);
     expect(title.length).toBeLessThanOrEqual(100);
     expect(title.endsWith("palavra...")).toBe(true);
+  });
+});
+
+describe("ticket.rules buildChatbotTicket (chatbot)", () => {
+  it("usa o resumo como título e junta os detalhes à descrição", () => {
+    expect(
+      buildChatbotTicket("Fui cobrado duas vezes no meu cartão", "Foi ontem, no agendamento 6BDOKZ")
+    ).toEqual({
+      title: "Fui cobrado duas vezes no meu cartão",
+      description: "Fui cobrado duas vezes no meu cartão\n\nDetalhes: Foi ontem, no agendamento 6BDOKZ",
+      category: "PAGAMENTO",
+      priority: "MEDIA",
+    });
+  });
+
+  it("usa só o resumo quando não há detalhes", () => {
+    const draft = buildChatbotTicket("O aplicativo fecha sozinho ao abrir");
+
+    expect(draft.description).toBe("O aplicativo fecha sozinho ao abrir");
+    expect(draft.category).toBe("OUTROS");
+  });
+
+  it("infere a categoria também pelos detalhes", () => {
+    expect(buildChatbotTicket("Tive um problema ontem", "O prestador não apareceu").category).toBe(
+      "PRESTADOR"
+    );
+  });
+
+  it("limita a descrição a 2000 caracteres", () => {
+    expect(buildChatbotTicket("Resumo do problema", "x".repeat(3000)).description).toHaveLength(2000);
   });
 });

@@ -203,6 +203,7 @@ export async function processMessage(
   const isCollectingTicket =
     session.state === BotState.INICIO &&
     (ctx.pendingPrompt === "TICKET_DESCRIPTION" ||
+      ctx.pendingPrompt === "TICKET_DETAILS" ||
       ctx.pendingPrompt === "TICKET_CONFIRMATION");
 
   // Saudações são globais: elas nunca devem ser interpretadas como nome de

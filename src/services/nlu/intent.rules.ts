@@ -364,7 +364,7 @@ export function classifyCorrectedAppointmentIntent(
   return null;
 }
 
-export type ClosingMessageKind = "THANKS" | "FAREWELL";
+export type ClosingMessageKind = "THANKS" | "FAREWELL" | "ACKNOWLEDGMENT";
 
 const THANKS_WORDS = new Set([
   "obrigado",
@@ -381,24 +381,36 @@ const THANKS_WORDS = new Set([
   "agradecido",
   "agradecida",
 ]);
-const FAREWELL_WORDS = new Set(["tchau", "tchauzinho", "flw", "falou", "xau"]);
+// "Somente" e "apenas" sozinhos respondem "posso ajudar com mais alguma coisa?"
+// no sentido de "só isso".
+const FAREWELL_WORDS = new Set([
+  "tchau", "tchauzinho", "flw", "falou", "xau", "somente", "apenas",
+]);
 const FAREWELL_PHRASE_PATTERN =
-  /\b(?:ate\s+(?:mais|logo|breve|a\s+proxima|depois)|(?:era\s+)?so\s+isso)\b/;
+  /\b(?:ate\s+(?:mais|logo|breve|a\s+proxima|depois)|(?:(?:e|era)\s+)?(?:so|somente|apenas)\s+isso|(?:e|era)\s+so$|nada\s+mais)\b/;
+// Concordâncias curtas ("legal", "ok", "não") não pedem nada novo. Só recebem
+// resposta própria quando não há pergunta pendente: diante de "Deseja agendar?",
+// "ok" continua sendo uma confirmação.
+const ACKNOWLEDGMENT_WORDS = new Set([
+  "legal", "ok", "okay", "beleza", "blz", "show", "perfeito", "otimo", "certo",
+  "entendi", "entendido", "combinado", "tranquilo", "joia", "massa", "top",
+  "nao", "nada",
+]);
 // Palavras que acompanham o agradecimento sem mudar o sentido. A mensagem
 // inteira precisa ser formada por elas: "obrigado, mas o app travou" segue
 // para a classificação normal.
 const CLOSING_FILLER_WORDS = new Set([
-  "a", "abraco", "abracos", "ajuda", "ate", "atencao", "atendimento", "beleza",
-  "blz", "boa", "bom", "breve", "certo", "de", "demais", "depois", "dia",
-  "e", "entao", "entendi", "era", "isso", "logo", "mais", "mesmo", "muito",
-  "muitissimo", "nao", "noite", "otimo", "ok", "pela", "pelo", "perfeito",
-  "proxima", "show", "so", "tarde", "tudo", "viu",
+  "a", "abraco", "abracos", "agora", "ajuda", "ate", "atencao", "atendimento",
+  "boa", "bom", "breve", "de", "demais", "depois", "dia", "e", "enquanto",
+  "entao", "era", "isso", "logo", "mais", "mesmo", "muito", "muitissimo",
+  "noite", "pela", "pelo", "por", "proxima", "so", "tarde", "tudo", "viu",
 ]);
 
 /**
- * Reconhece mensagens que só agradecem ou se despedem ("muito obrigado",
- * "valeu, tchau", "era só isso"). Agradecimento tem precedência sobre a
- * despedida porque pede a resposta "não há de quê".
+ * Reconhece mensagens que só agradecem, se despedem ou concordam ("muito
+ * obrigado", "valeu, tchau", "somente", "legal"). Agradecimento tem
+ * precedência porque pede a resposta "não há de quê"; a concordância vem por
+ * último.
  */
 export function classifyClosingMessage(
   message: string,
@@ -411,6 +423,7 @@ export function classifyClosingMessage(
     (word) =>
       THANKS_WORDS.has(word) ||
       FAREWELL_WORDS.has(word) ||
+      ACKNOWLEDGMENT_WORDS.has(word) ||
       CLOSING_FILLER_WORDS.has(word),
   );
   if (!isClosingVocabulary) return null;
@@ -422,7 +435,56 @@ export function classifyClosingMessage(
   ) {
     return "FAREWELL";
   }
+  if (words.some((word) => ACKNOWLEDGMENT_WORDS.has(word))) {
+    return "ACKNOWLEDGMENT";
+  }
   return null;
+}
+
+// Trechos aplicados ao texto original, que preserva acentos e maiúsculas.
+const PROBLEM_LEADING_CONNECTOR =
+  /^(?:por[eé]m|mas|ent[aã]o|s[oó]\s+que|e|al[eé]m\s+disso|ali[aá]s|contudo|todavia|no\s+entanto|inclusive)\s+/i;
+const PROBLEM_LEADING_GREETING =
+  /^(?:oi+|ol[aá]+|opa|e\s+a[ií]|bom\s+dia|boa\s+tarde|boa\s+noite)\s+/i;
+const PROBLEM_LEADING_REQUEST =
+  /^(?:(?:eu\s+)?(?:quero|queria|preciso|gostaria(?:\s+de)?)\s+)?(?:abrir|registrar|criar|fazer)\s+(?:(?:um|uma|o)\s+)?(?:chamado|ticket|reclama[cç][aã]o|ocorr[eê]ncia)\s+(?:porque|pois|por\s+que|sobre|pq|j[aá]\s+que)\s+/i;
+const PROBLEM_TRAILING_POLITENESS =
+  /\s+(?:por\s+favor|pfv|por\s+gentileza)$/i;
+const FILLER_ONLY_CLAUSE =
+  /^(?:oi+|ola+|opa|e ai|bom dia|boa tarde|boa noite|tudo bem|tudo certo|por favor|pfv|por gentileza)$/;
+// Vírgula ou ponto seguidos de dígito fazem parte de valores ("R$ 49,90").
+const CLAUSE_SEPARATOR = /(?:,|\.)(?!\d)|[;!?\n]+/;
+
+/**
+ * Extrai o problema relatado, sem cumprimentos, concordâncias e pedidos de
+ * suporte: "Legal, porém fui cobrado duas vezes, eu gostaria de suporte
+ * técnico" vira "Fui cobrado duas vezes". Devolve texto vazio quando a
+ * mensagem só pede atendimento.
+ */
+export function extractProblemStatement(message: string): string {
+  const clauses = message
+    .split(CLAUSE_SEPARATOR)
+    .map((clause) =>
+      clause
+        .trim()
+        .replace(PROBLEM_LEADING_GREETING, "")
+        .replace(PROBLEM_LEADING_CONNECTOR, "")
+        .replace(PROBLEM_LEADING_REQUEST, "")
+        .replace(PROBLEM_TRAILING_POLITENESS, "")
+        .trim(),
+    )
+    .filter((clause) => {
+      const normalized = normalizeForRules(clause);
+      if (!normalized || FILLER_ONLY_CLAUSE.test(normalized)) return false;
+      if (classifyClosingMessage(normalized)) return false;
+      const onlyAsksForSupport =
+        SUPPORT_REQUEST_PATTERN.test(normalized) &&
+        !SUPPORT_PROBLEM_PATTERN.test(normalized);
+      return !onlyAsksForSupport;
+    });
+
+  const statement = clauses.join(", ");
+  return statement.charAt(0).toUpperCase() + statement.slice(1);
 }
 
 /** Identifica frases que encerram o contexto atual e iniciam um novo fluxo. */
