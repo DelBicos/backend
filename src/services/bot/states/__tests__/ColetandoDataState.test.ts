@@ -263,3 +263,52 @@ describe("ColetandoDataState", () => {
     expect(result.reply).toContain("e mais 2 profissionais");
   });
 });
+
+// Caso de teste T4 (DEL-189), atualizado para a regra atual de 12 horas
+// (MIN_ADVANCE_HOURS): o dia só é aceito se ainda cabe um horário a partir
+// de agora + 12 horas. Ao meio-dia em São Paulo, o limite vira para amanhã.
+describe("ColetandoDataState - limite de antecedência", () => {
+  const today = "2026-11-26";
+  const tomorrow = "2026-11-27";
+  const nluFor = (date: string): NluResult => ({
+    intent: "FALLBACK",
+    entities: { date },
+    confidence: 1,
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    (ServiceModel.findAll as jest.Mock).mockResolvedValue([serviceFixture(10, 100, "Ana", 60)]);
+    (getAvailableSlots as jest.Mock).mockResolvedValue(["23:00"]);
+  });
+
+  afterEach(() => jest.useRealTimers());
+
+  it("aceita o dia de hoje até 11:59, quando ainda cabe um horário com 12 horas", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-26T11:59:00-03:00"));
+
+    const result = await new ColetandoDataState().handle(today, nluFor(today), session([10]), 1);
+
+    expect(result.nextState).toBe("COLETANDO_HORARIO");
+    expect(result.contextUpdate).toMatchObject({ date: today });
+  });
+
+  it("recusa o dia de hoje a partir de 12:00 e continua pedindo a data", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-26T12:00:00-03:00"));
+
+    const result = await new ColetandoDataState().handle(today, nluFor(today), session([10]), 1);
+
+    expect(result.nextState).toBe("COLETANDO_DATA");
+    expect(result.reply).toContain("no mínimo 12 horas de antecedência");
+    expect(ServiceModel.findAll).not.toHaveBeenCalled();
+  });
+
+  it("aceita exatamente o primeiro dia liberado pelo limite", async () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-11-26T12:00:00-03:00"));
+
+    const result = await new ColetandoDataState().handle(tomorrow, nluFor(tomorrow), session([10]), 1);
+
+    expect(result.nextState).toBe("COLETANDO_HORARIO");
+    expect(result.reply).not.toContain("antecedência");
+  });
+});
