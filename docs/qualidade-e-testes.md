@@ -1,7 +1,7 @@
 # Plano de testes — Backend
 
 > API do DelBicos: Express + TypeScript, Sequelize/PostgreSQL, Mongoose (chat e logs de login), Socket.IO e Stripe.
-> Versão de 26/11/2026, escrita sobre a `stag` daquele dia. O plano do app fica em `DelBicos/frontend`, no mesmo caminho.
+> Versão de 26/11/2026, escrita sobre a `stag` daquele dia. O plano do app fica em `DelBicos/frontend`, em `docs/qualidade-e-testes.md`.
 
 ## 1. Origem e o que mudou
 
@@ -74,23 +74,46 @@ Convenções (de `.agents/rules/03-tests.md`):
 
 O diagrama da Entrega 1 foi atualizado para o modelo atual (`APPOINTMENT_STATUSES`).
 
-| # | Origem | Destino | Gatilho | Rota / código | Testado |
+```mermaid
+stateDiagram-v2
+    [*] --> pending: T1 cliente agenda ou paga
+    pending --> confirmed: T2 profissional aceita
+    pending --> canceled: T3 cliente cancela ou profissional recusa
+    pending --> canceled: T4 12 h sem resposta
+    confirmed --> in_transit: T5 profissional sai
+    in_transit --> arrived: T6 chega a até 300 m
+    arrived --> in_progress: T7 código do cliente
+    in_progress --> completed: T8 código de novo
+    confirmed --> no_show: T9 não comparecimento
+    confirmed --> canceled: T10 cancelamento com retenção
+    pending --> pending: T11 reagendamento
+    confirmed --> confirmed: T11 reagendamento
+    completed --> [*]
+    canceled --> [*]
+    no_show --> [*]
+```
+
+Cada transição tem ao menos um teste; a coluna "Evidência" traz o arquivo e o título do teste (arquivos em `src/services/appointment/__tests__/`, salvo indicação).
+
+| # | Origem | Destino | Gatilho | Rota / código | Evidência |
 | --- | --- | --- | --- | --- | --- |
-| T1 | — | `pending` | Cliente agenda ou paga | `POST /api/appointments`, `POST /payments/confirm` | Sim |
-| T2 | `pending` | `confirmed` | Profissional aceita | `POST /:id/confirm` | Sim |
-| T3 | `pending` | `canceled` | Cliente cancela ou profissional recusa | `POST /:id/cancel` | Sim |
-| T4 | `pending` | `canceled` | 12 h sem resposta (`canceled_by = system`) | `jobs/appointmentCron` | Sim |
-| T5 | `confirmed` | `in_transit` | Profissional sai | `POST /:id/in-transit` | Sim |
-| T6 | `in_transit` | `arrived` | Profissional chega (até 300 m) | `POST /:id/arrived` | Sim |
-| T7 | `arrived` | `in_progress` | Profissional informa o código do cliente | `POST /:id/start-service` | Sim |
-| T8 | `in_progress` | `completed` | Profissional informa o código de novo | `POST /:id/complete-service` | Sim |
-| T9 | `confirmed` | `no_show` | Não comparecimento | `POST /:id/no-show` | Sim |
-| T10 | `confirmed` | `canceled` | Cancelamento com retenção conforme a antecedência | `POST /:id/cancel` | Sim |
-| T11 | `pending`, `confirmed` | mesmo status | Reagendamento pedido e aceito | `POST /:id/reschedule[/respond]` | Sim |
+| T1 | — | `pending` | Cliente agenda ou paga | `POST /api/appointments`, `POST /payments/confirm` | `appointment.service` › `createAppointment`; `services/__tests__/payment.capture` › `confirmAndCreateAppointment` |
+| T2 | `pending` | `confirmed` | Profissional aceita | `POST /:id/confirm` | `appointment.service` › "confirma e notifica o cliente" |
+| T3 | `pending` | `canceled` | Cliente cancela ou profissional recusa | `POST /:id/cancel` | `lifecycle.rules` › "pedido pendente: libera a reserva sem reter nada…" e "profissional cancelando pedido ainda pendente…" |
+| T4 | `pending` | `canceled` | 12 h sem resposta (`canceled_by = system`) | `jobs/appointmentCron` | `jobs/__tests__/appointmentCron` › "cancela como 'system', libera a reserva e avisa…" |
+| T5 | `confirmed` | `in_transit` | Profissional sai | `POST /:id/in-transit` | `checkin.service` › "deve atualizar status para in_transit e registrar auditoria" |
+| T6 | `in_transit` | `arrived` | Profissional chega (até 300 m) | `POST /:id/arrived` | `checkin.service` › "deve confirmar chegada se a distância estiver dentro dos 300m" (e a rejeição acima de 300 m) |
+| T7 | `arrived` | `in_progress` | Profissional informa o código do cliente | `POST /:id/start-service` | `checkin.service` › "deve realizar o check-in com sucesso quando código conferir" |
+| T8 | `in_progress` | `completed` | Profissional informa o código de novo | `POST /:id/complete-service` | `checkin.service` › "deve realizar check-out com sucesso quando código conferir" |
+| T9 | `confirmed` | `no_show` | Não comparecimento | `POST /:id/no-show` | `lifecycle.rules` › `markNoShow` › "retem 100% depois da tolerancia" |
+| T10 | `confirmed` | `canceled` | Cancelamento com retenção conforme a antecedência | `POST /:id/cancel` | `lifecycle.rules` › "cliente com mais de 24h…", "entre 24h e 2h…", "menos de 2h…" |
+| T11 | `pending`, `confirmed` | mesmo status | Reagendamento pedido e aceito | `POST /:id/reschedule[/respond]` | `lifecycle.rules` › "a outra parte aceita: horario muda e o pedido some" |
+
+Transições proibidas também testadas: cancelar em `in_transit`, `arrived` ou `in_progress` e em status finais (`lifecycle.rules` › "nao cancela em deslocamento nem durante o atendimento" e "nao cancela depois do inicio nem status finais"); `no_show` fora de `confirmed` (`markNoShow` › "exige agendamento confirmado"); código errado no início (`checkin.service` › "deve retornar 400 se o código estiver incorreto").
 
 Diferenças para a Entrega 1: não há estado "Check-out" nem aprovação do cliente; o serviço vai de `in_progress` direto a `completed`. Também não há cancelamento depois que o profissional sai (`in_transit` em diante): a Entrega 1 previa cancelamento de emergência no trajeto e durante a execução; hoje esses casos não têm saída no sistema. A disputa (`POST /:id/dispute`) só pode ser aberta pelo cliente em `confirmed`, `no_show` ou `completed`. Os campos de data são `arrived_at`, `completed_at` e os do audit trail (`/:id/audit-trail`).
 
-**Caminhos a manter cobertos:** feliz completo (T1→T2→T5→T6→T7→T8), cancelamento antes do aceite (T1→T3), expiração (T1→T4), cancelamento após aceite (T1→T2→T10), não comparecimento (T1→T2→T9) código errado em T7 e T8 (status não muda) e tentativa de cancelar em `in_transit` (recusada).
+**Caminhos a manter cobertos:** feliz completo (T1→T2→T5→T6→T7→T8), cancelamento antes do aceite (T1→T3), expiração (T1→T4), cancelamento após aceite (T1→T2→T10), não comparecimento (T1→T2→T9); código errado em T7 e T8 (status não muda) e tentativa de cancelar em `in_transit` (recusada). Código errado em T8 ainda não tem teste próprio (seção 9).
 
 ## 7. Upload de imagens (valores limite)
 
@@ -108,7 +131,7 @@ Atualizado a partir da análise de valores limites do avatar. O app envia direto
 
 ## 8. Roteiro manual (sistema)
 
-Em `https://azure.delbicos.com.br`, com `fernando@delbicos.com.br` (cliente) e `isabel@delbicos.com.br` (profissional):
+Em `https://azure.delbicos.com.br`, com a conta de teste de cliente e a de profissional (credenciais com o analista de testes, fora do repositório):
 
 1. Cliente busca um serviço, agenda e paga com cartão de teste do Stripe.
 2. Profissional confirma; os dois abrem o chat e trocam mensagens; o histórico aparece ao reabrir.
@@ -125,6 +148,7 @@ Em `https://azure.delbicos.com.br`, com `fernando@delbicos.com.br` (cliente) e `
 | `appointmentSchedule.service`, notificações de agendamento, `checkUpcomingServicesJob` | Abaixo de 40% | Testes unitários |
 | Upload (UP-06, UP-07) | Sem limite de tamanho nem checagem de conteúdo | Decidir a regra antes de testar |
 | Rate limit | Só a configuração é testada | Teste com Supertest |
+| Código errado no fim do serviço (T8) | Sem teste próprio | Teste em `checkin.service`, como o do início |
 
 ## 10. Critérios de entrada e saída
 
