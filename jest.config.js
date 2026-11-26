@@ -18,6 +18,9 @@ module.exports = {
     "!src/**/__tests__/**",
     "!src/**/__mocks__/**",
     "!src/**/*.d.ts",
+    // Sem codigo executavel: so comentarios OpenAPI (swagger-jsdoc) e tipos.
+    "!src/docs/**",
+    "!src/interfaces/**",
   ],
   coverageDirectory: "coverage",
   coverageProvider: "v8",
