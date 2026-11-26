@@ -49,21 +49,6 @@ it("remarca mantendo ID e pagamento, sem cancelar ou criar substituto", async ()
   expect(result.reply).not.toContain("Novo agendamento");
 });
 
-it("permite nova escolha após falha sem cancelar a reserva", async () => {
-  (rescheduleBotAppointment as jest.Mock).mockRejectedValue(
-    new Error("Horário ocupado"),
-  );
-  const result = await new ConfirmacaoState().handle(
-    "sim",
-    {} as any,
-    { context } as any,
-    1,
-  );
-  expect(result.nextState).toBe("COLETANDO_HORARIO");
-  expect(result.reply).toContain("Horário ocupado");
-  expect(cancelBotAppointment).not.toHaveBeenCalled();
-});
-
 describe("ConfirmacaoState - respostas e ações", () => {
   type HandleArgs = Parameters<ConfirmacaoState["handle"]>;
   const nlu = {} as unknown as HandleArgs[1];
@@ -152,4 +137,19 @@ describe("ConfirmacaoState - respostas e ações", () => {
     expect(result.reply).toBe("❌ Ocorreu um erro. Por favor, tente novamente.");
     expect(result.nextState).toBe("COLETANDO_HORARIO");
   });
+});
+
+it("permite nova escolha após falha sem cancelar a reserva", async () => {
+  (rescheduleBotAppointment as jest.Mock).mockRejectedValue(
+    new Error("Horário ocupado"),
+  );
+  const result = await new ConfirmacaoState().handle(
+    "sim",
+    {} as any,
+    { context } as any,
+    1,
+  );
+  expect(result.nextState).toBe("COLETANDO_HORARIO");
+  expect(result.reply).toContain("Horário ocupado");
+  expect(cancelBotAppointment).not.toHaveBeenCalled();
 });
