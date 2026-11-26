@@ -8,5 +8,6 @@
 | [RF03_CRUD_Servicos.md](RF03_CRUD_Servicos.md) · [RF03_RF04_PLAN.md](RF03_RF04_PLAN.md) | Requisito: cadastro de serviços |
 | [RF04_Raio_Atuacao.md](RF04_Raio_Atuacao.md) | Requisito: raio de atuação |
 | [RELATORIO_BACKEND.md](RELATORIO_BACKEND.md) | Relatório geral do backend |
+| [qualidade-e-testes.md](qualidade-e-testes.md) · [caixa-preta-agendamento.md](caixa-preta-agendamento.md) · [caixa-preta-busca.md](caixa-preta-busca.md) | Plano de testes e casos de caixa-preta |
 
 A referência das rotas fica no Swagger (`/docs` com o servidor rodando); os comentários que a geram estão em `src/docs`.

@@ -182,6 +182,17 @@ describe("cancelAppointment", () => {
     await expectHttpError(lifecycle.cancelAppointment(CLIENT_USER, "ABC123", undefined, NOW), 400);
   });
 
+  it.each(["in_transit", "arrived", "in_progress"])(
+    "nao cancela em deslocamento nem durante o atendimento (%s)",
+    async (status) => {
+      const appt = make({ status });
+      await expectHttpError(lifecycle.cancelAppointment(CLIENT_USER, "ABC123", undefined, NOW), 400);
+      await expectHttpError(lifecycle.cancelAppointment(PRO_USER, "ABC123", undefined, NOW), 400);
+      expect(appt.save).not.toHaveBeenCalled();
+      expect(PaymentService.settleWithRetention).not.toHaveBeenCalled();
+    },
+  );
+
   it("limita o tamanho do motivo", async () => {
     make();
     await expectHttpError(
