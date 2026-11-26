@@ -54,6 +54,12 @@ import { PaymentService, servicePriceInCents } from "../payment.service";
 import * as scheduleLock from "../appointmentSchedule.service";
 import * as refundQueue from "../appointmentRefund.service";
 import { AppointmentRefundModel } from "../../models/AppointmentRefund";
+import { ProfessionalModel } from "../../models/Professional";
+import { UserModel } from "../../models/User";
+import { ensureChatRoomForAppointment } from "../../utils/chatRoom";
+import logger from "../../utils/logger";
+import { syncBotSessionsForAppointmentStatus } from "../botAppointmentStatus.service";
+import * as notifications from "../appointment/appointmentNotifications.service";
 
 const mocked = (fn: unknown) => fn as jest.Mock;
 
@@ -481,5 +487,244 @@ describe("refundAmount", () => {
   it("retorna false quando o Stripe falha", async () => {
     mockRefundsCreate.mockRejectedValue(new Error("x"));
     await expect(PaymentService.refundAmount("pi_1", 1)).resolves.toBe(false);
+  });
+});
+
+describe("confirmAndCreateAppointment - reserva existente e efeitos", () => {
+  const metadata = {
+    userId: "1",
+    professionalId: "20",
+    serviceId: "40",
+    addressId: "50",
+    selectedTime: "2030-01-10T13:00:00.000Z",
+  };
+  const intent = (overrides: Record<string, unknown> = {}) => ({
+    status: "requires_capture",
+    amount: 15000,
+    metadata,
+    ...overrides,
+  });
+  const reservation = (overrides: Record<string, unknown> = {}) => ({
+    id: 9,
+    client_id: 30,
+    professional_id: 20,
+    service_id: 40,
+    status: "pending",
+    payment_intent_id: null,
+    final_price: null,
+    start_time: new Date(metadata.selectedTime),
+    save: jest.fn(),
+    ...overrides,
+  });
+
+  beforeEach(() => {
+    mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
+    mocked(AppointmentModel.findOne).mockReset().mockResolvedValue(null);
+    mocked(AppointmentRefundModel.findOne).mockResolvedValue(null);
+    mocked(ServiceModel.findByPk).mockResolvedValue({
+      id: 40,
+      professional_id: 20,
+      active: true,
+      title: "Pintura",
+      price_cents: 15000,
+    });
+    mocked(scheduleLock.assertNoAppointmentOverlap).mockReset().mockResolvedValue(undefined);
+    mocked(AppointmentModel.create).mockImplementation(async (data: object) => ({ id: 5, ...data }));
+    mocked(ensureChatRoomForAppointment).mockResolvedValue(undefined);
+    mocked(syncBotSessionsForAppointmentStatus).mockResolvedValue(null);
+    mocked(notifications.notifyAppointmentCreated).mockResolvedValue(undefined);
+    mocked(notifications.notifyPaymentConfirmed).mockResolvedValue(undefined);
+  });
+
+  it("traduz falha do Stripe ao buscar o pagamento em 400", async () => {
+    mockPaymentIntentsRetrieve.mockRejectedValue(new Error("No such payment_intent"));
+    await expectHttpError(PaymentService.confirmAndCreateAppointment("pi_1", 1), 400);
+  });
+
+  it.each([
+    ["sem metadados", undefined],
+    ["com profissional invalido", { ...metadata, professionalId: "abc" }],
+    ["com data invalida", { ...metadata, selectedTime: "ontem" }],
+  ])("recusa pagamento %s com 422", async (_label, meta) => {
+    mockPaymentIntentsRetrieve.mockResolvedValue(intent({ metadata: meta ?? { userId: "1" } }));
+    await expectHttpError(PaymentService.confirmAndCreateAppointment("pi_1", 1), 422);
+  });
+
+  it("recusa pagamento ja vinculado a reserva de outro cliente", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue(intent());
+    mocked(AppointmentModel.findOne).mockResolvedValueOnce({ id: 77, client_id: 99 });
+    await expectHttpError(PaymentService.confirmAndCreateAppointment("pi_1", 1), 403);
+    expect(refundQueue.settleQueuedPayment).not.toHaveBeenCalled();
+  });
+
+  it("vincula o pagamento a reserva do chatbot e avisa o cliente", async () => {
+    const existing = reservation();
+    mockPaymentIntentsRetrieve.mockResolvedValue(intent({ metadata: { ...metadata, appointmentId: "9" } }));
+    mocked(AppointmentModel.findOne).mockResolvedValueOnce(null).mockResolvedValueOnce(existing);
+
+    await expect(PaymentService.confirmAndCreateAppointment("pi_1", 1)).resolves.toBe(existing);
+
+    expect(existing).toMatchObject({ payment_intent_id: "pi_1", address_id: 50, final_price: 150 });
+    expect(existing.save).toHaveBeenCalled();
+    expect(AppointmentModel.create).not.toHaveBeenCalled();
+    expect(ensureChatRoomForAppointment).not.toHaveBeenCalled();
+    expect(notifications.notifyPaymentConfirmed).toHaveBeenCalledWith(1, 9, "Pintura", existing.start_time);
+    expect(syncBotSessionsForAppointmentStatus).toHaveBeenCalledWith(existing);
+  });
+
+  it("confere o valor pelo preco combinado na reserva", async () => {
+    const existing = reservation({ final_price: 120 });
+    mockPaymentIntentsRetrieve.mockResolvedValue(
+      intent({ amount: 12000, metadata: { ...metadata, appointmentId: "9" } }),
+    );
+    mocked(AppointmentModel.findOne).mockResolvedValueOnce(null).mockResolvedValueOnce(existing);
+
+    await PaymentService.confirmAndCreateAppointment("pi_1", 1);
+    expect(existing.final_price).toBe(120);
+  });
+
+  it.each([
+    ["nao encontrada", null, 404, "APPOINTMENT_NOT_OWNED"],
+    ["de outro servico", reservation({ service_id: 41 }), 409, "APPOINTMENT_MISMATCH"],
+    ["ja paga", reservation({ payment_intent_id: "pi_old" }), 409, "APPOINTMENT_ALREADY_PAID"],
+    ["cancelada", reservation({ status: "canceled" }), 409, "APPOINTMENT_NOT_PAYABLE"],
+  ])("devolve o pagamento quando a reserva esta %s", async (_label, existing, status, code) => {
+    mockPaymentIntentsRetrieve.mockResolvedValue(intent({ metadata: { ...metadata, appointmentId: "9" } }));
+    mocked(AppointmentModel.findOne).mockResolvedValueOnce(null).mockResolvedValueOnce(existing);
+
+    const error = await PaymentService.confirmAndCreateAppointment("pi_1", 1).catch((e: HttpError) => e);
+
+    expect(error).toMatchObject({ status, code });
+    expect(refundQueue.enqueuePaymentRefund).toHaveBeenCalledWith(
+      "pi_1",
+      existing ? 9 : null,
+      expect.anything(),
+    );
+    expect(refundQueue.settleQueuedPayment).toHaveBeenCalledWith("pi_1");
+  });
+
+  it.each([
+    ["inativo", { id: 40, professional_id: 20, active: false }],
+    ["de outro profissional", { id: 40, professional_id: 21, active: true }],
+  ])("devolve o pagamento quando o servico esta %s", async (_label, service) => {
+    mockPaymentIntentsRetrieve.mockResolvedValue(intent());
+    mocked(ServiceModel.findByPk).mockResolvedValue(service);
+
+    const error = await PaymentService.confirmAndCreateAppointment("pi_1", 1).catch((e: HttpError) => e);
+    expect(error).toMatchObject({ status: 409, code: "SERVICE_UNAVAILABLE" });
+    expect(refundQueue.settleQueuedPayment).toHaveBeenCalledWith("pi_1");
+  });
+
+  it("propaga erro inesperado da checagem de agenda sem enfileirar devolucao", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue(intent());
+    mocked(scheduleLock.assertNoAppointmentOverlap).mockRejectedValue(new Error("db fora"));
+
+    await expect(PaymentService.confirmAndCreateAppointment("pi_1", 1)).rejects.toThrow("db fora");
+    expect(refundQueue.enqueuePaymentRefund).not.toHaveBeenCalled();
+  });
+
+  it("cria o chat e avisa as partes do novo agendamento", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue(intent());
+    mocked(ProfessionalModel.findByPk).mockResolvedValue({ user_id: 200 });
+    mocked(UserModel.findByPk).mockResolvedValue({ id: 1, name: "Ana" });
+
+    const appt = await PaymentService.confirmAndCreateAppointment("pi_1", 1);
+
+    expect(ensureChatRoomForAppointment).toHaveBeenCalledWith(appt);
+    expect(notifications.notifyAppointmentCreated).toHaveBeenCalledWith({
+      appointmentId: 5,
+      startTime: new Date(metadata.selectedTime),
+      serviceTitle: "Pintura",
+      clientUserId: 1,
+      clientName: "Ana",
+      professionalUserId: 200,
+    });
+  });
+
+  it("nao desfaz o pagamento quando chat, aviso e chatbot falham", async () => {
+    mockPaymentIntentsRetrieve.mockResolvedValue(intent());
+    mocked(ensureChatRoomForAppointment).mockRejectedValue(new Error("chat"));
+    mocked(ProfessionalModel.findByPk).mockRejectedValue(new Error("aviso"));
+    mocked(syncBotSessionsForAppointmentStatus).mockRejectedValue(new Error("bot"));
+
+    await expect(PaymentService.confirmAndCreateAppointment("pi_1", 1)).resolves.toMatchObject({ id: 5 });
+
+    const warnings = mocked(logger.warn).mock.calls.map(([msg]) => msg);
+    expect(warnings).toEqual([
+      "[PaymentService] Falha ao criar chat após confirmação",
+      "[PaymentService] Falha ao notificar pagamento confirmado",
+      "[PaymentService] Falha ao sincronizar status no chatbot",
+    ]);
+  });
+});
+
+describe("getAppointmentReceipt", () => {
+  beforeEach(() => {
+    mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
+    mocked(AppointmentModel.findOne).mockReset();
+  });
+
+  it("devolve o link do recibo do pagamento", async () => {
+    mocked(AppointmentModel.findOne).mockResolvedValue({ id: 9, payment_intent_id: "pi_1" });
+    mockPaymentIntentsRetrieve.mockResolvedValue({ latest_charge: { receipt_url: "https://recibo" } });
+
+    await expect(PaymentService.getAppointmentReceipt(9, 1)).resolves.toBe("https://recibo");
+    expect(AppointmentModel.findOne).toHaveBeenCalledWith({ where: { id: 9, client_id: 30 } });
+    expect(mockPaymentIntentsRetrieve).toHaveBeenCalledWith("pi_1", { expand: ["latest_charge"] });
+  });
+
+  it("exige perfil de cliente", async () => {
+    mocked(ClientModel.findOne).mockResolvedValue(null);
+    await expectHttpError(PaymentService.getAppointmentReceipt(9, 1), 403);
+  });
+
+  it.each([
+    ["o agendamento nao e do cliente", null],
+    ["nao houve pagamento online", { id: 9, payment_intent_id: null }],
+  ])("responde 404 quando %s", async (_label, appointment) => {
+    mocked(AppointmentModel.findOne).mockResolvedValue(appointment);
+    await expectHttpError(PaymentService.getAppointmentReceipt(9, 1), 404);
+  });
+
+  it("responde 404 quando o Stripe ainda nao tem recibo", async () => {
+    mocked(AppointmentModel.findOne).mockResolvedValue({ id: 9, payment_intent_id: "pi_1" });
+    mockPaymentIntentsRetrieve.mockResolvedValue({ latest_charge: null });
+    await expectHttpError(PaymentService.getAppointmentReceipt(9, 1), 404);
+  });
+});
+
+describe("createBookingPaymentIntent - reserva existente", () => {
+  const input = { professionalId: 20, serviceId: 40, addressId: 50, selectedTime: "x", appointmentId: "9" };
+
+  beforeEach(() => {
+    mocked(ClientModel.findOne).mockResolvedValue({ id: 30 });
+    mocked(AppointmentModel.findOne).mockReset().mockResolvedValue(null);
+  });
+
+  it("recusa reserva que nao esta mais pendente", async () => {
+    mocked(AppointmentModel.findByPk).mockResolvedValue({ id: 9, client_id: 30, status: "confirmed" });
+    await expectHttpError(PaymentService.createBookingPaymentIntent(1, input), 400);
+  });
+
+  it("recusa endereco de outro usuario", async () => {
+    mocked(AppointmentModel.findByPk).mockResolvedValue({ id: 9, client_id: 30, status: "pending" });
+    mocked(AddressModel.findByPk).mockResolvedValue({ id: 50, user_id: 2 });
+    await expectHttpError(PaymentService.createBookingPaymentIntent(1, input), 404);
+  });
+
+  it("recusa endereco com id invalido sem consultar o banco", async () => {
+    mocked(AppointmentModel.findByPk).mockResolvedValue({ id: 9, client_id: 30, status: "pending" });
+    await expectHttpError(
+      PaymentService.createBookingPaymentIntent(1, { ...input, addressId: "abc" }),
+      404,
+    );
+    expect(AddressModel.findByPk).not.toHaveBeenCalled();
+  });
+
+  it("responde 404 quando o servico da reserva sumiu", async () => {
+    mocked(AppointmentModel.findByPk).mockResolvedValue({ id: 9, client_id: 30, status: "pending", service_id: 40 });
+    mocked(AddressModel.findByPk).mockResolvedValue({ id: 50, user_id: 1 });
+    mocked(ServiceModel.findByPk).mockResolvedValue(null);
+    await expectHttpError(PaymentService.createBookingPaymentIntent(1, input), 404);
   });
 });
