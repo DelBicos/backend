@@ -1,0 +1,3 @@
+{"sessionId":"1cbc3b","runId":"pre-fix","hypothesisId":"A","location":"server.ts:listen","message":"about to listen","data":{"port":3000,"isServerless":false,"jestWorker":null,"nodeEnv":null,"environment":"development"},"timestamp":1790613662904}
+{"sessionId":"1cbc3b","runId":"pre-fix","hypothesisId":"A","location":"server.ts:listen-ok","message":"listen succeeded","data":{"port":3000},"timestamp":1790613662916}
+{"sessionId":"1cbc3b","runId":"post-fix","hypothesisId":"F","location":"database.ts:sync-ok","message":"sequelize.sync succeeded","data":{"environment":"development"},"timestamp":1790613664146}
