@@ -7,6 +7,7 @@ jest.mock("../../services/storage/StorageFactory", () => ({
 import { getStorageAdapter } from "../../services/storage/StorageFactory";
 import { getUploadUrl } from "../upload.controller";
 import { AvatarController } from "../avatar.controller";
+import { mockReq } from "./handlerTestUtils";
 
 const mockGenerate = jest.fn();
 beforeEach(() => {
@@ -63,6 +64,22 @@ describe("getUploadUrl", () => {
     await getUploadUrl({ body: { fileName: "a.png", fileType: "image/png" } } as any, anon);
     expect(anon.status).toHaveBeenCalledWith(401);
     expect(mockGenerate).not.toHaveBeenCalled();
+  });
+
+  it("exige o nome do arquivo (400)", async () => {
+    const res = makeRes();
+    await getUploadUrl(mockReq({ user: { id: 7 }, body: { fileName: "  ", fileType: "image/png" } }), res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({ error: "fileName é obrigatório" });
+    expect(mockGenerate).not.toHaveBeenCalled();
+  });
+
+  it("responde 500 quando o armazenamento falha", async () => {
+    mockGenerate.mockRejectedValue(new Error("storage fora"));
+    const res = makeRes();
+    await getUploadUrl(mockReq({ user: { id: 7 }, body: { fileName: "a.png", fileType: "image/png" } }), res);
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json).toHaveBeenCalledWith({ error: "Erro interno do servidor" });
   });
 });
 
