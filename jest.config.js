@@ -18,8 +18,21 @@ module.exports = {
     "!src/**/__tests__/**",
     "!src/**/__mocks__/**",
     "!src/**/*.d.ts",
+    // Sem codigo executavel: so comentarios OpenAPI (swagger-jsdoc) e tipos.
+    "!src/docs/**",
+    "!src/interfaces/**",
+    // So tipos (interface/type), sem codigo executavel.
+    "!src/services/bot/BotStateNode.ts",
+    "!src/services/bot/states/servicoSearch/serviceSearch.types.ts",
+    "!src/services/storage/StorageAdapter.ts",
+    "!src/services/appointment/appointment.types.ts",
+    "!src/services/nlu/nlu.types.ts",
   ],
   coverageDirectory: "coverage",
+  // Minimo exigido (RNF-06). O CI roda com --coverage, entao uma queda barra a PR.
+  coverageThreshold: {
+    global: { lines: 80, statements: 80, branches: 80, functions: 80 },
+  },
   coverageProvider: "v8",
   coverageReporters: ["text-summary", "lcov"],
   projects: [
