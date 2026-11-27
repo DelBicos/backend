@@ -4,6 +4,8 @@ jest.mock("../appointmentActions", () => ({
   rescheduleBotAppointment: jest.fn(),
 }));
 jest.mock("../../../../utils/logger", () => ({ logError: jest.fn() }));
+import type { BotChatSessionModel, BotSessionContext } from "../../../../models/BotChatSession";
+import type { NluResult } from "../../../nlu.service";
 import { ConfirmacaoState } from "../ConfirmacaoState";
 import {
   cancelBotAppointment,
@@ -62,4 +64,37 @@ it("permite nova escolha após falha sem cancelar a reserva", async () => {
   expect(result.nextState).toBe("COLETANDO_HORARIO");
   expect(result.reply).toContain("Horário ocupado");
   expect(cancelBotAppointment).not.toHaveBeenCalled();
+});
+
+// Caso de teste T1 (DEL-186): agendar pelo chat com data válida termina em
+// pré-criação, com pedido de pagamento e sem dizer que o profissional aceitou.
+it("pré-cria o agendamento pelo chat e pede o pagamento sem afirmar o aceite", async () => {
+  (createBotAppointment as jest.Mock).mockResolvedValue({ id: 42, status: "pending" });
+  const createContext: BotSessionContext = {
+    pendingAction: "CREATE",
+    serviceName: "Limpeza",
+    date: "2030-01-07",
+    time: "09:00",
+  };
+
+  const result = await new ConfirmacaoState().handle(
+    "sim",
+    {} as NluResult,
+    { context: createContext } as BotChatSessionModel,
+    1,
+    "2030-01-07T12:00:00Z",
+  );
+
+  expect(createBotAppointment).toHaveBeenCalledWith(1, createContext, "2030-01-07T12:00:00Z");
+  expect(result.nextState).toBe("AGUARDANDO_CONFIRMACAO");
+  expect(result.contextUpdate).toMatchObject({
+    appointmentId: 42,
+    appointmentStatus: "pending",
+    appointmentPaid: false,
+    serviceOptions: ["Pagar Agora"],
+  });
+  expect(result.reply).toContain("pré-criado");
+  expect(result.reply).toContain("pagamento");
+  expect(result.reply).toContain("aguardará o aceite do profissional");
+  expect(result.reply).not.toMatch(/profissional (já )?aceitou/i);
 });
