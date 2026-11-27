@@ -46,7 +46,6 @@ export async function resetSchema(): Promise<void> {
     .sort();
 
   for (const file of files) {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const migration = require(path.join(MIGRATIONS_DIR, file));
     if (typeof migration.up !== "function") continue;
     await migration.up(sequelize.getQueryInterface(), Sequelize);
