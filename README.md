@@ -8,7 +8,7 @@
 
 <p align="center">
 
-[Sobre](#-delbicos-backend) | [Tecnologias](#️-tecnologies) | [Time](#-time) | [Estrutura](#-estrutura) | [Endpoints](#endpoints-usage) | [App](https://github.com/DelBicos/frontend) | [Docs](https://github.com/DelBicos/docs)
+[Sobre](#-delbicos-backend) | [Tecnologias](#️-tecnologies) | [Time](#-team) | [Estrutura](#-estrutura) | [Endpoints](#endpoints-usage) | [App](https://github.com/DelBicos/frontend) | [Docs](https://github.com/DelBicos/docs)
 
 </p>
 
