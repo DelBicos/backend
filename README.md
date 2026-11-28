@@ -8,63 +8,19 @@
 
 <p align="center">
 
-[Sobre](#-delbicos-backend) | [Arquitetura](#-arquitetura) | [Tecnologias](#️-tecnologies) | [Time](#-time) | [Estrutura](#-estrutura) | [Instalação](#️-instalação) | [Execução](#-execução) | [Testes](#-testes) | [App](https://github.com/fershibli/DelBicosV2) | [Docs](https://github.com/DelBicos/docs)
+[Sobre](#-delbicos-backend) | [Tecnologias](#️-tecnologies) | [Time](#-team) | [Estrutura](#-estrutura) | [Endpoints](#endpoints-usage) | [App](https://github.com/DelBicos/frontend) | [Docs](https://github.com/DelBicos/docs)
 
 </p>
 
 # 💻 DelBicos Backend
 
-API do DelBicos em TypeScript e Express. O app ([DelBicosV2](https://github.com/fershibli/DelBicosV2)) não é fronteira de segurança: a regra de negócio fica aqui.
+API do DelBicos em TypeScript e Express. O app ([DelBicos/frontend](https://github.com/DelBicos/frontend)) não é fronteira de segurança: a regra de negócio fica aqui.
 
 Postgres (Sequelize) guarda usuários, profissionais, serviços, agenda, pagamentos e o restante do negócio. MongoDB guarda só o chat e o log de login. Stripe cobra. Azure Blob Storage guarda imagem pública e documento privado. Um serviço Python (`nlp-service`) classifica a intenção do chatbot (TF-IDF + SVM) e faz a busca semântica. Não é um modelo generativo.
 
-## 🏗️ Arquitetura
-
-`server.ts` sobe o processo: ambiente, os dois bancos, os crons de agendamento e o HTTP na porta `3000` (ou `PORT`). O Socket.io do chat usa esse mesmo servidor. Com `IS_SERVERLESS=true` o processo não escuta porta.
-
-`src/app.ts` monta o Express: Helmet, limite de corpo, rate limit, CORS, sanitização, o Swagger em `/docs` e um grupo de rotas por domínio.
-
-| Camada | Responsabilidade |
-| --- | --- |
-| Rotas | Ligam o endpoint aos middlewares e a uma função de controller. Sem regra de negócio no arquivo de rota. |
-| Controllers | Funções exportadas, não classes. CRUD simples fala com o model direto. |
-| Services | Regra de negócio, transação em mais de uma tabela, ou integração externa (pagamento, e-mail, storage, voz, NLP). Arquivo em `.service.ts`. |
-| Models | Forma, tipo e restrição de campo. Mudança de schema sai com migration reversível. |
-| Jobs | Cron de agendamento e aviso de uma hora antes do atendimento. |
-| Realtime | Socket.io do chat. |
-
-Um service que só repassa a chamada para o model não tem função. Repositório ou caso de uso obrigatório não fazem parte desta API. O porquê de cada regra está em [docs/architecture.md](docs/architecture.md).
-
-Grupos montados em `src/app.ts`:
-
-| Prefixo | Domínio |
-| --- | --- |
-| `/api/user` | Conta e login de usuário |
-| `/auth` | Cadastro e verificação, com limite próprio de taxa |
-| `/api/admin` | Login e operações de administrador |
-| `/api/professionals` | Perfil e busca de profissionais |
-| `/api/services` | Serviços oferecidos |
-| `/api/categories` · `/api/subcategories` | Catálogo |
-| `/api/appointments` | Agendamentos |
-| `/api/availabilities` · `/api/availability-locks` | Agenda e bloqueio de horário |
-| `/api/payments` | Stripe |
-| `/api/chat` | Conversa entre cliente e profissional |
-| `/api/voice` | Transcrição e comando de voz |
-| `/api/address` | Endereços |
-| `/api/notifications` | Notificações |
-| `/api/favorites` | Favoritos |
-| `/api/dashboard` | Painel |
-| `/api/verification` | Verificação de identidade |
-| `/api/avatar` · `/api/uploads` · `/api/proxy-upload` | Arquivos |
-| `/api/utilities` | E-mail |
-
-A referência campo a campo é o Swagger em `/docs`, gerado a partir de `src/docs`.
-
 ## 🛠️ Tecnologies
 
-Node 20 ou superior (o CI usa 20; o `.nvmrc` pede 24.10.0). TypeScript, Express, Sequelize, PostgreSQL, Mongoose, Socket.io, Stripe, Azure Blob Storage, Jest e Docker. O classificador fica em Python.
-
-![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white) ![Node](https://img.shields.io/badge/Node%20js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white) ![Express](https://img.shields.io/badge/Express%20js-000000?style=for-the-badge&logo=express&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white) ![MongoDB](https://img.shields.io/badge/MongoDB-4EA94B?style=for-the-badge&logo=mongodb&logoColor=white) ![Socket.io](https://img.shields.io/badge/Socket.io-010101?style=for-the-badge&logo=socketdotio&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white) ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=for-the-badge&logo=css3&logoColor=white) ![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=for-the-badge&logo=html5&logoColor=white) ![Javascript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black) ![Git](https://img.shields.io/badge/GIT-E44C30?style=for-the-badge&logo=git&logoColor=white) ![Typescript](https://img.shields.io/badge/TypeScript-007ACC?style=for-the-badge&logo=typescript&logoColor=white) ![Swift](https://img.shields.io/badge/swift-F54A2A?style=for-the-badge&logo=swift&logoColor=white) ![Objective-C](https://img.shields.io/badge/OBJECTIVE--C-%233A95E3.svg?style=for-the-badge&logo=apple&logoColor=white) ![Java](https://img.shields.io/badge/java-%23ED8B00.svg?style=for-the-badge&logo=openjdk&logoColor=white) ![Kotlin](https://img.shields.io/badge/Kotlin-0095D5?&style=for-the-badge&logo=kotlin&logoColor=white) ![Express](https://img.shields.io/badge/Express%20js-000000?style=for-the-badge&logo=express&logoColor=white) ![MaterialUI](https://img.shields.io/badge/Material%20UI-007FFF?style=for-the-badge&logo=mui&logoColor=white) ![Node](https://img.shields.io/badge/Node%20js-339933?style=for-the-badge&logo=nodedotjs&logoColor=white) ![Vercel](https://img.shields.io/badge/Vercel-000000?style=for-the-badge&logo=vercel&logoColor=white) ![Postman](https://img.shields.io/badge/Postman-FF6C37?style=for-the-badge&logo=Postman&logoColor=white) ![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react&logoColor=61DAFB) ![React Native](https://img.shields.io/badge/React_Native-20232A?style=for-the-badge&logo=react&logoColor=61DAFB) ![Zustand](https://img.shields.io/badge/Zustand-007ACC?style=for-the-badge&logo=React&logoColor=white) ![MongoDB](https://img.shields.io/badge/MongoDB-4EA94B?style=for-the-badge&logo=mongodb&logoColor=white) ![Figma](https://img.shields.io/badge/Figma-F24E1E?style=for-the-badge&logo=figma&logoColor=white) ![Penpot](https://img.shields.io/badge/Penpot-000000?style=for-the-badge&logo=penpot&logoColor=white) ![Gimp](https://img.shields.io/badge/gimp-5C5543?style=for-the-badge&logo=gimp&logoColor=white) ![Inkscape](https://img.shields.io/badge/Inkscape-000000?style=for-the-badge&logo=Inkscape&logoColor=white) ![Vscode](https://img.shields.io/badge/Vscode-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white) ![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white) ![iOS](https://img.shields.io/badge/iOS-000000?style=for-the-badge&logo=ios&logoColor=white) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=for-the-badge&logo=postgresql&logoColor=white) ![Socket.io](https://img.shields.io/badge/Socket.io-010101?style=for-the-badge&logo=socketdotio&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-2496ED?style=for-the-badge&logo=docker&logoColor=white) ![Python](https://img.shields.io/badge/Python-3776AB?style=for-the-badge&logo=python&logoColor=white)
 
 <br>
 
@@ -83,13 +39,14 @@ DelBicosBackend
 ├── server.ts                 # Ambiente, bancos, crons e HTTP + Socket.io
 ├── src
 │  ├── app.ts                 # Express, middlewares e grupos de rota
+│  ├── assets                 # Logos do README
 │  ├── routes                 # Um arquivo por domínio
 │  ├── controllers            # Funções de endpoint
 │  ├── services               # Regra de negócio e integração externa
 │  ├── models                 # Sequelize e associações
 │  ├── middlewares            # Auth, validação, segurança, erro
 │  ├── jobs                   # Crons de agendamento
-│  ├── realtime               # Socket.io do chat
+│  ├── realtime               # Socket.io: chat e rastreamento de localização
 │  ├── config                 # Banco, ambiente, Stripe, Swagger, e-mail
 │  ├── docs                   # Comentários OpenAPI
 │  ├── constants
@@ -107,130 +64,103 @@ DelBicosBackend
 └── .env.example
 ```
 
-As pastas de `src/` acima são a lista fechada. Pasta nova é decisão de arquitetura, não de uma feature.
+## Endpoints Usage
 
-## ⚙️ Instalação
+### User Management
 
-Node 20 ou superior e npm. O lockfile é o `package-lock.json`.
+#### 1. Log in
 
-```bash
-git clone https://github.com/DelBicos/backend.git
-cd DelBicosBackend
-npm install
-cp .env.example .env
+- **Endpoint**: `/api/user/login`
+- **Method**: `POST`
+- **Request Body**:
+
+```json
+{
+  "email": "johndoe@example.com",
+  "password": "password123"
+}
 ```
 
-O servidor não sobe sem `SECRET_KEY` (32 caracteres ou mais; `openssl rand -hex 32`). Trocar a chave desloga todo mundo. O `.env.example` agrupa o restante: SMTP, Stripe, Postgres, Mongo do chat, Azure Blob, o classificador (`NLU_SERVICE_URL` e `NLU_SERVICE_API_KEY`) e a transcrição de voz. Não commite o `.env`.
+- **Response**:
 
-Postgres local, se for rodar fora do Docker: banco `delbicos`, usuário `delbicos`, porta `5432`. Esses são os valores padrão do `docker-compose.yml` e do exemplo.
-
-```bash
-npm run migrate:db:create   # cria o banco, se o papel do Postgres puder
-npm run migrate             # aplica as migrations
-npm run seed                # dados iniciais
+```json
+{
+  "message": "Login realizado com sucesso",
+  "token": "<jwt>",
+  "user": {
+    "id": 1,
+    "name": "John Doe",
+    "email": "johndoe@example.com",
+    "phone": "15999999999",
+    "admin": false,
+    "professional_id": null
+  }
+}
 ```
 
-| Script | O que faz |
-| --- | --- |
-| `npm run migrate:new -- nome` | Gera uma migration |
-| `npm run migrate:undo` | Desfaz a última |
-| `npm run migrate:undo:all` | Desfaz todas |
-| `npm run migrate:reset` | Desfaz todas e aplica de novo |
-| `npm run seed:undo` | Desfaz o último seed |
-| `npm run seed:reset` | Desfaz os seeds e roda de novo |
-| `npm run audit:catalog` | Confere o catálogo de serviços |
+### User Management
 
-## Execução
+#### 2. Get the logged user
 
-### Na máquina
+- **Endpoint**: `/api/user/me`
+- **Method**: `GET`
+- **Header**: `Authorization: Bearer <jwt>`
+- **Response**:
 
-Com Postgres e Mongo no ar, e o `.env` apontando para eles:
-
-```bash
-npm run dev
+```json
+{
+  "user": {
+    "id": 1,
+    "name": "John Doe",
+    "email": "johndoe@example.com",
+    "phone": "15999999999",
+    "avatar_uri": null,
+    "admin": false,
+    "professional_id": null
+  }
+}
 ```
 
-Isso roda `ts-node-dev` em `server.ts`, com reload. A API escuta a porta `3000`, ou o valor de `PORT`. Swagger em [http://localhost:3000/docs](http://localhost:3000/docs).
+### User Management
 
-Para o processo compilado:
+#### 3. Get a user by ID
 
-```bash
-npm run build
-npm start
+- **Endpoint**: `/api/user/:id`
+- **Method**: `GET`
+- **Header**: `Authorization: Bearer <jwt>`
+- **Response**:
+
+```json
+{
+  "id": 2,
+  "name": "Jane Doe",
+  "avatar_uri": null
+}
 ```
 
-`npm run build` gera `dist/` com `tsc`. `npm start` executa `node dist/server.js`.
+### User Management
 
-### Docker
+#### 4. Update the logged user
 
-O Compose usa a rede externa `delbicos-shared-network`, a mesma do app. Crie uma vez:
+- **Endpoint**: `/api/user/me`
+- **Method**: `PUT`
+- **Header**: `Authorization: Bearer <jwt>`
+- **Request Body**:
 
-```bash
-npm run docker:network
+```json
+{
+  "name": "John Smith",
+  "phone": "15988888888"
+}
 ```
 
-Sobe Postgres, Mongo, o classificador Python e a API. Dentro do container o host do Postgres é `postgres` e o do Mongo é `mongo`, independente do que estiver no `.env` da máquina. O NLP local fica em `http://nlu-service:8000`.
+- **Response**:
 
-```bash
-npm run docker:up
-npm run docker:migrate
-npm run docker:seed
+```json
+{
+  "id": 1,
+  "name": "John Smith",
+  "email": "johndoe@example.com",
+  "phone": "15988888888"
+}
 ```
-
-`npm run docker:dev` sobe os serviços e acompanha o log da API.
-
-| Script | O que faz |
-| --- | --- |
-| `npm run docker:build` | Monta as imagens |
-| `npm run docker:up` | Sobe em segundo plano |
-| `npm run docker:dev` | Sobe e segue o log de `delbicos-server` |
-| `npm run docker:logs` | Logs de todos os serviços |
-| `npm run docker:exec` | Shell no container da API |
-| `npm run docker:restart` | Reinicia os serviços |
-| `npm run docker:restart:postgres` | Reinicia só o Postgres |
-| `npm run docker:down` | Derruba os containers |
-| `npm run docker:migrate` | `npm run migrate` dentro da API |
-| `npm run docker:seed` | `npm run seed` dentro da API |
-| `npm run docker:copy:env` | Copia o `.env` para o container |
-| `npm run docker:rebuild` | Derruba, monta sem cache e sobe |
-| `npm run docker:clean` | Derruba e apaga volumes |
-| `npm run docker:clean:images` | Derruba e poda imagens soltas |
-| `npm run docker:clean:all` | Derruba, apaga volumes e poda imagens e volumes do Docker |
-
-O Azurite (emulador do Blob Storage) não sobe no `docker:up`. Para usá-lo: `docker compose --profile storage up -d azurite` e `AZURE_STORAGE_CONNECTION_STRING=UseDevelopmentStorage=true`.
-
-## Testes
-
-`npm run lint` é o `tsc --noEmit`. Não há um script separado de ESLint.
-
-| Script | O que faz |
-| --- | --- |
-| `npm test` | Jest |
-| `npm run test:unit` | Só o projeto `unit`, sem cobertura |
-| `npm run test:integration` | Só o projeto `integration`. Precisa do Postgres de teste |
-| `npm run test:all` | Os dois projetos, sem cobertura |
-| `npm run test:coverage` | Jest com cobertura |
-| `npm run test:db:up` | Sobe o Postgres descartável na porta `5433` |
-| `npm run test:db:migrate` | Aplica as migrations nesse banco |
-| `npm run test:db:logs` | Log do Postgres de teste |
-| `npm run test:db:down` | Derruba e apaga o volume de teste |
-
-Integração:
-
-```bash
-npm run test:db:up
-npm run test:db:migrate
-npm run test:integration
-npm run test:db:down
-```
-
-O banco de teste usa `PR2_TEST_DATABASE_URL` (`postgresql://delbicos_test:test123@localhost:5433/pr2_test`), o mesmo usuário e senha do `docker-compose.test.yml`.
-
-## Documentação
-
-| Documento | Assunto |
-| --- | --- |
-| [docs/architecture.md](docs/architecture.md) | Por que cada camada existe |
-| [docs/README.md](docs/README.md) | Índice: chatbot, NLP, voz, RF03, RF04 |
-| [App](https://github.com/fershibli/DelBicosV2) | Cliente Expo |
-| [Docs do produto](https://github.com/DelBicos/docs) | Entregas por semestre |
