@@ -8,13 +8,13 @@
 
 <p align="center">
 
-[Sobre](#-delbicos-backend) | [Arquitetura](#-arquitetura) | [Tecnologias](#️-tecnologies) | [Time](#-time) | [Estrutura](#-estrutura) | [Instalação](#️-instalação) | [Execução](#-execução) | [Testes](#-testes) | [App](https://github.com/fershibli/DelBicosV2) | [Docs](https://github.com/DelBicos/docs)
+[Sobre](#-delbicos-backend) | [Arquitetura](#-arquitetura) | [Tecnologias](#️-tecnologies) | [Time](#-time) | [Estrutura](#-estrutura) | [Instalação](#️-instalação) | [Execução](#-execução) | [Testes](#-testes) | [App](https://github.com/DelBicos/frontend) | [Docs](https://github.com/DelBicos/docs)
 
 </p>
 
 # 💻 DelBicos Backend
 
-API do DelBicos em TypeScript e Express. O app ([DelBicosV2](https://github.com/fershibli/DelBicosV2)) não é fronteira de segurança: a regra de negócio fica aqui.
+API do DelBicos em TypeScript e Express. O app ([DelBicos/frontend](https://github.com/DelBicos/frontend)) não é fronteira de segurança: a regra de negócio fica aqui.
 
 Postgres (Sequelize) guarda usuários, profissionais, serviços, agenda, pagamentos e o restante do negócio. MongoDB guarda só o chat e o log de login. Stripe cobra. Azure Blob Storage guarda imagem pública e documento privado. Um serviço Python (`nlp-service`) classifica a intenção do chatbot (TF-IDF + SVM) e faz a busca semântica. Não é um modelo generativo.
 
@@ -31,7 +31,7 @@ Postgres (Sequelize) guarda usuários, profissionais, serviços, agenda, pagamen
 | Services | Regra de negócio, transação em mais de uma tabela, ou integração externa (pagamento, e-mail, storage, voz, NLP). Arquivo em `.service.ts`. |
 | Models | Forma, tipo e restrição de campo. Mudança de schema sai com migration reversível. |
 | Jobs | Cron de agendamento e aviso de uma hora antes do atendimento. |
-| Realtime | Socket.io do chat. |
+| Realtime | Socket.io do chat e do rastreamento de localização em tempo real. |
 
 Um service que só repassa a chamada para o model não tem função. Repositório ou caso de uso obrigatório não fazem parte desta API. O porquê de cada regra está em [docs/architecture.md](docs/architecture.md).
 
@@ -54,6 +54,7 @@ Grupos montados em `src/app.ts`:
 | `/api/notifications` | Notificações |
 | `/api/favorites` | Favoritos |
 | `/api/dashboard` | Painel |
+| `/api/tickets` | Central de chamados |
 | `/api/verification` | Verificação de identidade |
 | `/api/avatar` · `/api/uploads` · `/api/proxy-upload` | Arquivos |
 | `/api/utilities` | E-mail |
@@ -83,13 +84,14 @@ DelBicosBackend
 ├── server.ts                 # Ambiente, bancos, crons e HTTP + Socket.io
 ├── src
 │  ├── app.ts                 # Express, middlewares e grupos de rota
+│  ├── assets                 # Logos do README
 │  ├── routes                 # Um arquivo por domínio
 │  ├── controllers            # Funções de endpoint
 │  ├── services               # Regra de negócio e integração externa
 │  ├── models                 # Sequelize e associações
 │  ├── middlewares            # Auth, validação, segurança, erro
 │  ├── jobs                   # Crons de agendamento
-│  ├── realtime               # Socket.io do chat
+│  ├── realtime               # Socket.io: chat e rastreamento de localização
 │  ├── config                 # Banco, ambiente, Stripe, Swagger, e-mail
 │  ├── docs                   # Comentários OpenAPI
 │  ├── constants
@@ -115,7 +117,7 @@ Node 20 ou superior e npm. O lockfile é o `package-lock.json`.
 
 ```bash
 git clone https://github.com/DelBicos/backend.git
-cd DelBicosBackend
+cd backend
 npm install
 cp .env.example .env
 ```
@@ -232,5 +234,5 @@ O banco de teste usa `PR2_TEST_DATABASE_URL` (`postgresql://delbicos_test:test12
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | Por que cada camada existe |
 | [docs/README.md](docs/README.md) | Índice: chatbot, NLP, voz, RF03, RF04 |
-| [App](https://github.com/fershibli/DelBicosV2) | Cliente Expo |
+| [App](https://github.com/DelBicos/frontend) | Cliente Expo |
 | [Docs do produto](https://github.com/DelBicos/docs) | Entregas por semestre |
