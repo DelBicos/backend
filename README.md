@@ -8,7 +8,7 @@
 
 <p align="center">
 
-[Sobre](#-delbicos-backend) | [Arquitetura](#-arquitetura) | [Tecnologias](#️-tecnologies) | [Time](#-time) | [Estrutura](#-estrutura) | [Instalação](#️-instalação) | [Execução](#-execução) | [Testes](#-testes) | [App](https://github.com/DelBicos/frontend) | [Docs](https://github.com/DelBicos/docs)
+[Sobre](#-delbicos-backend) | [Tecnologias](#️-tecnologies) | [Time](#-time) | [Estrutura](#-estrutura) | [Instalação](#️-instalação) | [Execução](#-execução) | [Testes](#-testes) | [App](https://github.com/DelBicos/frontend) | [Docs](https://github.com/DelBicos/docs)
 
 </p>
 
@@ -17,49 +17,6 @@
 API do DelBicos em TypeScript e Express. O app ([DelBicos/frontend](https://github.com/DelBicos/frontend)) não é fronteira de segurança: a regra de negócio fica aqui.
 
 Postgres (Sequelize) guarda usuários, profissionais, serviços, agenda, pagamentos e o restante do negócio. MongoDB guarda só o chat e o log de login. Stripe cobra. Azure Blob Storage guarda imagem pública e documento privado. Um serviço Python (`nlp-service`) classifica a intenção do chatbot (TF-IDF + SVM) e faz a busca semântica. Não é um modelo generativo.
-
-## 🏗️ Arquitetura
-
-`server.ts` sobe o processo: ambiente, os dois bancos, os crons de agendamento e o HTTP na porta `3000` (ou `PORT`). O Socket.io do chat usa esse mesmo servidor. Com `IS_SERVERLESS=true` o processo não escuta porta.
-
-`src/app.ts` monta o Express: Helmet, limite de corpo, rate limit, CORS, sanitização, o Swagger em `/docs` e um grupo de rotas por domínio.
-
-| Camada | Responsabilidade |
-| --- | --- |
-| Rotas | Ligam o endpoint aos middlewares e a uma função de controller. Sem regra de negócio no arquivo de rota. |
-| Controllers | Funções exportadas, não classes. CRUD simples fala com o model direto. |
-| Services | Regra de negócio, transação em mais de uma tabela, ou integração externa (pagamento, e-mail, storage, voz, NLP). Arquivo em `.service.ts`. |
-| Models | Forma, tipo e restrição de campo. Mudança de schema sai com migration reversível. |
-| Jobs | Cron de agendamento e aviso de uma hora antes do atendimento. |
-| Realtime | Socket.io do chat e do rastreamento de localização em tempo real. |
-
-Um service que só repassa a chamada para o model não tem função. Repositório ou caso de uso obrigatório não fazem parte desta API. O porquê de cada regra está em [docs/architecture.md](docs/architecture.md).
-
-Grupos montados em `src/app.ts`:
-
-| Prefixo | Domínio |
-| --- | --- |
-| `/api/user` | Conta e login de usuário |
-| `/auth` | Cadastro e verificação, com limite próprio de taxa |
-| `/api/admin` | Login e operações de administrador |
-| `/api/professionals` | Perfil e busca de profissionais |
-| `/api/services` | Serviços oferecidos |
-| `/api/categories` · `/api/subcategories` | Catálogo |
-| `/api/appointments` | Agendamentos |
-| `/api/availabilities` · `/api/availability-locks` | Agenda e bloqueio de horário |
-| `/api/payments` | Stripe |
-| `/api/chat` | Conversa entre cliente e profissional |
-| `/api/voice` | Transcrição e comando de voz |
-| `/api/address` | Endereços |
-| `/api/notifications` | Notificações |
-| `/api/favorites` | Favoritos |
-| `/api/dashboard` | Painel |
-| `/api/tickets` | Central de chamados |
-| `/api/verification` | Verificação de identidade |
-| `/api/avatar` · `/api/uploads` · `/api/proxy-upload` | Arquivos |
-| `/api/utilities` | E-mail |
-
-A referência campo a campo é o Swagger em `/docs`, gerado a partir de `src/docs`.
 
 ## 🛠️ Tecnologies
 
