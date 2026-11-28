@@ -8,7 +8,7 @@
 
 <p align="center">
 
-[Sobre](#-delbicos-backend) | [Tecnologias](#️-tecnologies) | [Time](#-time) | [Estrutura](#-estrutura) | [App](https://github.com/DelBicos/frontend) | [Docs](https://github.com/DelBicos/docs)
+[Sobre](#-delbicos-backend) | [Tecnologias](#️-tecnologies) | [Time](#-time) | [Estrutura](#-estrutura) | [Endpoints](#endpoints-usage) | [App](https://github.com/DelBicos/frontend) | [Docs](https://github.com/DelBicos/docs)
 
 </p>
 
@@ -64,3 +64,103 @@ DelBicosBackend
 └── .env.example
 ```
 
+## Endpoints Usage
+
+### User Management
+
+#### 1. Log in
+
+- **Endpoint**: `/api/user/login`
+- **Method**: `POST`
+- **Request Body**:
+
+```json
+{
+  "email": "johndoe@example.com",
+  "password": "password123"
+}
+```
+
+- **Response**:
+
+```json
+{
+  "message": "Login realizado com sucesso",
+  "token": "<jwt>",
+  "user": {
+    "id": 1,
+    "name": "John Doe",
+    "email": "johndoe@example.com",
+    "phone": "15999999999",
+    "admin": false,
+    "professional_id": null
+  }
+}
+```
+
+### User Management
+
+#### 2. Get the logged user
+
+- **Endpoint**: `/api/user/me`
+- **Method**: `GET`
+- **Header**: `Authorization: Bearer <jwt>`
+- **Response**:
+
+```json
+{
+  "user": {
+    "id": 1,
+    "name": "John Doe",
+    "email": "johndoe@example.com",
+    "phone": "15999999999",
+    "avatar_uri": null,
+    "admin": false,
+    "professional_id": null
+  }
+}
+```
+
+### User Management
+
+#### 3. Get a user by ID
+
+- **Endpoint**: `/api/user/:id`
+- **Method**: `GET`
+- **Header**: `Authorization: Bearer <jwt>`
+- **Response**:
+
+```json
+{
+  "id": 2,
+  "name": "Jane Doe",
+  "avatar_uri": null
+}
+```
+
+### User Management
+
+#### 4. Update the logged user
+
+- **Endpoint**: `/api/user/me`
+- **Method**: `PUT`
+- **Header**: `Authorization: Bearer <jwt>`
+- **Request Body**:
+
+```json
+{
+  "name": "John Smith",
+  "phone": "15988888888"
+}
+```
+
+- **Response**:
+
+```json
+{
+  "id": 1,
+  "name": "John Smith",
+  "email": "johndoe@example.com",
+  "phone": "15988888888"
+}
+```
